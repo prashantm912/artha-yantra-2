@@ -32,8 +32,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/StrategyDetail"
                 }
               }
             }
@@ -78,8 +77,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/DraftVersionResponse"
                 }
               }
             }
@@ -143,8 +141,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/RiskSettings"
                 }
               }
             }
@@ -180,8 +177,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/RiskSettings"
                 }
               }
             }
@@ -431,8 +427,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/StrategyListResponse"
                 }
               }
             }
@@ -468,8 +463,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/DraftVersionResponse"
                 }
               }
             }
@@ -516,8 +510,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/RollbackResponse"
                 }
               }
             }
@@ -563,8 +556,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/PublishResponse"
                 }
               }
             }
@@ -601,8 +593,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/TestSendResult"
                 }
               }
             }
@@ -760,8 +751,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/ArchiveResponse"
                 }
               }
             }
@@ -799,8 +789,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/ValidateResponse"
                 }
               }
             }
@@ -846,8 +835,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/SignalDto"
                 }
               }
             }
@@ -884,8 +872,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/SignalDto"
                 }
               }
             }
@@ -1259,8 +1246,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/JournalPage"
                 }
               }
             }
@@ -1510,8 +1496,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/NotificationsResponse"
                 }
               }
             }
@@ -1613,8 +1598,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/VersionListResponse"
                 }
               }
             }
@@ -1658,8 +1642,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/StrategyDetail"
                 }
               }
             }
@@ -1703,8 +1686,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/UniverseInfo"
                 }
               }
             }
@@ -1755,8 +1737,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/DiffResponse"
                 }
               }
             }
@@ -1997,8 +1978,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/SignalPage"
                 }
               }
             }
@@ -2035,8 +2015,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/SignalDto"
                 }
               }
             }
@@ -2396,8 +2375,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/SignalFeed"
                 }
               }
             }
@@ -2465,6 +2443,13 @@
             "format" : "date-time"
           }
         }, {
+          "name" : "degraded",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean"
+          }
+        }, {
           "name" : "limit",
           "in" : "query",
           "required" : false,
@@ -2489,8 +2474,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/RejectionPage"
                 }
               }
             }
@@ -2573,6 +2557,13 @@
             "format" : "uuid"
           }
         }, {
+          "name" : "strategySlug",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
           "name" : "from",
           "in" : "query",
           "required" : false,
@@ -2595,8 +2586,44 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/RailCountList"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/signal-rejections/eval-funnel" : {
+      "get" : {
+        "tags" : [ "signal-rejections-controller" ],
+        "operationId" : "evalFunnel",
+        "parameters" : [ {
+          "name" : "date",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EvalFunnel"
                 }
               }
             }
@@ -2701,8 +2728,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/TradePage"
                 }
               }
             }
@@ -2798,8 +2824,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/PositionList"
                 }
               }
             }
@@ -2872,8 +2897,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/Pnl"
                 }
               }
             }
@@ -2997,6 +3021,42 @@
         }
       }
     },
+    "/api/v1/paper/attribution" : {
+      "get" : {
+        "tags" : [ "paper-controller" ],
+        "operationId" : "attribution",
+        "parameters" : [ {
+          "name" : "book",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Attribution"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/orders/tradebook" : {
       "get" : {
         "tags" : [ "orders-controller" ],
@@ -3007,8 +3067,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/Tradebook"
                 }
               }
             }
@@ -3036,8 +3095,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/Positions"
                 }
               }
             }
@@ -3065,8 +3123,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/Orderbook"
                 }
               }
             }
@@ -3611,6 +3668,25 @@
           }
         }
       },
+      "DraftVersionResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "version" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "checksum" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "checksum", "id", "status", "version" ]
+      },
       "JsonNode" : { },
       "UpdateBody" : {
         "type" : "object",
@@ -3625,6 +3701,62 @@
             "$ref" : "#/components/schemas/JsonNode"
           }
         }
+      },
+      "AuditEntry" : {
+        "type" : "object",
+        "properties" : {
+          "key" : {
+            "type" : "string"
+          },
+          "action" : {
+            "type" : "string"
+          },
+          "detail" : {
+            "type" : [ "string", "null" ]
+          },
+          "created_at" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "action", "created_at", "detail", "key" ]
+      },
+      "RiskSettingRow" : {
+        "type" : "object",
+        "properties" : {
+          "key" : {
+            "type" : "string"
+          },
+          "value" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "key", "updatedAt", "value" ]
+      },
+      "RiskSettings" : {
+        "type" : "object",
+        "properties" : {
+          "book" : {
+            "type" : "string"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RiskSettingRow"
+            }
+          },
+          "audit" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/AuditEntry"
+            }
+          }
+        },
+        "required" : [ "audit", "book", "items" ]
       },
       "AccountBody" : {
         "type" : "object",
@@ -3641,40 +3773,40 @@
         "type" : "object",
         "properties" : {
           "startingCapital" : {
-            "type" : "number"
+            "type" : "string"
           },
           "cash" : {
-            "type" : "number"
+            "type" : "string"
           },
           "equity" : {
-            "type" : "number"
+            "type" : "string"
           },
           "realized" : {
-            "type" : "number"
+            "type" : "string"
           },
           "unrealized" : {
-            "type" : "number"
+            "type" : "string"
           },
           "dayPnl" : {
-            "type" : "number"
+            "type" : "string"
           },
           "openPositions" : {
             "type" : "integer",
             "format" : "int32"
           },
           "capitalUsed" : {
-            "type" : "number"
+            "type" : "string"
           },
           "usageByClass" : {
             "type" : "object",
             "additionalProperties" : {
-              "type" : "number"
+              "type" : "string"
             }
           },
           "marginPercents" : {
             "type" : "object",
             "additionalProperties" : {
-              "type" : "number"
+              "type" : "string"
             }
           }
         },
@@ -3803,6 +3935,25 @@
           }
         }
       },
+      "RollbackResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "newVersion" : {
+            "type" : "string"
+          },
+          "copiedFrom" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "copiedFrom", "id", "newVersion", "status" ]
+      },
       "PublishRequest" : {
         "type" : "object",
         "properties" : {
@@ -3819,6 +3970,35 @@
             "type" : "string"
           }
         }
+      },
+      "PublishResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "version" : {
+            "type" : "string"
+          },
+          "versionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "id", "status", "version", "versionId" ]
+      },
+      "TestSendResult" : {
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "status" ]
       },
       "ToggleResult" : {
         "type" : "object",
@@ -3863,6 +4043,19 @@
         },
         "required" : [ "id", "slug", "status", "version" ]
       },
+      "ArchiveResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "id", "status" ]
+      },
       "ValidateRequest" : {
         "type" : "object",
         "properties" : {
@@ -3870,6 +4063,39 @@
             "type" : "string"
           }
         }
+      },
+      "ValidateResponse" : {
+        "type" : "object",
+        "properties" : {
+          "valid" : {
+            "type" : "boolean"
+          },
+          "errors" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ValidationIssue"
+            }
+          },
+          "warnings" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ValidationIssue"
+            }
+          }
+        },
+        "required" : [ "errors", "valid", "warnings" ]
+      },
+      "ValidationIssue" : {
+        "type" : "object",
+        "properties" : {
+          "path" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "message", "path" ]
       },
       "TakenRequest" : {
         "type" : "object",
@@ -3885,6 +4111,80 @@
             "type" : "string"
           }
         }
+      },
+      "SignalDto" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "strategyVersionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "signalType" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "entryPrice" : {
+            "type" : [ "string", "null" ]
+          },
+          "stopLoss" : {
+            "type" : [ "string", "null" ]
+          },
+          "target" : {
+            "type" : [ "string", "null" ]
+          },
+          "compositeScore" : {
+            "type" : "string"
+          },
+          "scoreBreakdown" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "expiresAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "suggestedQty" : {
+            "type" : [ "string", "null" ]
+          },
+          "tradeableExchange" : {
+            "type" : [ "string", "null" ]
+          },
+          "tradeableTradingsymbol" : {
+            "type" : [ "string", "null" ]
+          },
+          "scalperDetail" : {
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/JsonNode"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "exitReason" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "compositeScore", "entryPrice", "exchange", "exitReason", "expiresAt", "generatedAt", "id", "interval", "scalperDetail", "scoreBreakdown", "side", "signalType", "status", "stopLoss", "strategyVersionId", "suggestedQty", "target", "tradeableExchange", "tradeableTradingsymbol", "tradingsymbol" ]
       },
       "SellDecisionRow" : {
         "type" : "object",
@@ -3928,19 +4228,19 @@
             "type" : [ "string", "null" ]
           },
           "entryPrice" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "currentPrice" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "unrealizedPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "stopLevel" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "trailLevel" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "stillBuyable" : {
             "type" : "boolean"
@@ -4071,7 +4371,7 @@
             "type" : "boolean"
           },
           "threshold" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "passWhen" : {
             "type" : [ "string", "null" ]
@@ -4123,10 +4423,13 @@
             }
           },
           "compositeThreshold" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
+          },
+          "nullPolicy" : {
+            "type" : [ "string", "null" ]
           }
         },
-        "required" : [ "compositeThreshold", "rails" ]
+        "required" : [ "compositeThreshold", "nullPolicy", "rails" ]
       },
       "ResetBody" : {
         "type" : "object",
@@ -4168,17 +4471,17 @@
             "format" : "int64"
           },
           "avgEntryPrice" : {
-            "type" : "number"
+            "type" : "string"
           },
           "realizedPnl" : {
-            "type" : "number"
+            "type" : "string"
           },
           "openedAt" : {
             "type" : "string",
             "format" : "date-time"
           },
           "closedAt" : {
-            "type" : [ "string", "null" ],
+            "type" : "string",
             "format" : "date-time"
           }
         },
@@ -4242,16 +4545,16 @@
             "format" : "int64"
           },
           "avgEntryPrice" : {
-            "type" : "number"
+            "type" : "string"
           },
           "markPrice" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "unrealizedPnl" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "realizedPnl" : {
-            "type" : "number"
+            "type" : "string"
           },
           "status" : {
             "type" : "string"
@@ -4261,10 +4564,10 @@
             "format" : "date-time"
           },
           "stopLoss" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "takeProfit" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "buyingPowerWarning" : {
             "type" : [ "string", "null" ]
@@ -4388,10 +4691,10 @@
             "format" : "int64"
           },
           "stopLoss" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "target" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "exchange", "qty", "side", "signalId", "stopLoss", "target", "tradingsymbol" ]
@@ -4406,6 +4709,22 @@
             "type" : "string"
           }
         }
+      },
+      "NotificationsResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "notificationsEnabled" : {
+            "type" : "boolean"
+          },
+          "notificationChannel" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "id", "notificationChannel", "notificationsEnabled" ]
       },
       "BracketBody" : {
         "type" : "object",
@@ -4422,25 +4741,25 @@
         "type" : "object",
         "properties" : {
           "brokerage" : {
-            "type" : "number"
+            "type" : "string"
           },
           "stt" : {
-            "type" : "number"
+            "type" : "string"
           },
           "exchangeTxn" : {
-            "type" : "number"
+            "type" : "string"
           },
           "gst" : {
-            "type" : "number"
+            "type" : "string"
           },
           "stamp" : {
-            "type" : "number"
+            "type" : "string"
           },
           "sebi" : {
-            "type" : "number"
+            "type" : "string"
           },
           "total" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "brokerage", "exchangeTxn", "gst", "sebi", "stamp", "stt", "total" ]
@@ -4459,29 +4778,41 @@
             "type" : "string"
           },
           "entryPrice" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "stopLoss" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "target" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "compositeScore" : {
-            "type" : "number"
+            "type" : "string"
           },
           "generatedAt" : {
             "type" : "string",
             "format" : "date-time"
           },
           "scalperDetail" : {
-            "$ref" : "#/components/schemas/JsonNode"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/JsonNode"
+            }, {
+              "type" : "null"
+            } ]
           },
           "minerviniDetail" : {
-            "$ref" : "#/components/schemas/JsonNode"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/JsonNode"
+            }, {
+              "type" : "null"
+            } ]
           },
           "manasAroraDetail" : {
-            "$ref" : "#/components/schemas/JsonNode"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/JsonNode"
+            }, {
+              "type" : "null"
+            } ]
           }
         },
         "required" : [ "compositeScore", "entryPrice", "generatedAt", "manasAroraDetail", "minerviniDetail", "scalperDetail", "side", "signalId", "status", "stopLoss", "target" ]
@@ -4516,13 +4847,13 @@
             "format" : "date-time"
           },
           "fillPrice" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "fillSimulator" : {
             "type" : [ "string", "null" ]
           },
           "slippageApplied" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "fees" : {
             "$ref" : "#/components/schemas/FeeBreakdown"
@@ -4554,16 +4885,16 @@
             "format" : "int64"
           },
           "avgEntryPrice" : {
-            "type" : "number"
+            "type" : "string"
           },
           "markPrice" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "unrealizedPnl" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "realizedPnl" : {
-            "type" : "number"
+            "type" : "string"
           },
           "status" : {
             "type" : "string"
@@ -4580,20 +4911,20 @@
             "type" : [ "string", "null" ]
           },
           "stopLoss" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "takeProfit" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "advisedLots" : {
             "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "marginSnapshot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "marginPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "subaccountIdx" : {
             "type" : [ "integer", "null" ],
@@ -4618,6 +4949,266 @@
           }
         },
         "required" : [ "advisedLots", "avgEntryPrice", "book", "closeReason", "closedAt", "exchange", "id", "marginPct", "marginSnapshot", "markPrice", "openedAt", "openingSignal", "openingSignalId", "orders", "qty", "realizedPnl", "side", "status", "stopLoss", "subaccountIdx", "takeProfit", "tradingsymbol", "unrealizedPnl" ]
+      },
+      "StrategyListItem" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "slug" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "currentVersion" : {
+            "type" : [ "string", "null" ]
+          },
+          "publishedVersion" : {
+            "type" : [ "string", "null" ]
+          },
+          "currentVersionId" : {
+            "type" : [ "string", "null" ]
+          },
+          "publishedVersionId" : {
+            "type" : [ "string", "null" ]
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "tags" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "author" : {
+            "type" : "string"
+          },
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "notificationsEnabled" : {
+            "type" : "boolean"
+          },
+          "notificationChannel" : {
+            "type" : [ "string", "null" ]
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "author", "currentVersion", "currentVersionId", "enabled", "id", "name", "notificationChannel", "notificationsEnabled", "publishedVersion", "publishedVersionId", "slug", "status", "tags", "updatedAt" ]
+      },
+      "StrategyListResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrategyListItem"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "items", "limit", "offset" ]
+      },
+      "StrategyDetail" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "versionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "publishedVersionId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "publishedVersion" : {
+            "type" : [ "string", "null" ]
+          },
+          "slug" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : [ "string", "null" ]
+          },
+          "tags" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "version" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "config" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "configYaml" : {
+            "type" : "string"
+          },
+          "checksum" : {
+            "type" : "string"
+          },
+          "notes" : {
+            "type" : [ "string", "null" ]
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "notificationsEnabled" : {
+            "type" : "boolean"
+          },
+          "notificationChannel" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "checksum", "config", "configYaml", "createdAt", "description", "enabled", "id", "name", "notes", "notificationChannel", "notificationsEnabled", "publishedVersion", "publishedVersionId", "slug", "status", "tags", "updatedAt", "version", "versionId" ]
+      },
+      "VersionListItem" : {
+        "type" : "object",
+        "properties" : {
+          "versionId" : {
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "checksum" : {
+            "type" : "string"
+          },
+          "author" : {
+            "type" : "string"
+          },
+          "notes" : {
+            "type" : [ "string", "null" ]
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "author", "checksum", "createdAt", "notes", "status", "version", "versionId" ]
+      },
+      "VersionListResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/VersionListItem"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "Constituent" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "exchange", "tradingsymbol" ]
+      },
+      "UniverseInfo" : {
+        "type" : "object",
+        "properties" : {
+          "mode" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : [ "string", "null" ]
+          },
+          "constituentCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "checksum" : {
+            "type" : "string"
+          },
+          "survivorshipCaveat" : {
+            "type" : [ "string", "null" ]
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Constituent"
+            }
+          }
+        },
+        "required" : [ "asOf", "checksum", "constituentCount", "items", "mode", "survivorshipCaveat" ]
+      },
+      "DiffResponse" : {
+        "type" : "object",
+        "properties" : {
+          "structured" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Op"
+            }
+          },
+          "yamlFrom" : {
+            "type" : "string"
+          },
+          "yamlTo" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "structured", "yamlFrom", "yamlTo" ]
+      },
+      "Op" : {
+        "type" : "object",
+        "properties" : {
+          "path" : {
+            "type" : "string"
+          },
+          "op" : {
+            "type" : "string"
+          },
+          "before" : {
+            "type" : [ "string", "null" ]
+          },
+          "after" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "after", "before", "op", "path" ]
       },
       "AuditLogResponse" : {
         "type" : "object",
@@ -4718,19 +5309,19 @@
             "format" : "int32"
           },
           "netRealized" : {
-            "type" : "number"
+            "type" : "string"
           },
           "winRate" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "profitFactor" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "expectancy" : {
-            "type" : "number"
+            "type" : "string"
           },
           "maxDrawdownPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "criteria" : {
             "type" : "array",
@@ -4749,13 +5340,13 @@
             "format" : "int32"
           },
           "minProfitFactor" : {
-            "type" : "number"
+            "type" : "string"
           },
           "minExpectancy" : {
-            "type" : "number"
+            "type" : "string"
           },
           "maxDrawdownPct" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "maxDrawdownPct", "minExpectancy", "minProfitFactor", "minTrades" ]
@@ -4776,16 +5367,36 @@
             "format" : "int32"
           },
           "expectancy" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sharpe" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "maxDrawdownPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "expectancy", "graduatedAt", "maxDrawdownPct", "sharpe", "strategyId", "trades" ]
+      },
+      "SignalPage" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SignalDto"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "items", "limit", "offset" ]
       },
       "SellDecisions" : {
         "type" : "object",
@@ -4823,19 +5434,19 @@
             "type" : [ "string", "null" ]
           },
           "entryPrice" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "currentPrice" : {
-            "type" : "number"
+            "type" : "string"
           },
           "unrealizedPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "stopLevel" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "trailLevel" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "stillBuyable" : {
             "type" : "boolean"
@@ -4957,6 +5568,109 @@
         },
         "required" : [ "admitted", "batch", "candidates", "capBound", "capExceedance", "droppedByCap", "entries", "openAtStart", "ranAt", "runDate", "wouldEnter" ]
       },
+      "SignalFeed" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SignalDto"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "RejectionPage" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RejectionRow"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "items", "limit", "offset" ]
+      },
+      "RejectionRow" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "strategyVersionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "strategySlug" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : [ "string", "null" ]
+          },
+          "blockingRail" : {
+            "type" : "string"
+          },
+          "blockingOperand" : {
+            "type" : [ "string", "null" ]
+          },
+          "blockingThreshold" : {
+            "type" : [ "string", "null" ]
+          },
+          "blockingMargin" : {
+            "type" : [ "string", "null" ]
+          },
+          "blockingReason" : {
+            "type" : [ "string", "null" ]
+          },
+          "compositeScore" : {
+            "type" : [ "string", "null" ]
+          },
+          "compositeThreshold" : {
+            "type" : [ "string", "null" ]
+          },
+          "diagnostic" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "dataHealth" : {
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/JsonNode"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "degraded" : {
+            "type" : "boolean"
+          },
+          "barTime" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "barTime", "blockingMargin", "blockingOperand", "blockingRail", "blockingReason", "blockingThreshold", "compositeScore", "compositeThreshold", "dataHealth", "degraded", "diagnostic", "exchange", "generatedAt", "id", "interval", "side", "strategySlug", "strategyVersionId", "tradingsymbol" ]
+      },
       "ShadowSummaryResponse" : {
         "type" : "object",
         "properties" : {
@@ -4992,10 +5706,10 @@
             "format" : "int64"
           },
           "pnlPoints" : {
-            "type" : "number"
+            "type" : "string"
           },
           "pnlNet" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "unpriced" : {
             "type" : "integer",
@@ -5003,6 +5717,67 @@
           }
         },
         "required" : [ "closed", "losses", "open", "pnlNet", "pnlPoints", "unpriced", "variant", "wins" ]
+      },
+      "RailCount" : {
+        "type" : "object",
+        "properties" : {
+          "rail" : {
+            "type" : "string"
+          },
+          "count" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "count", "rail" ]
+      },
+      "RailCountList" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RailCount"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "EvalFunnel" : {
+        "type" : "object",
+        "properties" : {
+          "sessionDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "boots" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OutcomeCount"
+            }
+          }
+        },
+        "required" : [ "boots", "items", "sessionDate" ]
+      },
+      "OutcomeCount" : {
+        "type" : "object",
+        "properties" : {
+          "strategySlug" : {
+            "type" : "string"
+          },
+          "outcome" : {
+            "type" : "string"
+          },
+          "evalCount" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "evalCount", "outcome", "strategySlug" ]
       },
       "DotHealth" : {
         "type" : "object",
@@ -5042,11 +5817,17 @@
           "required" : {
             "type" : "boolean"
           },
+          "frozen" : {
+            "type" : "boolean"
+          },
+          "neverCrossing" : {
+            "type" : "boolean"
+          },
           "detail" : {
             "type" : "string"
           }
         },
-        "required" : [ "alive", "detail", "dot", "required" ]
+        "required" : [ "alive", "detail", "dot", "frozen", "neverCrossing", "required" ]
       },
       "ShadowVariantListResponse" : {
         "type" : "object",
@@ -5060,6 +5841,84 @@
         },
         "required" : [ "items" ]
       },
+      "TradePage" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TradeDto"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "items", "limit", "offset" ]
+      },
+      "PositionList" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PositionDto"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "EquityPoint" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string"
+          },
+          "equity" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "date", "equity" ]
+      },
+      "Pnl" : {
+        "type" : "object",
+        "properties" : {
+          "points" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/EquityPoint"
+            }
+          },
+          "summary" : {
+            "$ref" : "#/components/schemas/PnlSummary"
+          }
+        },
+        "required" : [ "points", "summary" ]
+      },
+      "PnlSummary" : {
+        "type" : "object",
+        "properties" : {
+          "realizedTotal" : {
+            "type" : "string"
+          },
+          "trades" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "winRate" : {
+            "type" : [ "string", "null" ]
+          },
+          "expectancy" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "expectancy", "realizedTotal", "trades", "winRate" ]
+      },
       "MarginHeat" : {
         "type" : "object",
         "properties" : {
@@ -5070,19 +5929,19 @@
             "type" : [ "string", "null" ]
           },
           "spanMargin" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "exposureMargin" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "totalMargin" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "requiredMargin" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "finalMargin" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "openPositions" : {
             "type" : "integer",
@@ -5154,6 +6013,224 @@
         },
         "required" : [ "items" ]
       },
+      "Attribution" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/AttributionRow"
+            }
+          },
+          "coverage" : {
+            "$ref" : "#/components/schemas/AttributionCoverage"
+          }
+        },
+        "required" : [ "coverage", "items" ]
+      },
+      "AttributionCoverage" : {
+        "type" : "object",
+        "properties" : {
+          "closedPositions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "closedPositionsTagged" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "closedQty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "closedQtyTagged" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "openPositions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "openPositionsTagged" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "openQty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "openQtyTagged" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "closedPositions", "closedPositionsTagged", "closedQty", "closedQtyTagged", "openPositions", "openPositionsTagged", "openQty", "openQtyTagged" ]
+      },
+      "AttributionRow" : {
+        "type" : "object",
+        "properties" : {
+          "slug" : {
+            "type" : [ "string", "null" ]
+          },
+          "book" : {
+            "type" : "string"
+          },
+          "closedPositions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "closedQty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "openQty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "attributedRealizedPnl" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "attributedRealizedPnl", "book", "closedPositions", "closedQty", "openQty", "slug" ]
+      },
+      "Tradebook" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TradebookEntry"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "TradebookEntry" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "action" : {
+            "type" : "string"
+          },
+          "qty" : {
+            "type" : "string"
+          },
+          "price" : {
+            "type" : "string"
+          },
+          "tradeValue" : {
+            "type" : "string"
+          },
+          "product" : {
+            "type" : "string"
+          },
+          "orderId" : {
+            "type" : "string"
+          },
+          "tradeTime" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "action", "exchange", "orderId", "price", "product", "qty", "symbol", "tradeTime", "tradeValue" ]
+      },
+      "PositionEntry" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "qty" : {
+            "type" : [ "string", "null" ]
+          },
+          "product" : {
+            "type" : "string"
+          },
+          "avgPrice" : {
+            "type" : "string"
+          },
+          "ltp" : {
+            "type" : [ "string", "null" ]
+          },
+          "mtmPnl" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "avgPrice", "exchange", "ltp", "mtmPnl", "product", "qty", "side", "symbol" ]
+      },
+      "Positions" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PositionEntry"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "Orderbook" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OrderbookEntry"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "OrderbookEntry" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "action" : {
+            "type" : "string"
+          },
+          "qty" : {
+            "type" : "string"
+          },
+          "price" : {
+            "type" : "string"
+          },
+          "triggerPrice" : {
+            "type" : "string"
+          },
+          "pricetype" : {
+            "type" : "string"
+          },
+          "product" : {
+            "type" : "string"
+          },
+          "orderId" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "timestamp" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "action", "exchange", "orderId", "price", "pricetype", "product", "qty", "status", "symbol", "timestamp", "triggerPrice" ]
+      },
       "Funds" : {
         "type" : "object",
         "properties" : {
@@ -5161,22 +6238,42 @@
             "type" : "string"
           },
           "availableCash" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "collateral" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "m2mRealized" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "m2mUnrealized" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "utilisedDebits" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "availableCash", "collateral", "m2mRealized", "m2mUnrealized", "status", "utilisedDebits" ]
+      },
+      "JournalPage" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Entry"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "items", "limit", "offset" ]
       },
       "Insight" : {
         "type" : "object",
@@ -5208,10 +6305,14 @@
             "$ref" : "#/components/schemas/JsonNode"
           },
           "priority" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "priorityDetail" : {
-            "$ref" : "#/components/schemas/JsonNode"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/JsonNode"
+            }, {
+              "type" : "null"
+            } ]
           },
           "dataTrust" : {
             "type" : "string"
@@ -5378,7 +6479,7 @@
           "criteria" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/Criterion"
+              "$ref" : "#/components/schemas/EvidenceCriterion"
             }
           },
           "graduatedAt" : {
@@ -5394,7 +6495,7 @@
           "rejectionProfile" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/RailCount"
+              "$ref" : "#/components/schemas/EvidenceRailCount"
             }
           },
           "openSellDecisions" : {
@@ -5415,6 +6516,37 @@
         },
         "required" : [ "asOf", "criteria", "crossingTimeline", "enabled", "graduatedAt", "name", "notes", "openSellDecisions", "rejectionProfile", "slug", "stage", "strategyId" ]
       },
+      "EvidenceCriterion" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "required" : {
+            "type" : "string"
+          },
+          "actual" : {
+            "type" : "string"
+          },
+          "pass" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "actual", "name", "pass", "required" ]
+      },
+      "EvidenceRailCount" : {
+        "type" : "object",
+        "properties" : {
+          "rail" : {
+            "type" : "string"
+          },
+          "count" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "count", "rail" ]
+      },
       "OpenSell" : {
         "type" : "object",
         "properties" : {
@@ -5433,26 +6565,13 @@
             "type" : "string"
           },
           "unrealizedPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "acknowledged" : {
             "type" : "boolean"
           }
         },
         "required" : [ "acknowledged", "runDate", "sellDecisionId", "symbol", "unrealizedPct", "verdict" ]
-      },
-      "RailCount" : {
-        "type" : "object",
-        "properties" : {
-          "rail" : {
-            "type" : "string"
-          },
-          "count" : {
-            "type" : "integer",
-            "format" : "int64"
-          }
-        },
-        "required" : [ "count", "rail" ]
       },
       "NotificationEventRow" : {
         "type" : "object",
@@ -5539,16 +6658,16 @@
             "format" : "int32"
           },
           "meanCompositeFired" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "meanCompositeRejected" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "meanSupportRatioFired" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "meanSupportRatioRejected" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "firedCount", "meanCompositeFired", "meanCompositeRejected", "meanSupportRatioFired", "meanSupportRatioRejected", "rejectedCount" ]
@@ -5567,7 +6686,7 @@
             "type" : "string"
           },
           "composite" : {
-            "type" : "number"
+            "type" : "string"
           },
           "dotSupports" : {
             "type" : "integer",
@@ -5627,10 +6746,10 @@
             "type" : [ "string", "null" ]
           },
           "composite" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "threshold" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "blockingRail" : {
             "type" : "string"
@@ -5670,7 +6789,7 @@
             "type" : "string"
           },
           "priority" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "band" : {
             "type" : [ "string", "null" ]
@@ -5682,22 +6801,22 @@
             }
           },
           "optionLegCost" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "marginEstimate" : {
             "type" : "string"
           },
           "riskReward" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "entryPrice" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "stopLoss" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "target" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "dataTrust" : {
             "type" : "string"
@@ -5749,10 +6868,10 @@
             "type" : "string"
           },
           "points" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "c" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "c", "key", "points" ]

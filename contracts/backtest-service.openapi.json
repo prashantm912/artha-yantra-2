@@ -98,8 +98,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/BacktestRunAccepted"
                 }
               }
             }
@@ -333,8 +332,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/IndicatorRegistry"
                 }
               }
             }
@@ -407,8 +405,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/IndicatorSeriesResponse"
                 }
               }
             }
@@ -677,8 +674,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/BacktestTradePage"
                 }
               }
             }
@@ -715,8 +711,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/RunResult"
                 }
               }
             }
@@ -1010,8 +1005,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/BacktestSummaryPage"
                 }
               }
             }
@@ -1047,8 +1041,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/StressWindow"
                 }
               }
             }
@@ -1218,8 +1211,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/BacktestJobPage"
                 }
               }
             }
@@ -1256,8 +1248,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/BacktestJobDetail"
                 }
               }
             }
@@ -1292,8 +1283,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/JobCancelAccepted"
                 }
               }
             }
@@ -1597,6 +1587,67 @@
           }
         }
       },
+      "BacktestRunAccepted" : {
+        "type" : "object",
+        "properties" : {
+          "jobId" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "provenance" : {
+            "$ref" : "#/components/schemas/ProvenanceBlock"
+          }
+        },
+        "required" : [ "jobId", "provenance", "status" ]
+      },
+      "ProvenanceBlock" : {
+        "type" : "object",
+        "properties" : {
+          "engineSha" : {
+            "type" : [ "string", "null" ]
+          },
+          "engineImage" : {
+            "type" : [ "string", "null" ]
+          },
+          "configHash" : {
+            "type" : [ "string", "null" ]
+          },
+          "dataHash" : {
+            "type" : [ "string", "null" ]
+          },
+          "contentHash" : {
+            "type" : [ "string", "null" ]
+          },
+          "datasetEpoch" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "evidencePolicy" : {
+            "type" : [ "string", "null" ]
+          },
+          "universeChecksum" : {
+            "type" : [ "string", "null" ]
+          },
+          "premiumSource" : {
+            "type" : [ "string", "null" ]
+          },
+          "costClass" : {
+            "type" : [ "string", "null" ]
+          },
+          "profile" : {
+            "type" : "string"
+          },
+          "warmStatus" : {
+            "type" : [ "string", "null" ]
+          },
+          "premiumContentUnverified" : {
+            "type" : [ "boolean", "null" ]
+          }
+        },
+        "required" : [ "configHash", "contentHash", "costClass", "dataHash", "datasetEpoch", "engineImage", "engineSha", "evidencePolicy", "premiumContentUnverified", "premiumSource", "profile", "universeChecksum", "warmStatus" ]
+      },
       "DeepSwingRunRequest" : {
         "type" : "object",
         "properties" : {
@@ -1821,6 +1872,242 @@
         },
         "required" : [ "jobId", "note", "tags" ]
       },
+      "IndicatorMeta" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "params" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ParamMeta"
+            }
+          },
+          "outputs" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "render" : {
+            "type" : "string"
+          },
+          "pane" : {
+            "type" : "string"
+          },
+          "requiresContext" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "id", "label", "outputs", "pane", "params", "render", "requiresContext" ]
+      },
+      "IndicatorRegistry" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/IndicatorMeta"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "ParamMeta" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "defaultValue" : { }
+        },
+        "required" : [ "defaultValue", "name" ]
+      },
+      "IndicatorSeriesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "series" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/NamedSeries"
+            }
+          }
+        },
+        "required" : [ "series" ]
+      },
+      "NamedSeries" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "points" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Point"
+            }
+          }
+        },
+        "required" : [ "name", "points" ]
+      },
+      "Point" : {
+        "type" : "object",
+        "properties" : {
+          "time" : {
+            "type" : "string"
+          },
+          "value" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "time", "value" ]
+      },
+      "BacktestTradeItem" : {
+        "type" : "object",
+        "properties" : {
+          "seq" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "qty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "entryTs" : {
+            "type" : "string"
+          },
+          "entryPrice" : {
+            "type" : "string"
+          },
+          "exitTs" : {
+            "type" : [ "string", "null" ]
+          },
+          "exitPrice" : {
+            "type" : [ "string", "null" ]
+          },
+          "pnl" : {
+            "type" : "string"
+          },
+          "pnlPct" : {
+            "type" : "string"
+          },
+          "exitReason" : {
+            "type" : [ "string", "null" ]
+          },
+          "barsHeld" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "touchBasis" : {
+            "type" : [ "string", "null" ]
+          },
+          "contributions" : {
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/JsonNode"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "exchange" : {
+            "type" : [ "string", "null" ]
+          },
+          "tradingsymbol" : {
+            "type" : [ "string", "null" ]
+          },
+          "stopLoss" : {
+            "type" : [ "string", "null" ]
+          },
+          "takeProfit" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "barsHeld", "contributions", "entryPrice", "entryTs", "exchange", "exitPrice", "exitReason", "exitTs", "pnl", "pnlPct", "qty", "seq", "side", "stopLoss", "takeProfit", "touchBasis", "tradingsymbol" ]
+      },
+      "BacktestTradePage" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/BacktestTradeItem"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "items", "limit", "offset" ]
+      },
+      "RunResult" : {
+        "type" : "object",
+        "properties" : {
+          "metrics" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "equityCurve" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "drawdownCurve" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "benchmarkCurve" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "dataHash" : {
+            "type" : [ "string", "null" ]
+          },
+          "seed" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "premiumSource" : {
+            "type" : [ "string", "null" ]
+          },
+          "strategyId" : {
+            "type" : [ "string", "null" ]
+          },
+          "ranAt" : {
+            "type" : [ "string", "null" ]
+          },
+          "exchange" : {
+            "type" : [ "string", "null" ]
+          },
+          "tradingsymbol" : {
+            "type" : [ "string", "null" ]
+          },
+          "universeChecksum" : {
+            "type" : [ "string", "null" ]
+          },
+          "universeAsOf" : {
+            "type" : [ "string", "null" ]
+          },
+          "engineSha" : {
+            "type" : [ "string", "null" ]
+          },
+          "engineImage" : {
+            "type" : [ "string", "null" ]
+          },
+          "caveats" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        },
+        "required" : [ "benchmarkCurve", "caveats", "dataHash", "drawdownCurve", "engineImage", "engineSha", "equityCurve", "exchange", "metrics", "premiumSource", "ranAt", "seed", "strategyId", "tradingsymbol", "universeAsOf", "universeChecksum" ]
+      },
       "SwingReportCard" : {
         "type" : "object",
         "properties" : {
@@ -1837,22 +2124,22 @@
             "format" : "int32"
           },
           "battingAvgPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgWinPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgLossPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "payoffRatio" : {
-            "type" : "number"
+            "type" : "string"
           },
           "expectancyPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgBarsHeld" : {
-            "type" : "number"
+            "type" : "string"
           },
           "meetsReliabilityBar" : {
             "type" : "boolean"
@@ -1890,7 +2177,7 @@
             "format" : "int32"
           },
           "maxComposite" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sampleBucket" : {
             "type" : [ "string", "null" ],
@@ -1901,6 +2188,63 @@
           }
         },
         "required" : [ "bars", "maxComposite", "reason", "sampleBreakdown", "sampleBucket", "sessionDate" ]
+      },
+      "BacktestSummaryItem" : {
+        "type" : "object",
+        "properties" : {
+          "strategyVersionId" : {
+            "type" : [ "string", "null" ]
+          },
+          "runId" : {
+            "type" : "string"
+          },
+          "sharpe" : {
+            "type" : "string"
+          },
+          "totalReturn" : {
+            "type" : "string"
+          },
+          "maxDrawdown" : {
+            "type" : "string"
+          },
+          "completedAt" : {
+            "type" : "string"
+          },
+          "equity" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        },
+        "required" : [ "completedAt", "equity", "maxDrawdown", "runId", "sharpe", "strategyVersionId", "totalReturn" ]
+      },
+      "BacktestSummaryPage" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/BacktestSummaryItem"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "StressWindow" : {
+        "type" : "object",
+        "properties" : {
+          "from" : {
+            "type" : [ "string", "null" ]
+          },
+          "to" : {
+            "type" : [ "string", "null" ]
+          },
+          "evidencePolicy" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "evidencePolicy", "from", "to" ]
       },
       "SavedViewsResponse" : {
         "type" : "object",
@@ -1913,52 +2257,6 @@
           }
         },
         "required" : [ "items" ]
-      },
-      "ProvenanceBlock" : {
-        "type" : "object",
-        "properties" : {
-          "engineSha" : {
-            "type" : [ "string", "null" ]
-          },
-          "engineImage" : {
-            "type" : [ "string", "null" ]
-          },
-          "configHash" : {
-            "type" : [ "string", "null" ]
-          },
-          "dataHash" : {
-            "type" : [ "string", "null" ]
-          },
-          "contentHash" : {
-            "type" : [ "string", "null" ]
-          },
-          "datasetEpoch" : {
-            "type" : [ "integer", "null" ],
-            "format" : "int64"
-          },
-          "evidencePolicy" : {
-            "type" : [ "string", "null" ]
-          },
-          "universeChecksum" : {
-            "type" : [ "string", "null" ]
-          },
-          "premiumSource" : {
-            "type" : [ "string", "null" ]
-          },
-          "costClass" : {
-            "type" : [ "string", "null" ]
-          },
-          "profile" : {
-            "type" : "string"
-          },
-          "warmStatus" : {
-            "type" : [ "string", "null" ]
-          },
-          "premiumContentUnverified" : {
-            "type" : [ "boolean", "null" ]
-          }
-        },
-        "required" : [ "configHash", "contentHash", "costClass", "dataHash", "datasetEpoch", "engineImage", "engineSha", "evidencePolicy", "premiumContentUnverified", "premiumSource", "profile", "universeChecksum", "warmStatus" ]
       },
       "RunComparability" : {
         "type" : "object",
@@ -1994,6 +2292,116 @@
           }
         },
         "required" : [ "contentHash", "currentEpoch", "datasetEpochAtRun", "engineSha", "evidencePolicy", "runId", "stale", "staleEpochs" ]
+      },
+      "BacktestJobPage" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/BacktestJobSummary"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "items", "limit", "offset" ]
+      },
+      "BacktestJobSummary" : {
+        "type" : "object",
+        "properties" : {
+          "jobId" : {
+            "type" : "string"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "progress" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "strategyId" : {
+            "type" : [ "string", "null" ]
+          },
+          "strategyVersion" : {
+            "type" : [ "string", "null" ]
+          },
+          "totalReturn" : {
+            "type" : [ "string", "null" ]
+          },
+          "testFrom" : {
+            "type" : [ "string", "null" ]
+          },
+          "testTo" : {
+            "type" : [ "string", "null" ]
+          },
+          "interval" : {
+            "type" : [ "string", "null" ]
+          },
+          "initialCapital" : {
+            "type" : [ "string", "null" ]
+          },
+          "seed" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "tags" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "note" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "createdAt", "initialCapital", "interval", "jobId", "kind", "note", "progress", "seed", "status", "strategyId", "strategyVersion", "tags", "testFrom", "testTo", "totalReturn" ]
+      },
+      "BacktestJobDetail" : {
+        "type" : "object",
+        "properties" : {
+          "jobId" : {
+            "type" : "string"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "progress" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "startedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "finishedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "error" : {
+            "type" : [ "string", "null" ]
+          },
+          "resultRef" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "error", "finishedAt", "jobId", "kind", "progress", "resultRef", "startedAt", "status" ]
       },
       "ExperimentListResponse" : {
         "type" : "object",
@@ -2286,19 +2694,19 @@
             "format" : "int32"
           },
           "netPnlInr" : {
-            "type" : "number"
+            "type" : "string"
           },
           "grossPremiumPoints" : {
-            "type" : "number"
+            "type" : "string"
           },
           "winRate" : {
-            "type" : "number"
+            "type" : "string"
           },
           "expectancyInr" : {
-            "type" : "number"
+            "type" : "string"
           },
           "maxDrawdownInr" : {
-            "type" : "number"
+            "type" : "string"
           },
           "exitReasonCounts" : {
             "type" : "object",
@@ -2309,6 +2717,15 @@
           }
         },
         "required" : [ "exitReasonCounts", "expectancyInr", "grossPremiumPoints", "maxDrawdownInr", "name", "netPnlInr", "tradeCount", "winRate" ]
+      },
+      "JobCancelAccepted" : {
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "status" ]
       },
       "ErrorResponse" : {
         "type" : "object",

@@ -68,6 +68,136 @@ class CandleRepositoryWindowsTest {
     assertThat(CandleRepository.refreshWindows(x, x, 92, 8)).containsExactly(new Window(x, x));
   }
 
+  // ---- planRebuildWindows: windows sized in TUPLES, because the cap that aborted the rebuild is
+
+  /** The 2026-08-04 live {@code candles_5m} chunk layout: uniform 70-day chunks, densest last. */
+  private static List<CandleRepository.ChunkLoad> liveCandles5mChunks() {
+    long[] tuples = {740441, 3931536, 4706633, 4123835, 4593370, 5112833, 5558488};
+    OffsetDateTime first = t("2025-01-02T00:00:00Z");
+    List<CandleRepository.ChunkLoad> chunks = new java.util.ArrayList<>();
+    for (int i = 0; i < tuples.length; i++) {
+      chunks.add(
+          new CandleRepository.ChunkLoad(
+              first.plusDays(70L * i), first.plusDays(70L * (i + 1)), tuples[i]));
+    }
+    return chunks;
+  }
+
+  /**
+   * The defect, stated as an invariant: no window may hold more than the budget. Measured live,
+   * the OLD fixed 100-day windows held up to 9,543,253 tuples against a 5,000,000 ceiling.
+   */
+  @Test
+  void planRebuildWindowsKeepsEveryWindowInsideTheTupleBudget() {
+    List<CandleRepository.ChunkLoad> chunks = liveCandles5mChunks();
+    OffsetDateTime start = chunks.get(0).from();
+    OffsetDateTime end = chunks.get(chunks.size() - 1).to();
+
+    List<Window> windows =
+        CandleRepository.planRebuildWindows(
+            chunks, start, end, CandleRepository.REBUILD_WINDOW_TUPLE_BUDGET, 92, 8);
+
+    for (Window w : windows) {
+      assertThat(tuplesIn(chunks, w))
+          .as("window %s..%s must fit the per-DML budget", w.from(), w.to())
+          .isLessThanOrEqualTo(CandleRepository.REBUILD_WINDOW_TUPLE_BUDGET);
+    }
+    // and the whole 5,558,488-tuple chunk really was split rather than skipped
+    assertThat(windows.size()).isGreaterThan(chunks.size());
+  }
+
+  /** Content of a window, counting a straddled chunk pro-rata — the planner's own cost model. */
+  private static long tuplesIn(List<CandleRepository.ChunkLoad> chunks, Window w) {
+    long total = 0;
+    for (CandleRepository.ChunkLoad c : chunks) {
+      OffsetDateTime from = c.from().isBefore(w.from()) ? w.from() : c.from();
+      OffsetDateTime to = c.to().isAfter(w.to()) ? w.to() : c.to();
+      if (from.isBefore(to)) {
+        total +=
+            c.tuples()
+                * Duration.between(from, to).getSeconds()
+                / Duration.between(c.from(), c.to()).getSeconds();
+      }
+    }
+    return total;
+  }
+
+  @Test
+  void planRebuildWindowsCoversTheWholeRangeWithOverlappedInteriorCuts() {
+    List<CandleRepository.ChunkLoad> chunks = liveCandles5mChunks();
+    OffsetDateTime start = chunks.get(0).from();
+    OffsetDateTime end = chunks.get(chunks.size() - 1).to();
+
+    List<Window> windows =
+        CandleRepository.planRebuildWindows(
+            chunks, start, end, CandleRepository.REBUILD_WINDOW_TUPLE_BUDGET, 92, 8);
+
+    assertThat(windows.get(0).from()).isEqualTo(start);
+    assertThat(windows.get(windows.size() - 1).to()).isEqualTo(end); // clamped, never past end
+    for (int i = 1; i < windows.size(); i++) {
+      Window prev = windows.get(i - 1);
+      Window w = windows.get(i);
+      assertThat(w.from()).isBefore(w.to());
+      // no gap: the next window starts strictly inside the previous one, and the previous window
+      // runs a full 8 days past the cut — or to `end`, when fewer than 8 days remain, which is the
+      // same clamp refreshWindows applies and leaves no bucket uncovered inside the range
+      assertThat(w.from()).isBefore(prev.to());
+      OffsetDateTime full = w.from().plusDays(8);
+      assertThat(prev.to())
+          .as("interior cut %s keeps the 7-day candles_1w bucket fully inside the earlier window", i)
+          .isEqualTo(full.isAfter(end) ? end : full);
+    }
+  }
+
+  @Test
+  void planRebuildWindowsGivesASparseCaggOneWindowInsteadOfTheDenseCaggsWindowCount() {
+    // candles_1w: 19,076 tuples in its densest chunk, 60,769 across 12 years (live, 2026-08-04)
+    List<CandleRepository.ChunkLoad> sparse =
+        List.of(
+            new CandleRepository.ChunkLoad(t("2025-01-02T00:00:00Z"), t("2025-03-13T00:00:00Z"), 15000),
+            new CandleRepository.ChunkLoad(t("2025-03-13T00:00:00Z"), t("2025-05-22T00:00:00Z"), 19076));
+
+    List<Window> windows =
+        CandleRepository.planRebuildWindows(
+            sparse,
+            t("2025-01-02T00:00:00Z"),
+            t("2025-05-22T00:00:00Z"),
+            CandleRepository.REBUILD_WINDOW_TUPLE_BUDGET,
+            92,
+            8);
+
+    // 140 days of a sparse cagg is 34,076 tuples — but the 92-day MATERIALIZATION bound still
+    // applies, so it is 2 windows, not 1 and not candles_5m's count
+    assertThat(windows).hasSize(2);
+  }
+
+  @Test
+  void planRebuildWindowsStillCapsTheSpanWhenNoChunkIsCompressed() {
+    // the 2026-07-10 protection: zero chunks means zero tuples, which must NOT plan as one CALL
+    // spanning the whole 12-year rebuild
+    OffsetDateTime start = t("2014-01-01T00:00:00Z");
+    OffsetDateTime end = start.plusDays(4400);
+
+    List<Window> windows =
+        CandleRepository.planRebuildWindows(
+            List.of(), start, end, CandleRepository.REBUILD_WINDOW_TUPLE_BUDGET, 92, 8);
+
+    assertThat(windows).hasSize(48); // ceil(4400 / 92) — the same bound refreshWindows enforces
+    assertThat(windows.get(0).from()).isEqualTo(start);
+    assertThat(windows.get(windows.size() - 1).to()).isEqualTo(end);
+    for (Window w : windows) {
+      assertThat(Duration.between(w.from(), w.to()).toDays()).isLessThanOrEqualTo(100);
+    }
+  }
+
+  @Test
+  void planRebuildWindowsDegenerateStartEqualsEndYieldsOneGuardWindow() {
+    OffsetDateTime x = t("2026-01-01T00:00:00Z");
+
+    assertThat(CandleRepository.planRebuildWindows(List.of(), x, x, 1_250_000, 92, 8))
+        .containsExactly(new Window(x, x));
+  }
+
   // ---- purgeWindows: contiguous, exact per-row DELETE bounds (no overlap wanted)
 
   @Test

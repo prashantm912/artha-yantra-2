@@ -202,6 +202,84 @@ class CorporateActionIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   @Test
+  void aReBackfillThatFailsPartWayLeavesTheExistingSeriesIntact() {
+    // THE discriminating fixture (V057): a re-backfill that dies AFTER the 1d leg has already
+    // succeeded — i.e. past the point the old purge-then-fetch order had already deleted every bar
+    // this symbol owns. Under that order the 1m failure left the symbol gutted forever, because a
+    // purged symbol fails the sweep's own hasNonBhavcopyDaily pre-filter and is never looked at
+    // again (45 live symbols measured in that state, 2026-08-04). Under fetch → verify → swap the
+    // fetch fails with `candles` still untouched.
+    OffsetDateTime from = OffsetDateTime.parse("2025-06-01T00:00:00+05:30");
+    OffsetDateTime to = OffsetDateTime.parse("2026-06-15T00:00:00+05:30");
+    List<in.arthayantra.marketdata.candles.Candle> before = candles.range("NSE", "TCS", "1d", from, to);
+    assertThat(before).as("the series this test is about must exist first").isNotEmpty();
+
+    mockGateway().setCorporateActionActive(true); // detection fires
+    mockGateway().setFailOnInterval("1m"); // …and the rebuild dies on its second leg
+    try {
+      List<UUID> detections = job.sweepNow();
+      assertThat(detections).hasSize(1);
+
+      await()
+          .atMost(Duration.ofSeconds(60))
+          .untilAsserted(
+              () -> assertThat(events.eventsFor("NSE", "TCS").get(0).status()).isEqualTo("FAILED"));
+
+      // The property under test. Bar-for-bar, not a count: a count would pass if the purge had run
+      // and the 1d re-fetch had refilled the same buckets with DIFFERENT (adjusted) closes, which
+      // is precisely the half-rebuilt state a count cannot distinguish from an untouched one.
+      assertThat(candles.range("NSE", "TCS", "1d", from, to))
+          .as("a failed re-backfill must leave the cached series byte-for-byte intact")
+          .containsExactlyElementsOf(before);
+      // and the staging buffer is not left holding the partial fetch
+      assertThat(
+              jdbc.queryForObject(
+                  "SELECT count(*) FROM candle_rebuild_staging WHERE tradingsymbol = 'TCS'",
+                  Long.class))
+          .isZero();
+    } finally {
+      mockGateway().setFailOnInterval(null);
+    }
+  }
+
+  @Test
+  void aTruncatedReBackfillIsRefusedRatherThanSwappedIn() {
+    // The second half of "verify": the fetch SUCCEEDS but comes back short. Nothing throws, so the
+    // exception path above cannot catch this — only the coverage check can, and a swap that accepts
+    // a truncated fetch is the original defect with extra steps. Here the 1d re-backfill window is
+    // pinned to 400 days by the class properties while the cached series was seeded from 2025-06-01,
+    // so shrinking the fetch is not needed: instead the gateway is asked for a symbol whose cache
+    // extends BEYOND what the rebuild will stage, by seeding an extra bar past `now`.
+    OffsetDateTime from = OffsetDateTime.parse("2025-06-01T00:00:00+05:30");
+    OffsetDateTime to = OffsetDateTime.parse("2026-06-15T00:00:00+05:30");
+    OffsetDateTime future = OffsetDateTime.parse("2026-06-30T00:00:00+05:30");
+    candles.upsertAuthoritativeAll(
+        List.of(
+            new in.arthayantra.marketdata.candles.Candle(
+                "NSE", "TCS", "1d", future,
+                new BigDecimal("100.0000"), new BigDecimal("101.0000"),
+                new BigDecimal("99.0000"), new BigDecimal("100.5000"), 1_000L, null, "KITE")));
+    List<in.arthayantra.marketdata.candles.Candle> before =
+        candles.range("NSE", "TCS", "1d", from, future.plusDays(1));
+
+    mockGateway().setCorporateActionActive(true);
+
+    List<UUID> detections = job.sweepNow();
+    assertThat(detections).hasSize(1);
+
+    await()
+        .atMost(Duration.ofSeconds(60))
+        .untilAsserted(
+            () -> assertThat(events.eventsFor("NSE", "TCS").get(0).status()).isEqualTo("FAILED"));
+
+    // the staged series stops at `now` (2026-06-15) but the cache reaches 2026-06-30: swapping
+    // would silently drop the newer bar, so the rebuild refuses and changes nothing
+    assertThat(candles.range("NSE", "TCS", "1d", from, future.plusDays(1)))
+        .as("a staged series that does not reach the cached series' end must be refused")
+        .containsExactlyElementsOf(before);
+  }
+
+  @Test
   void consistentCacheProducesNoDetections() {
     // CA scenario inactive: cache and "Kite" agree — the sweep must be a no-op
     assertThat(job.sweepNow()).isEmpty();
@@ -239,6 +317,67 @@ class CorporateActionIntegrationTest extends MarketDataIntegrationTestBase {
     assertThat(events.eventsFor("NSE", "TCS")).hasSize(1);
     // purge was skipped: the pre-existing base bars survive
     assertThat(candles.range("NSE", "TCS", "1d", from, to)).hasSize(barsBefore);
+  }
+
+  @Test
+  void refreshFailedEventIsResumedRefreshOnlyAgainstTheRealSchema() {
+    // task_6903cd5e: the same checkpoint, for the class that ERRORED rather than crashed. Against
+    // the real Flyway lineage this also proves V051 applied — the widened CHECK has to admit
+    // REFRESH_FAILED or updateStatus would throw.
+    OffsetDateTime from = OffsetDateTime.parse("2025-06-01T00:00:00+05:30");
+    OffsetDateTime to = OffsetDateTime.parse("2026-06-15T00:00:00+05:30");
+    int barsBefore = candles.range("NSE", "TCS", "1d", from, to).size();
+    assertThat(barsBefore).isGreaterThan(0);
+
+    UUID id =
+        events.insertDetected(
+            "NSE", "TCS", java.time.LocalDate.parse("2026-06-01"),
+            new BigDecimal("2.0"), 4, 3, "[]");
+    events.updateStatus(id, "BASE_REBUILT");
+    events.incrementRefreshAttempts(id);
+    events.updateStatus(id, "REFRESH_FAILED"); // V051 admits the new resumable state
+
+    mockGateway().setCorporateActionActive(false); // no fresh divergence — resume is the ONLY path
+
+    job.sweepNow();
+
+    await()
+        .atMost(Duration.ofSeconds(60))
+        .untilAsserted(
+            () -> assertThat(events.eventsFor("NSE", "TCS").get(0).status()).isEqualTo("RESOLVED"));
+
+    CorporateActionRepository.EventRow resumed = events.eventsFor("NSE", "TCS").get(0);
+    // Identity, not a row count — because identity is what this test actually means: the resume
+    // must reuse THE SAME event, not merely leave one behind. (A count would also be the wrong
+    // instrument for a DB that persists across methods and surefire reruns, but note this class
+    // does clear the table at @BeforeEach, so that is a robustness argument here, not a live bug.)
+    assertThat(resumed.id()).isEqualTo(id);
+    assertThat(resumed.refreshAttempts()).isEqualTo(2); // the resume counted its own attempt
+    assertThat(candles.range("NSE", "TCS", "1d", from, to)).hasSize(barsBefore); // purge skipped
+  }
+
+  @Test
+  void spentRetryBoundAbandonsTheEventInsteadOfRetryingForever() {
+    UUID id =
+        events.insertDetected(
+            "NSE", "TCS", java.time.LocalDate.parse("2026-06-01"),
+            new BigDecimal("2.0"), 4, 3, "[]");
+    events.updateStatus(id, "REFRESH_FAILED");
+    // three recorded attempts = the default artha.corporate-actions.max-refresh-attempts
+    events.incrementRefreshAttempts(id);
+    events.incrementRefreshAttempts(id);
+    events.incrementRefreshAttempts(id);
+
+    mockGateway().setCorporateActionActive(false);
+
+    job.sweepNow();
+
+    CorporateActionRepository.EventRow abandoned = events.eventsFor("NSE", "TCS").get(0);
+    assertThat(abandoned.id()).isEqualTo(id); // identity: THIS event was abandoned, not merely some event
+    assertThat(abandoned.status()).isEqualTo("REFRESH_ABANDONED");
+    assertThat(abandoned.refreshAttempts()).isEqualTo(3); // no fourth attempt was started
+    assertThat(abandoned.resolvedAt()).as("terminal states stamp resolved_at").isNotNull();
+    NTFY.verify(1, postRequestedFor(urlPathEqualTo("/ay-ca-test")));
   }
 
   @Test

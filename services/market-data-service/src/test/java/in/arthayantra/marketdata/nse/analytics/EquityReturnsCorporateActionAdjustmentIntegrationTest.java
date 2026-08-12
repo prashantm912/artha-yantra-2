@@ -19,7 +19,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * FID P0-4 / audit-H6 equality IT for the CA-adjusted equity-returns price plane (adopting the same
- * shared multiplicative rule as {@link in.arthayantra.marketdata.screener.AdjustedEquityDailySql} into
+ * shared multiplicative rule as {@link in.arthayantra.marketdata.equitydaily.AdjustedEquityDailySql} into
  * {@link EquityReturnsService}). The Equity-Returns screener reconstructs multi-day returns from the
  * ACTUAL historical closes (rn 2/6/22/127/253 sessions back), not the exchange-published prev_close —
  * so a split/bonus inside a window used to open a false price cliff (the raw pre-split close sits on a

@@ -123,13 +123,13 @@ public class PaperController {
 
   /** Open positions with mark-to-market P&amp;L ({@code book} absent → all books). */
   @GetMapping("/positions")
-  public Map<String, Object> positions(@RequestParam(required = false) String book) {
-    return Map.of("items", paper.openPositions(book));
+  public PaperViews.PositionList positions(@RequestParam(required = false) String book) {
+    return new PaperViews.PositionList(paper.openPositions(book));
   }
 
   /** The closed-trade ledger (optional {@code book} + {@code symbol}); feeds the chart marks. */
   @GetMapping("/trades")
-  public Map<String, Object> trades(
+  public PaperViews.TradePage trades(
       @RequestParam(required = false) String book,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
           OffsetDateTime from,
@@ -142,12 +142,9 @@ public class PaperController {
         symbol == null ? null : symbol.contains(":") ? symbol.substring(symbol.indexOf(':') + 1) : symbol;
     int boundedLimit = Math.min(Math.max(limit, 1), 500);
     int boundedOffset = Math.max(offset, 0);
-    return Map.of(
-        "items",
+    return new PaperViews.TradePage(
         paper.trades(book, from, to, tradingsymbol, boundedLimit, boundedOffset),
-        "limit",
         boundedLimit,
-        "offset",
         boundedOffset);
   }
 
@@ -182,8 +179,25 @@ public class PaperController {
 
   /** Daily equity + win rate / expectancy for a book ({@code book} absent → all books). */
   @GetMapping("/pnl")
-  public Map<String, Object> pnl(@RequestParam(required = false) String book) {
+  public PaperViews.Pnl pnl(@RequestParam(required = false) String book) {
     return paper.pnl(book);
+  }
+
+  /**
+   * Per-strategy P&amp;L decomposition from the V057 per-signal lots ({@code book} absent → all
+   * books) — the read that {@code GROUP BY opening_signal_id} cannot produce.
+   *
+   * <p>A second entry on an already-open key AVERAGES into the position and the row keeps its
+   * ORIGINAL {@code opening_signal_id}, so a position built by two strategies on the same bar
+   * credits one and hides the other. This walks the per-fill lots instead.
+   *
+   * <p>The {@code coverage} block ships with every response by design — it is what stops an empty
+   * decomposition from being misread as an untraded book while positions opened before V057 (which
+   * have no lots, and no honest backfill) still dominate the ledger.
+   */
+  @GetMapping("/attribution")
+  public PaperViews.Attribution attribution(@RequestParam(required = false) String book) {
+    return paper.attribution(book);
   }
 
   /**

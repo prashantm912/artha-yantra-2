@@ -1,5 +1,6 @@
 package in.arthayantra.backtest.replay.options;
 
+import in.arthayantra.strategyengine.eval.PremiumLevels;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
@@ -93,11 +94,9 @@ public final class PremiumExitEvaluator {
    * so only those levels have a paper counterpart to be parity with.
    */
   private static BigDecimal level(BigDecimal entry, BigDecimal pct, boolean up) {
-    if (pct == null) {
-      return null;
-    }
-    BigDecimal frac = pct.divide(new BigDecimal("100"), 6, RoundingMode.HALF_UP);
-    return entry.multiply(up ? ONE.add(frac) : ONE.subtract(frac)).setScale(2, RoundingMode.HALF_UP);
+    // §9-04: the ONE definition, shared with the live PremiumBracketRules. This used to be a copy
+    // agreeing with the live one only via the javadoc above and the equivalence fixture.
+    return PremiumLevels.paiseRounded(entry, pct, up);
   }
 
   /**

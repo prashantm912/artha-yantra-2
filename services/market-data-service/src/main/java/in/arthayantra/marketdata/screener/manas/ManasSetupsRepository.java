@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Persists + reads per-candidate Manas base geometry ({@code manas_arora_setups}). TWO rows per
@@ -37,9 +38,16 @@ public class ManasSetupsRepository {
     this.jdbc = jdbc;
   }
 
-  /** Batch-upserts geometry for a screen date. {@code geometry} maps symbol → its list of setups. */
-  public int upsertAll(LocalDate screenDate, Map<String, List<ManasSetup>> geometry) {
+  /**
+   * Atomically REPLACES geometry for a screen date (delete-by-date then write), so a setup row for
+   * a symbol the guard has since dropped cannot survive a recompute. {@code geometry} maps symbol →
+   * its list of setups; an EMPTY map is a valid input meaning "no passers today" and correctly
+   * clears the date.
+   */
+  @Transactional
+  public int replaceAll(LocalDate screenDate, Map<String, List<ManasSetup>> geometry) {
     Date d = Date.valueOf(screenDate);
+    jdbc.update("DELETE FROM manas_arora_setups WHERE screen_date = ?", d);
     List<Object[]> batch = new ArrayList<>(geometry.size() * 2);
     for (Map.Entry<String, List<ManasSetup>> e : geometry.entrySet()) {
       for (ManasSetup s : e.getValue()) {

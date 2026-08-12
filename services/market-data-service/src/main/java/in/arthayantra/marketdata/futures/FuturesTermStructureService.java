@@ -39,18 +39,18 @@ public class FuturesTermStructureService {
       String tradingsymbol,
       LocalDate expiry,
       long daysToExpiry,
-      @Schema(types = {"number", "null"}) BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
       @Schema(types = {"integer", "null"}) Long oi,
       @Schema(types = {"integer", "null"}) Long volume,
-      @Schema(types = {"number", "null"}) BigDecimal basisAbsolute,
-      @Schema(types = {"number", "null"}) BigDecimal basisAnnualized) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal basisAbsolute,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal basisAnnualized) {}
 
   /** The term structure. */
   public record TermStructure(
       String underlying,
-      @Schema(types = {"number", "null"}) BigDecimal spot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
       String state,
-      @Schema(types = {"number", "null"}) BigDecimal calendarSpread,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal calendarSpread,
       boolean stale,
       OffsetDateTime asOf,
       List<ContractLeg> contracts,

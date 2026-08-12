@@ -26,6 +26,83 @@ class SwingCatchUpStateRepositoryIntegrationTest extends StrategySignalIntegrati
 
   private static final LocalDate SESSION = LocalDate.of(2026, 7, 17);
 
+  /**
+   * V060, and the defect a UNIT test could not see: {@code seedMissing} must refuse a session only
+   * when its run marker says the ENTRIES ran, not merely that a row exists.
+   *
+   * <p>Since the 16:00/08:35 split the exits-only settle writes a marker for every session —
+   * correctly, since it evaluated every held stop, which is what the 08:30 canary and 20:15
+   * heartbeat ask about. A bare row-exists test here refuses to SEED, so the session never reaches
+   * {@code retryableSessions}, the catch-up never sees it, and the 08:35 entry pass silently never
+   * happens with every health signal green.
+   *
+   * <p>⚠️ This test exists because a unit test MASKED exactly that. {@code SwingBatchCatchUpTest}
+   * fakes the retryable-state helper by filtering on {@code hasRunWithEntries}, which is not what
+   * this SQL does — so the fix looked complete while the real statement still refused every
+   * session. Cross-vendor review caught it one layer above where I had fixed it. The rule the
+   * miss illustrates: when a guard lives in SQL, the test that proves it must run the SQL.
+   */
+  @Test
+  void anExitsOnlyMarkerIsStillSeeded_butACompleteRunIsNot() {
+    String exitsOnly = "cu-it-exits-" + System.nanoTime();
+    String full = "cu-it-full-" + System.nanoTime();
+    String legacy = "cu-it-legacy-" + System.nanoTime();
+
+    // The 16:00 settle's marker: ran, but owes its entries.
+    insertMarker(exitsOnly, SESSION, Boolean.FALSE);
+    // A complete run — nothing left to do for this session.
+    insertMarker(full, SESSION, Boolean.TRUE);
+    // A pre-V060 row: NULL reads as "entries ran", so it must NOT be re-seeded.
+    insertMarker(legacy, SESSION, null);
+
+    state.seedMissing(exitsOnly, java.util.List.of(SESSION));
+    state.seedMissing(full, java.util.List.of(SESSION));
+    state.seedMissing(legacy, java.util.List.of(SESSION));
+
+    assertThat(seeded(exitsOnly))
+        .as("an exits-only session still owes its entries and MUST be seeded")
+        .isTrue();
+    assertThat(seeded(full))
+        .as("a complete run must not be re-seeded")
+        .isFalse();
+    assertThat(seeded(legacy))
+        .as("a pre-V060 NULL row reads as entries-ran — re-seeding it would replay history")
+        .isFalse();
+  }
+
+  /** A session with NO marker at all is seeded, exactly as before V060. */
+  @Test
+  void aSessionWithNoMarkerAtAllIsStillSeeded() {
+    String batch = "cu-it-nomarker-" + System.nanoTime();
+
+    state.seedMissing(batch, java.util.List.of(SESSION));
+
+    assertThat(seeded(batch)).isTrue();
+  }
+
+  private void insertMarker(String batch, LocalDate session, Boolean entriesEnabled) {
+    jdbc.update(
+        """
+        INSERT INTO swing_batch_runs
+            (batch, run_date, ran_at, strategies, candidates, entries, exits, exit_skipped,
+             entries_enabled)
+        VALUES (?, ?, now(), 1, 0, 0, 0, 0, ?)
+        """,
+        batch,
+        java.sql.Date.valueOf(session),
+        entriesEnabled);
+  }
+
+  private boolean seeded(String batch) {
+    Integer rows =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM swing_catchup_runs WHERE batch = ? AND session_date = ?",
+            Integer.class,
+            batch,
+            java.sql.Date.valueOf(SESSION));
+    return rows != null && rows > 0;
+  }
+
   @Test
   void firstClaimWinsAndAConcurrentFreshClaimLoses() {
     String batch = "cu-it-fresh-" + System.nanoTime();
@@ -39,15 +116,88 @@ class SwingCatchUpStateRepositoryIntegrationTest extends StrategySignalIntegrati
   }
 
   @Test
-  void aPendingRowIsReclaimableAndIncrementsAttempts() {
+  void aPendingRowIsReclaimableWithinTheSameDayWithoutSpendingTheBudget() {
+    // ⚠️ This test used to assert attempts == 2 here, pinning "attempts counts CLAIMS". That was
+    // only ever an accident of the schedule: with one catch-up run per morning, claims and IST days
+    // were the same number. The budget's own exhaustion alert says "a held position's daily bar is
+    // still missing" and the sweep window is expressed in max-attempts + 2 trading DAYS — it always
+    // meant days. Counting claims means widening a cron silently shortens the recovery budget, and
+    // at the default of 5 a six-pass morning marks the session ABANDONED ("UNRECOVERABLE") before
+    // that morning is over.
     String batch = "cu-it-pending-" + System.nanoTime();
-    assertThat(state.claim(batch, SESSION, 30)).isPresent(); // attempt 1
+    assertThat(state.claim(batch, SESSION, 30)).isPresent(); // day 1, attempt 1
     state.markPending(batch, SESSION);
 
     Optional<SwingCatchUpStateRepository.Claim> retry = state.claim(batch, SESSION, 30);
 
     assertThat(retry).as("a PENDING partial is retryable").isPresent();
-    assertThat(retry.get().attempts()).as("attempts accrue across retries").isEqualTo(2);
+    assertThat(retry.get().attempts())
+        .as("a second claim on the SAME IST day is a retry, not another day of trying")
+        .isEqualTo(1);
+  }
+
+  /**
+   * The budget counts IST days, and a once-a-day caller sees exactly what it always saw.
+   *
+   * <p>⚠️ Runs the real SQL, because the fix IS the SQL — a {@code CASE} comparing {@code
+   * claimed_at}'s IST date to today's. The sibling test above records what happens when a guard that
+   * lives in SQL is proved by a unit test instead.
+   */
+  /**
+   * ⚠️ THE PRODUCTION PATH, and the one the first cut of this test missed. Every real session is
+   * SEEDED before it is claimed, and a seeded row has {@code attempts = 0} with {@code claimed_at}
+   * unset — so the day comparison sees NULL, which is neither less-than nor equal, and without an
+   * explicit NULL arm the first genuine claim returns attempt ZERO. A five-day budget would then
+   * run for six, silently.
+   *
+   * <p>The sibling test below claims a row that does not exist yet, which takes the INSERT arm of
+   * the upsert. That is the EXCEPTIONAL path. Cross-vendor review caught the gap; the shape is the
+   * catalogue's "a test that supplies its own input" — it built the one starting state the bug
+   * could not occur in.
+   */
+  @Test
+  void aSeededRowStartsAtAttemptOneNotZero() {
+    String batch = "cu-it-seeded-" + System.nanoTime();
+    state.seedMissing(batch, java.util.List.of(SESSION));
+
+    assertThat(state.claim(batch, SESSION, 30).orElseThrow().attempts())
+        .as(
+            "a seeded row has claimed_at NULL, so the first real claim must still count as day ONE"
+                + " — returning 0 here stretches every budget by a day")
+        .isEqualTo(1);
+  }
+
+  @Test
+  void attemptsCountIstDaysNotClaims() {
+    String batch = "cu-it-budget-" + System.nanoTime();
+
+    assertThat(state.claim(batch, SESSION, 30).orElseThrow().attempts()).isEqualTo(1);
+    // Five more passes in the same morning — the shape a 10-minute poll produces.
+    for (int pass = 0; pass < 5; pass++) {
+      state.markPending(batch, SESSION);
+      assertThat(state.claim(batch, SESSION, 30).orElseThrow().attempts())
+          .as("pass %d of one morning must not spend a day of budget", pass + 2)
+          .isEqualTo(1);
+    }
+
+    // Now genuinely cross days. Five more DAYS must reach 6 — i.e. one past the default budget of
+    // 5, which is the point at which the caller abandons. Byte-identical to the old behaviour for a
+    // once-a-day caller, which is the property that makes this change safe to deploy.
+    for (int day = 2; day <= 6; day++) {
+      state.markPending(batch, SESSION);
+      backdateClaimByOneDay(batch);
+      assertThat(state.claim(batch, SESSION, 30).orElseThrow().attempts())
+          .as("day %d of trying", day)
+          .isEqualTo(day);
+    }
+  }
+
+  /** Moves the row's last claim back one full day so the next claim lands on a later IST date. */
+  private void backdateClaimByOneDay(String batch) {
+    jdbc.update(
+        "UPDATE swing_catchup_runs SET claimed_at = claimed_at - interval '1 day'"
+            + " WHERE batch = ? AND session_date = ?",
+        batch, java.sql.Date.valueOf(SESSION));
   }
 
   @Test
@@ -102,7 +252,12 @@ class SwingCatchUpStateRepositoryIntegrationTest extends StrategySignalIntegrati
     Optional<SwingCatchUpStateRepository.Claim> reclaim = state.claim(batch, SESSION, 30);
 
     assertThat(reclaim).as("a RUNNING claim staler than the lease is reclaimable").isPresent();
-    assertThat(reclaim.get().attempts()).isEqualTo(2);
+    // ⚠️ Deliberately NO assertion on attempts here. The lease is measured in MINUTES and the budget
+    // in IST DAYS, so a 2-hour back-date lands on the previous day whenever this runs between 00:00
+    // and 02:00 IST and on the same day otherwise. Asserting either number would make this test
+    // pass or fail by wall-clock time — a flake that only ever reproduces overnight. The counter has
+    // its own test (attemptsCountIstDaysNotClaims) which controls both timestamps; this one is
+    // about reclaimability.
     // A fresh RUNNING claim right after is again blocked (the reclaim reset claimed_at to now).
     assertThat(state.claim(batch, SESSION, 30)).isEmpty();
   }

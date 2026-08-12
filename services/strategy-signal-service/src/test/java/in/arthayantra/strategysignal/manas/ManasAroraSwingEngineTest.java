@@ -79,6 +79,58 @@ class ManasAroraSwingEngineTest {
   }
 
   @Test
+  void anArmedTrailRatchetsTheGoverningStopWithoutFiringAnExit() throws IOException {
+    // M40 Critical 3 fix, round 3 (owner ruling, 2026-08-02): proves SwingBatchEngine's exit pass —
+    // with the REAL ATR/Chandelier arithmetic (ExitEvaluator, unmodified) — calls the
+    // cacheManasGoverningStop port (IN MEMORY ONLY, never stop_loss or any database column — see
+    // that method's javadoc for why: stop_loss also serves as the intraday disaster-stop a 15s
+    // poller reads with no book filter) when a held position's trail has armed but nothing exits,
+    // and that it does NOT fire an exit in the same run (the two are mutually exclusive branches of
+    // the same evaluation). See PaperServiceManasAggregateRiskIntegrationTest for the "lowers
+    // computed risk and never touches stop_loss" half of this proof.
+    UUID strategyId = UUID.randomUUID();
+    UUID publishedVersion = UUID.randomUUID();
+    JsonNode config = breakoutConfig();
+    StrategyRepository registry = mock(StrategyRepository.class);
+    when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
+    when(registry.findVersionById(publishedVersion))
+        .thenReturn(Optional.of(version(publishedVersion, strategyId, config)));
+
+    List<EngineCandle> series = craftArmedTrail();
+    SignalRepository signals = mock(SignalRepository.class);
+    when(signals.activeEntries())
+        .thenReturn(
+            List.of(anchor(42L, publishedVersion, new BigDecimal("152"), series.get(0).bucketStart())));
+    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    when(candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(series);
+    ManasFunnelClient funnel = mock(ManasFunnelClient.class);
+    when(funnel.buyableAndOnDeck()).thenReturn(List.of());
+
+    EmissionGuard guard = mock(EmissionGuard.class);
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    SwingBatchEngine engine =
+        new SwingBatchEngine(
+            registry, candles, signals, mock(SignalPublisher.class), events, Optional.of(guard),
+            passthroughTx(), new ObjectMapper(), Clock.systemUTC());
+    ManasDoctrine doctrine =
+        new ManasDoctrine(
+            funnel, signals, new ManasPyramidPolicy(false, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
+            new ObjectMapper(), true, 520, 10, 1440);
+
+    SwingBatchEngine.SwingRun run = engine.runDaily(doctrine);
+
+    assertThat(run.exits()).as("the armed trail has not been BREACHED — nothing exits").isZero();
+    ArgumentCaptor<BigDecimal> stop = ArgumentCaptor.forClass(BigDecimal.class);
+    verify(guard)
+        .cacheManasGoverningStop(
+            eq(Books.MANAS_ARORA), eq("NSE"), eq("TESTCO"), eq("BUY"), eq(42L), stop.capture());
+    assertThat(stop.getValue())
+        .as("the armed (breakeven-floored) trail ratchets to AT LEAST entry price — strictly tighter"
+            + " than the persisted initial stop (entry − 2×ATR, well below entry)")
+        .isGreaterThanOrEqualTo(new BigDecimal("152"));
+  }
+
+  @Test
   void aPyramidedSymbolExitsAllLotsAtOnceAndExpiresEverySibling() throws IOException {
     ExitHarness h = new ExitHarness();
     h.stubAnchors(
@@ -141,6 +193,8 @@ class ManasAroraSwingEngineTest {
     verify(r.signals()).stampManasAroraDetail(anyLong(), detail.capture());
     assertThat(detail.getValue())
         .isEqualTo("{\"setup\":\"manas-arora-breakout\",\"setupType\":\"breakout\",\"pivot\":\"150\",\"pyramidLot\":2}");
+    // A non-breaching add must never spuriously trip the add-path observability fix's audit/alert.
+    verify(r.guard(), never()).recordPyramidRiskCapBreach(any(), any(), any());
   }
 
   @Test
@@ -149,6 +203,45 @@ class ManasAroraSwingEngineTest {
 
     assertThat(r.run().entries()).as("the risk cap blocks the add").isZero();
     verify(r.events(), never()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
+    // Add-path observability fix (E4 §2f). Three of RiskService's four audited rails
+    // (daily-loss/profit-target/heat-cap) write a risk_audit row + push an ntfy alert on trip;
+    // deployment audits only. Before this fix the pyramid risk-cap block matched neither group —
+    // this proves it now reaches the same EmissionGuard governor surface (RiskServicePyramidCapTest
+    // proves what the paper adapter does with the call from there: audits + alerts, deduped per IST
+    // day, matching the audit+alert group). The FRESH-entry half of M40 (the gap this add-path fix did
+    // NOT close) is proven separately below by
+    // aFreshEntryAtSixOpenPositionsIsRefusedWhenTheSeventhWouldBreachTheOpenRiskCap — see
+    // docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md for the original gap record.
+    verify(r.guard()).recordPyramidRiskCapBreach(eq(Books.MANAS_ARORA), eq("TESTCO"), any());
+  }
+
+  @Test
+  void aFreshEntryAtSixOpenPositionsIsRefusedWhenTheSeventhWouldBreachTheOpenRiskCap() throws IOException {
+    // M40 (owner-directed 2026-08-02): 6 open Manas positions already risking exactly 6% of a
+    // ₹1,000,000 book (representative of 6 names each risking risk_pct_equity=1.0, the value both
+    // manas-arora-breakout.yaml and manas-arora-vcp.yaml carry — max_open_paper_positions=7 makes a
+    // 7th reachable at current config since both strategies share one Books.MANAS_ARORA key). NEWCO is
+    // NOT held (signals.activeEntries() is empty) — this is a FRESH (first) entry, not a pyramid add,
+    // and pyramiding is DISABLED (enabled=false) to prove the cap fires independently of that flag.
+    FreshResult r = runFreshEntry(new BigDecimal("60000"));
+
+    assertThat(r.run().entries())
+        .as("the 7th fresh entry is refused by the aggregate open-risk cap")
+        .isZero();
+    verify(r.events(), never()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
+    verify(r.guard()).recordPyramidRiskCapBreach(eq(Books.MANAS_ARORA), eq("NEWCO"), any());
+  }
+
+  @Test
+  void aFreshSeventhEntryStaysAdmittedWhenTheAggregateStaysUnderTheOpenRiskCap() throws IOException {
+    // The discriminating counterpart: 6 open positions whose aggregate risk is well under the cap, so
+    // the 7th name's own risk keeps the 7-name aggregate under 6% too — this check must not become an
+    // over-eager blanket refusal of every fresh Manas entry.
+    FreshResult r = runFreshEntry(new BigDecimal("10000"));
+
+    assertThat(r.run().entries()).as("under the cap at 7 names — still admitted").isEqualTo(1);
+    verify(r.events()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
+    verify(r.guard(), never()).recordPyramidRiskCapBreach(any(), any(), any());
   }
 
   @Test
@@ -163,6 +256,53 @@ class ManasAroraSwingEngineTest {
     assertThat(run.exitSkipped()).as("a future lot is not an approximate exit").isZero();
     verify(h.candles, never()).fetch(any(), any(), any(), any(), any());
     verify(h.events, never()).publishEvent(argThat((Object e) -> e instanceof SignalExited));
+  }
+
+  /**
+   * M6 characterization (#128 batch scoping, market-data-service's {@code
+   * ManasSwingExitEquivalenceTest} covers the deep-sim half): {@code lotsAsOf} admits a lot whose
+   * {@code generatedAt} date EQUALS the pinned session (a same-day catch-up run, or a live run
+   * where the entry pass just opened it), so {@code exitPass} evaluates {@code ExitEvaluator} at
+   * {@code entryIndex == series.size()-1} — the SAME bar the lot was opened on. Exercised through
+   * the REAL production path ({@code runDaily} → {@code exitPass} → {@code lotsAsOf} →
+   * {@code buildBank} → {@code ExitEvaluator.evaluate}), not a hand-rolled equivalent — a change to
+   * {@code lotsAsOf}'s date comparison (e.g. excluding same-day lots to "fix" M6 on the live side)
+   * would turn {@code exits()} to 0 and redden this test. The 4-bar series is deliberately too
+   * short for the config's ATR-based stop_loss/trailing_stop to warm up, isolating the square_off
+   * rule (a pure close-vs-past-close check, independent of entry timing) as the only reachable exit.
+   */
+  @Test
+  void aSameDayLotIsAdmittedAndEvaluatedOnItsOwnEntryBar() throws IOException {
+    ExitHarness h = new ExitHarness();
+    List<EngineCandle> sameDaySeries = fourBarSquareOffSeries();
+    OffsetDateTime entryBar = sameDaySeries.get(sameDaySeries.size() - 1).bucketStart();
+    LocalDate pinnedSession = entryBar.withOffsetSameInstant(IST).toLocalDate();
+    when(h.candles.fetch(any(), any(), any(), any(), any())).thenReturn(sameDaySeries);
+    h.stubAnchors(h.anchor(42L, entryBar)); // same calendar day as the pinned session
+
+    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine(false), pinnedSession);
+
+    assertThat(run.exits())
+        .as("live has no entry-bar guard: the same-day lot IS evaluated and its exit fires")
+        .isEqualTo(1);
+    assertThat(run.exitSkipped()).isZero();
+    ArgumentCaptor<String> reason = ArgumentCaptor.forClass(String.class);
+    verify(h.signals)
+        .insert(
+            any(), any(), any(), any(), eq("EXIT"), any(), any(), any(), any(), any(), any(),
+            any(), any(), reason.capture());
+    assertThat(reason.getValue()).isEqualTo("SQUARE_OFF");
+  }
+
+  /** 4 flat-OHLC bars [100,100,100,140] — too short for ATR(20) to warm, so only square_off
+   * (fast_pct=35/fast_bars=3, per manas-arora-breakout.yaml) is reachable: 140 >= 100*1.35. */
+  private static List<EngineCandle> fourBarSquareOffSeries() {
+    double[] closes = {100.0, 100.0, 100.0, 140.0};
+    List<EngineCandle> bars = new ArrayList<>();
+    for (int d = 0; d < closes.length; d++) {
+      bars.add(bar(200 + d, closes[d])); // day offset 200+ so it never collides with craftDecline()
+    }
+    return bars;
   }
 
   @Test
@@ -224,7 +364,10 @@ class ManasAroraSwingEngineTest {
   }
 
   private record AddResult(
-      SwingBatchEngine.SwingRun run, SignalRepository signals, ApplicationEventPublisher events) {}
+      SwingBatchEngine.SwingRun run,
+      SignalRepository signals,
+      ApplicationEventPublisher events,
+      EmissionGuard guard) {}
 
   private AddResult runPyramidAdd(BigDecimal existingOpenRiskInr) throws IOException {
     return runPyramidAdd(existingOpenRiskInr, null, null);
@@ -271,7 +414,61 @@ class ManasAroraSwingEngineTest {
             funnel, signals, new ManasPyramidPolicy(true, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
             new ObjectMapper(), true, 520, 10, 1440);
 
-    return new AddResult(engine.runDaily(doctrine, requiredBarDate), signals, events);
+    return new AddResult(engine.runDaily(doctrine, requiredBarDate), signals, events, guard);
+  }
+
+  private record FreshResult(
+      SwingBatchEngine.SwingRun run,
+      SignalRepository signals,
+      ApplicationEventPublisher events,
+      EmissionGuard guard) {}
+
+  /**
+   * Runs the entry pass for a NOT-held candidate ("NEWCO") against a stubbed pre-existing aggregate
+   * open risk — the M40 fresh-entry counterpart of {@link #runPyramidAdd}. Pyramiding is DISABLED
+   * (enabled=false) throughout: the fresh-entry risk-cap check must fire regardless of that flag.
+   */
+  private FreshResult runFreshEntry(BigDecimal existingOpenRiskInr) throws IOException {
+    UUID strategyId = UUID.randomUUID();
+    UUID publishedVersion = UUID.randomUUID();
+    JsonNode config = breakoutConfig();
+    StrategyRepository registry = mock(StrategyRepository.class);
+    when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
+    when(registry.findVersionById(publishedVersion))
+        .thenReturn(Optional.of(version(publishedVersion, strategyId, config)));
+
+    List<EngineCandle> series = craft(3_000L);
+    SignalRepository signals = mock(SignalRepository.class);
+    when(signals.activeEntries()).thenReturn(List.of()); // NEWCO is not held — a fresh (first) entry
+    stubInsert(signals, 55L);
+
+    ManasFunnelClient funnel = mock(ManasFunnelClient.class);
+    when(funnel.buyableAndOnDeck())
+        .thenReturn(
+            List.of(
+                new ManasFunnelClient.Candidate(
+                    "NEWCO", new BigDecimal("152"), new BigDecimal("150"), "breakout", null,
+                    new BigDecimal("150"), null, false)));
+    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    when(candles.fetch(eq("NSE"), eq("NEWCO"), eq("1d"), any(), any())).thenReturn(series);
+
+    EmissionGuard guard = mock(EmissionGuard.class);
+    when(guard.entryAllowed(Books.MANAS_ARORA)).thenReturn(true);
+    when(guard.bookEquity(Books.MANAS_ARORA)).thenReturn(new BigDecimal("1000000"));
+    when(guard.openRiskInr(Books.MANAS_ARORA)).thenReturn(existingOpenRiskInr);
+    when(guard.suggestedQty(any(), any(), any(), any(), any(), any())).thenReturn(new BigDecimal("100"));
+
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    SwingBatchEngine engine =
+        new SwingBatchEngine(
+            registry, candles, signals, mock(SignalPublisher.class), events, Optional.of(guard),
+            passthroughTx(), new ObjectMapper(), Clock.systemUTC());
+    ManasDoctrine doctrine =
+        new ManasDoctrine(
+            funnel, signals, new ManasPyramidPolicy(false, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
+            new ObjectMapper(), true, 520, 10, 1440);
+
+    return new FreshResult(engine.runDaily(doctrine), signals, events, guard);
   }
 
   // ---- harness --------------------------------------------------------------------------------
@@ -364,6 +561,24 @@ class ManasAroraSwingEngineTest {
     }
     bars.add(bar(26, 140.0));
     bars.add(bar(27, 120.0));
+    return bars;
+  }
+
+  /**
+   * Entry at ₹152 (day 0), flat through day 19 (ATR(20) warmup), then a gradual, controlled rise to
+   * ~₹170 by day 35 (+11.8% off entry) — well past the §3.5B +9% arm threshold, but slow enough
+   * (~1.1/day) to stay under BOTH square-off triggers (35% in ≤3 sessions; 40% over the 10-day MA) and
+   * leave the armed Chandelier trail (peak − 2×rolling-ATR) comfortably below the current close (no
+   * trailing_stop fire either). Used by {@code anArmedTrailRatchetsTheGoverningStopWithoutFiringAnExit}.
+   */
+  private static List<EngineCandle> craftArmedTrail() {
+    List<EngineCandle> bars = new ArrayList<>();
+    for (int d = 0; d <= 19; d++) {
+      bars.add(bar(d, 152.0));
+    }
+    for (int d = 20; d <= 35; d++) {
+      bars.add(bar(d, 152.0 + 1.125 * (d - 19)));
+    }
     return bars;
   }
 

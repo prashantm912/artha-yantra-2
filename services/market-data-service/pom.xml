@@ -61,6 +61,16 @@
       <artifactId>market-calendar</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <!-- M7 (#128 swing exit-parity slice 1): test-scope only, so the frozen live ExitEvaluator
+         can drive the swing exit-equivalence characterization fixture directly, without needing
+         the strategy-signal-service module or a Spring context. Production code in this service
+         is untouched — the deep sims keep their own hand-rolled exit logic. -->
+    <dependency>
+      <groupId>in.arthayantra</groupId>
+      <artifactId>strategy-engine</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>

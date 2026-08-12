@@ -1,6 +1,6 @@
 package in.arthayantra.marketdata.screener.minervini.geometry;
 
-import in.arthayantra.marketdata.screener.AdjustedEquityDailySql;
+import in.arthayantra.marketdata.equitydaily.AdjustedEquityDailySql;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.List;

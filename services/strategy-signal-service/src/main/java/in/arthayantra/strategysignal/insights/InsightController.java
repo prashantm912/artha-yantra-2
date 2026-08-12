@@ -254,7 +254,9 @@ public class InsightController {
    * runtime click is the owner's"); watchlist-add / sell-ack return a PROPOSED instruction the browser
    * calls; ack / dismiss / mute are in-module idempotent writes. Every path writes an
    * {@code insight_actions} row FIRST (§2.4). Trust gate (§7.4 / hard-line): a BLOCKED insight refuses
-   * ALL actions (422); a DEGRADED insight refuses the order-placing prefills.
+   * ALL actions (422) EXCEPT mute/unmute; a DEGRADED insight refuses the order-placing prefills.
+   * Mute/unmute bypass the gate on purpose (pre-arm review M2): BLOCKED DATA_TRUST and stale-tick
+   * alerts are exactly the repeat-pagers, and muting is the owner's off-switch — it must always work.
    */
   @PostMapping("/{id}/act")
   public ActResponse act(@PathVariable UUID id, @RequestBody(required = false) ActRequest body) {
@@ -264,7 +266,8 @@ public class InsightController {
     if (action == null || action.isBlank()) {
       throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "action is required");
     }
-    if ("BLOCKED".equals(insight.dataTrust())) {
+    boolean muteAction = "MUTE_TYPE".equals(action) || "UNMUTE_TYPE".equals(action);
+    if (!muteAction && "BLOCKED".equals(insight.dataTrust())) {
       throw new ApiException(
           422,
           ErrorCodes.DATA_STALE,
@@ -288,10 +291,22 @@ public class InsightController {
         triage(id, Insight.Status.DISMISSED, "DISMISS");
         yield done(id, action, "dismissed");
       }
-      case "MUTE_TYPE" -> {
-        repository.updateStatus(id, Insight.Status.DISMISSED.name());
-        repository.insertAction(id, "MUTE_TYPE", refJson(Map.of("type", insight.type())), "owner");
-        yield done(id, action, "type muted for this instance (server-side per-type mutes are §13 row 10)");
+      case "MUTE_TYPE", "UNMUTE_TYPE" -> {
+        Map<String, Object> ref = new java.util.LinkedHashMap<>();
+        ref.put("type", insight.type());
+        // I4 delivery mutes are explicitly marked (pre-arm review M5): the mute reader matches ONLY
+        // marked rows, so legacy scopeless MUTE_TYPE audit rows can never act as global mutes.
+        ref.put("delivery", true);
+        if (insight.scope() != null && insight.scope().startsWith("strategy:")) {
+          ref.put("scope", insight.scope());
+        }
+        repository.insertAction(id, action, refJson(ref), "owner");
+        yield done(
+            id,
+            action,
+            "MUTE_TYPE".equals(action)
+                ? "type muted for future delivery (strategy-scoped when applicable)"
+                : "type mute removed for future delivery (strategy-scoped when applicable)");
       }
       case "OPEN_TICKET" -> ticket(insight, id, action, body, "/api/v1/paper/orders");
       case "TAKE_SIGNAL" -> ticket(insight, id, action, body, null);

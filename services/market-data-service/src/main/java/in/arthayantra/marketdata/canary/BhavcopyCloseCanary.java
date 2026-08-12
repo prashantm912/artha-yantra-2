@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.canary;
 
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.alerts.NtfyClient;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -40,7 +41,7 @@ public class BhavcopyCloseCanary {
 
   /** One symbol whose bhavcopy close diverges from its Kite 1d close beyond the threshold. */
   public record CloseMismatch(
-      String symbol, BigDecimal bhavClose, BigDecimal kiteClose, BigDecimal relDiffPct) {}
+      String symbol, @Schema(type = "string") BigDecimal bhavClose, @Schema(type = "string") BigDecimal kiteClose, @Schema(type = "string") BigDecimal relDiffPct) {}
 
   /** The report for a trade date: compared count, divergent count, and the worst offenders. */
   public record BhavcopyCloseReport(
@@ -48,7 +49,7 @@ public class BhavcopyCloseCanary {
       String status,
       int compared,
       int divergent,
-      BigDecimal thresholdPct,
+      @Schema(type = "string") BigDecimal thresholdPct,
       List<CloseMismatch> offenders) {}
 
   // Symbols whose 1d bar is genuinely Kite-captured (source='KITE'); a bhavcopy-projected bar
@@ -104,7 +105,26 @@ public class BhavcopyCloseCanary {
     this.sampleLimit = sampleLimit;
   }
 
-  /** Daily sweep (20:10 IST, after the ~19:30 bhavcopy lands). Live-only. */
+  /**
+   * Daily sweep, after the evening's bhavcopy lands. Live-only.
+   *
+   * <p>⚠️ Sweeps the LATEST bhavcopy date, which is not necessarily today's. NSE's publish time
+   * varies — measured 17:52, 17:59, 18:47 and 19:31 across four days — so on a late night the file
+   * has not landed when this fires, and without the guard below the canary silently re-evaluates
+   * YESTERDAY's session and alerts on it as if it were tonight's: an operator message naming the
+   * wrong day, repeated every late night — and a confidently wrong alert trains the owner to ignore
+   * the channel. The margin is thin even at the current 20:10 against a 19:30 bhavcopy, and it
+   * shrinks to nothing under the pending schedule move.
+   *
+   * <p>⚠️ A skipped comparison is PERMANENTLY missed for that session, not deferred.
+   * {@code BhavcopyStartupCatchup} starts the backfill on the next boot, so the DATA arrives — but
+   * this canary has no completion listener and only fires on its own cron, and by the time it next
+   * fires that session is no longer today, so the guard below skips it again. Forever. Only a
+   * same-day retry, or a bhavcopy-complete listener, can ever make it. Skipping still trades a
+   * missed check for a WRONG one, which is the right trade; it does not make the check free, and
+   * the loss is a whole session's close comparison rather than a delay. Wiring that listener is the
+   * real fix and is deliberately not in this change.
+   */
   @Scheduled(cron = "${artha.bhavcopy-close.cron:0 10 20 * * MON-FRI}", zone = "Asia/Kolkata")
   public void sweep() {
     if (!live || !enabled) {
@@ -112,6 +132,17 @@ public class BhavcopyCloseCanary {
     }
     LocalDate latest = latestTradeDate();
     if (latest == null) {
+      return;
+    }
+    LocalDate today = LocalDate.now(clock.withZone(Ist.ZONE));
+    if (latest.isBefore(today)) {
+      // Neutral wording on purpose: this also fires on a weekday NSE holiday, where there is no
+      // file to wait for and "has not landed yet" would be a small lie in the log every holiday.
+      log.info(
+          "bhavcopy-close canary skipped — the newest bhavcopy is {} but today is {}; there is no"
+              + " bar for today (a late publish, or a non-trading weekday), and comparing an older"
+              + " session would alert on the wrong day",
+          latest, today);
       return;
     }
     BhavcopyCloseReport report;

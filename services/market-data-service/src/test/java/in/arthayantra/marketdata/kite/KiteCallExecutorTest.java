@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.ResourceAccessException;
 
 /** Phase-11 B-3 resilience stack: pacing, retry policy, saturation and breaker mapping. */
 class KiteCallExecutorTest {
@@ -304,5 +305,55 @@ class KiteCallExecutorTest {
     assertThat(exec.kiteRestBreaker().getState())
         .as("local pacing must never be scored as an upstream fault")
         .isEqualTo(CircuitBreaker.State.CLOSED);
+  }
+
+  /**
+   * The DISTINCT, still-live sub-defect (task_4fd8eadc): {@code kite-dump}'s budget is 1 permit /
+   * 30 minutes for the WHOLE three-exchange sweep, so an internal {@code Retry} on this family is
+   * self-defeating — the one attempt that actually reaches Kite fails, the shared retry
+   * immediately tries again, attempt 2 needs a SECOND permit the bucket cannot refill for ~30
+   * minutes, and that attempt throws {@code RequestNotPermitted} (non-retryable, so Retry gives
+   * up). {@code execute()} then maps it to the exact {@code local broker DUMP budget saturated}
+   * 429 text the ORIGINAL F-SYNC symptom used — masking the real, retryable cause behind a
+   * saturation message that never happened. DUMP must surface its one real failure untouched;
+   * {@code InstrumentSyncScheduler.morningSyncCatchUp} is the actual retry mechanism for this
+   * family, not an internal Retry.
+   *
+   * <p>⚠️ <b>WHAT THIS TEST CANNOT SHOW, so do not read it as proving more than it does.</b> It
+   * builds a limiter with {@code timeoutDuration(ZERO)}, which models the common case — the retry
+   * cannot wait, so it dies on the limiter without touching the network. PRODUCTION uses a
+   * FIXED-CYCLE 30-minute refresh with a 5-second acquire wait, so a failure landing just before a
+   * boundary lets a retry straddle it and take the newly refreshed permit. This test is
+   * structurally incapable of exercising that path, and cross-vendor review correctly rejected an
+   * earlier "call volume is unchanged" claim built on it. The change DOES remove those rare
+   * boundary-straddling retries; that cost is accepted and documented on
+   * {@code KiteCallExecutor.execute}.
+   */
+  @Test
+  void dumpFamilyNeverRetriesInternally() {
+    KiteCallExecutor exec =
+        executor(
+            RateLimiterConfig.custom()
+                .limitForPeriod(1)
+                .limitRefreshPeriod(Duration.ofMinutes(30))
+                .timeoutDuration(Duration.ZERO)
+                .build(),
+            lenientBreaker());
+
+    AtomicInteger invocations = new AtomicInteger();
+    assertThatThrownBy(
+            () ->
+                exec.execute(
+                    KiteCallExecutor.Family.DUMP,
+                    () -> {
+                      invocations.incrementAndGet();
+                      throw new ResourceAccessException("kite dump: connection timed out");
+                    }))
+        .isInstanceOf(ResourceAccessException.class);
+    assertThat(invocations.get())
+        .as(
+            "DUMP must never retry internally — a 2nd attempt would need a permit the 30-min"
+                + " bucket cannot refill")
+        .isEqualTo(1);
   }
 }

@@ -33,6 +33,7 @@ function renderPage() {
 }
 
 describe('TrendingOiPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 6853ms in a full-suite run.
   it('renders the faithful column headers and a Bullish sentiment row', () => {
     renderPage();
     const table = screen.getByRole('table');
@@ -41,7 +42,7 @@ describe('TrendingOiPage', () => {
     }
     // The newest bucket (ΔPut 300 > ΔCall 100 → Diff +200) reads Bullish.
     expect(within(table).getAllByText('Bullish').length).toBeGreaterThan(0);
-  });
+  }, 15_000);
 
   it('Graph view swaps the table for the ΔOI chart', async () => {
     renderPage();

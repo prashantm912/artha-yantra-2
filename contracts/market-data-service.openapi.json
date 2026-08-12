@@ -168,8 +168,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/WatchlistCreated"
                 }
               }
             }
@@ -276,6 +275,34 @@
         }
       }
     },
+    "/api/v1/market/symbol-lineage/detect" : {
+      "post" : {
+        "tags" : [ "symbol-lineage-controller" ],
+        "operationId" : "detectSymbolLineage",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SymbolLineageDetectResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/subscriptions" : {
       "get" : {
         "tags" : [ "subscriptions-controller" ],
@@ -328,8 +355,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/SubscribeResponse"
                 }
               }
             }
@@ -576,7 +602,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/Report"
+                  "$ref" : "#/components/schemas/ManasReport"
                 }
               }
             }
@@ -611,7 +637,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/Report"
+                  "$ref" : "#/components/schemas/ManasReport"
                 }
               }
             }
@@ -879,8 +905,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/IvRollupResponse"
                 }
               }
             }
@@ -1262,8 +1287,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/ContinuousBackfillResponse"
                 }
               }
             }
@@ -1537,8 +1561,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/WorldIndicesResponse"
                 }
               }
             }
@@ -1623,6 +1646,51 @@
         }
       }
     },
+    "/api/v1/market/symbol-lineage" : {
+      "get" : {
+        "tags" : [ "symbol-lineage-controller" ],
+        "operationId" : "listSymbolLineage",
+        "parameters" : [ {
+          "name" : "exchange",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "default" : "NSE"
+          }
+        }, {
+          "name" : "activeOnly",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean",
+            "default" : false
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SymbolLineageResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/status" : {
       "get" : {
         "tags" : [ "market-surface-controller" ],
@@ -1633,8 +1701,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/MarketSurfaceStatus"
                 }
               }
             }
@@ -1746,8 +1813,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/ScreenerResponse"
                 }
               }
             }
@@ -1846,6 +1912,43 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/MinerviniBacktestResult"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener/minervini/plane-divergence" : {
+      "get" : {
+        "tags" : [ "minervini-controller" ],
+        "operationId" : "planeDivergence",
+        "parameters" : [ {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MinerviniPlaneDivergence"
                 }
               }
             }
@@ -2455,6 +2558,51 @@
         }
       }
     },
+    "/api/v1/market/screener/lineage-impact" : {
+      "get" : {
+        "tags" : [ "lineage-screen-impact-controller" ],
+        "operationId" : "lineageScreenImpact",
+        "parameters" : [ {
+          "name" : "screen",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "default" : "minervini"
+          }
+        }, {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LineageScreenImpact"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/pre-open" : {
       "get" : {
         "tags" : [ "pre-open-controller" ],
@@ -2465,8 +2613,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/PreOpen"
                 }
               }
             }
@@ -2673,7 +2820,8 @@
           "in" : "query",
           "required" : true,
           "schema" : {
-            "type" : "string"
+            "type" : "string",
+            "format" : "date"
           }
         }, {
           "name" : "window",
@@ -2696,7 +2844,8 @@
           "in" : "query",
           "required" : false,
           "schema" : {
-            "type" : "string"
+            "type" : "string",
+            "format" : "date"
           }
         } ],
         "responses" : {
@@ -3131,8 +3280,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/OptOiChart"
                 }
               }
             }
@@ -3454,8 +3602,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/OiAnalysis"
                 }
               }
             }
@@ -3526,8 +3673,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/StrikeSeries"
                 }
               }
             }
@@ -3601,8 +3747,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/MultipleOi"
                 }
               }
             }
@@ -3798,8 +3943,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/ChainHistoryResponse"
                 }
               }
             }
@@ -4012,7 +4156,8 @@
           "in" : "query",
           "required" : false,
           "schema" : {
-            "type" : "string"
+            "type" : "string",
+            "format" : "date"
           }
         }, {
           "name" : "interval",
@@ -4258,8 +4403,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/MarketStatusesResponse"
                 }
               }
             }
@@ -4287,8 +4431,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/HolidaysResponse"
                 }
               }
             }
@@ -4611,8 +4754,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/FuturesPreOpen"
                 }
               }
             }
@@ -4678,8 +4820,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/FutOiChart"
                 }
               }
             }
@@ -4707,8 +4848,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/OiBuzzIndicesResponse"
                 }
               }
             }
@@ -4752,7 +4892,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/Heatmap"
+                  "$ref" : "#/components/schemas/OiBuzzHeatmap"
                 }
               }
             }
@@ -4816,8 +4956,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/FutAnalysisResponse"
                 }
               }
             }
@@ -4881,8 +5020,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/FutAnalysisSeriesResponse"
                 }
               }
             }
@@ -5003,8 +5141,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/Screen"
                 }
               }
             }
@@ -5054,8 +5191,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/EodResponse"
                 }
               }
             }
@@ -5283,8 +5419,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/BankAnalysisResponse"
                 }
               }
             }
@@ -5366,8 +5501,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/ParticipantOi"
                 }
               }
             }
@@ -5410,8 +5544,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/LongShort"
                 }
               }
             }
@@ -5454,8 +5587,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/DerivativeStats"
                 }
               }
             }
@@ -5498,8 +5630,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/Cash"
                 }
               }
             }
@@ -5873,8 +6004,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/AnnouncementsResponse"
                 }
               }
             }
@@ -6498,8 +6628,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/Entitlement"
                 }
               }
             }
@@ -6843,7 +6972,7 @@
                 "schema" : {
                   "type" : "array",
                   "items" : {
-                    "type" : "number"
+                    "type" : "string"
                   }
                 }
               }
@@ -7240,6 +7369,53 @@
         },
         "required" : [ "createdAt", "id", "items", "name" ]
       },
+      "WatchlistCreated" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "id", "name" ]
+      },
+      "SymbolLineageDetectResponse" : {
+        "type" : "object",
+        "properties" : {
+          "asOf" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "detected" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "inserted" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "refreshed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "confirmed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "inferred" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "refuted" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "asOf", "confirmed", "detected", "inferred", "inserted", "refreshed", "refuted" ]
+      },
       "SubscribeRequest" : {
         "type" : "object",
         "properties" : {
@@ -7260,6 +7436,21 @@
           }
         }
       },
+      "SubscribeResponse" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "effectiveMode" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "effectiveMode", "exchange", "tradingsymbol" ]
+      },
       "PortfolioStat" : {
         "type" : "object",
         "properties" : {
@@ -7268,16 +7459,16 @@
             "format" : "int32"
           },
           "totalReturnPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "cagrPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "maxDrawdownPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "sharpe" : {
-            "type" : "number"
+            "type" : "string"
           },
           "tradesTaken" : {
             "type" : "integer",
@@ -7288,23 +7479,23 @@
             "format" : "int32"
           },
           "avgExposurePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "months" : {
             "type" : "integer",
             "format" : "int32"
           },
           "positiveMonthsPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "bestMonthPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "worstMonthPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgMonthPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "annual" : {
             "type" : "array",
@@ -7391,31 +7582,31 @@
             "format" : "int32"
           },
           "winRatePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgWinPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgLossPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "payoffRatio" : {
-            "type" : "number"
+            "type" : "string"
           },
           "expectancyPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "profitFactor" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgBarsHeld" : {
-            "type" : "number"
+            "type" : "string"
           },
           "bestTradePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "worstTradePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "longestHoldBars" : {
             "type" : "integer",
@@ -7434,7 +7625,7 @@
             "format" : "int32"
           },
           "stopOutPct" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "avgBarsHeld", "avgLossPct", "avgWinPct", "bestTradePct", "expectancyPct", "longestHoldBars", "losses", "maxLossStreak", "maxWinStreak", "payoffRatio", "profitFactor", "setup", "shortestHoldBars", "stopOutPct", "trades", "winRatePct", "wins", "worstTradePct" ]
@@ -7447,7 +7638,7 @@
             "format" : "int32"
           },
           "returnPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "trades" : {
             "type" : "integer",
@@ -7466,40 +7657,40 @@
             "type" : "string"
           },
           "close" : {
-            "type" : "number"
+            "type" : "string"
           },
           "sma50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma150" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma200" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "high52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "low52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pctFromHigh" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pctAboveLow" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "rsRank" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "avgTurnover50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "freeFloatMcapCr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "freeFloatPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "gates" : {
             "type" : "array",
@@ -7603,25 +7794,221 @@
             "format" : "int32"
           },
           "winRatePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "beatBenchmarkRatePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "meanReturnPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "meanBenchmarkReturnPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "meanExcessReturnPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "medianReturnPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "beatBenchmarkRatePct", "horizonSessions", "meanBenchmarkReturnPct", "meanExcessReturnPct", "meanReturnPct", "medianReturnPct", "sampleCount", "winRatePct" ]
+      },
+      "ManasPortfolioStat" : {
+        "type" : "object",
+        "properties" : {
+          "slots" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalReturnPct" : {
+            "type" : "string"
+          },
+          "cagrPct" : {
+            "type" : "string"
+          },
+          "maxDrawdownPct" : {
+            "type" : "string"
+          },
+          "sharpe" : {
+            "type" : "string"
+          },
+          "tradesTaken" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tradesSkipped" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "avgExposurePct" : {
+            "type" : "string"
+          },
+          "months" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "positiveMonthsPct" : {
+            "type" : "string"
+          },
+          "bestMonthPct" : {
+            "type" : "string"
+          },
+          "worstMonthPct" : {
+            "type" : "string"
+          },
+          "avgMonthPct" : {
+            "type" : "string"
+          },
+          "annual" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ManasYearReturn"
+            }
+          }
+        },
+        "required" : [ "annual", "avgExposurePct", "avgMonthPct", "bestMonthPct", "cagrPct", "maxDrawdownPct", "months", "positiveMonthsPct", "sharpe", "slots", "totalReturnPct", "tradesSkipped", "tradesTaken", "worstMonthPct" ]
+      },
+      "ManasReport" : {
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          },
+          "variant" : {
+            "type" : [ "string", "null" ]
+          },
+          "fromDate" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "runAt" : {
+            "type" : [ "string", "null" ]
+          },
+          "symbolsScanned" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalTrades" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "setups" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ManasSetupStat"
+            }
+          },
+          "portfolio" : {
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/ManasPortfolioStat"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "portfolioRsPriority" : {
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/ManasPortfolioStat"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "portfolioRsPriorityNet" : {
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/ManasPortfolioStat"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "note" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "fromDate", "note", "portfolio", "portfolioRsPriority", "portfolioRsPriorityNet", "runAt", "setups", "status", "symbolsScanned", "totalTrades", "variant" ]
+      },
+      "ManasSetupStat" : {
+        "type" : "object",
+        "properties" : {
+          "setup" : {
+            "type" : "string"
+          },
+          "trades" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "wins" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "losses" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "winRatePct" : {
+            "type" : "string"
+          },
+          "avgWinPct" : {
+            "type" : "string"
+          },
+          "avgLossPct" : {
+            "type" : "string"
+          },
+          "payoffRatio" : {
+            "type" : "string"
+          },
+          "expectancyPct" : {
+            "type" : "string"
+          },
+          "profitFactor" : {
+            "type" : "string"
+          },
+          "avgBarsHeld" : {
+            "type" : "string"
+          },
+          "bestTradePct" : {
+            "type" : "string"
+          },
+          "worstTradePct" : {
+            "type" : "string"
+          },
+          "longestHoldBars" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "shortestHoldBars" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "maxWinStreak" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "maxLossStreak" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "stopOutPct" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "avgBarsHeld", "avgLossPct", "avgWinPct", "bestTradePct", "expectancyPct", "longestHoldBars", "losses", "maxLossStreak", "maxWinStreak", "payoffRatio", "profitFactor", "setup", "shortestHoldBars", "stopOutPct", "trades", "winRatePct", "wins", "worstTradePct" ]
+      },
+      "ManasYearReturn" : {
+        "type" : "object",
+        "properties" : {
+          "year" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "returnPct" : {
+            "type" : "string"
+          },
+          "trades" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "returnPct", "trades", "year" ]
       },
       "ManasRow" : {
         "type" : "object",
@@ -7633,34 +8020,34 @@
             "type" : "string"
           },
           "close" : {
-            "type" : "number"
+            "type" : "string"
           },
           "sma50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma200" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "high52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "low52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "avgVol20" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "avgVol50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "turnover50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "withinHighPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "aboveLowPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "withinHigh" : {
             "type" : "boolean"
@@ -7678,10 +8065,10 @@
             "type" : "boolean"
           },
           "freeFloatMcapCr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "freeFloatPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "gates" : {
             "type" : "array",
@@ -7697,7 +8084,7 @@
             "type" : "boolean"
           },
           "rsRank" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "aboveLowPct", "aboveSma50", "avgVol20", "avgVol50", "close", "exchange", "freeFloatMcapCr", "freeFloatPct", "gates", "gatesPassed", "high52w", "liquidDepth", "liquidVolume", "low52w", "lowCap", "passesAll", "rsRank", "sma200", "sma50", "symbol", "turnover50", "withinHigh", "withinHighPct" ]
@@ -7781,19 +8168,19 @@
             "format" : "int32"
           },
           "capital" : {
-            "type" : "number"
+            "type" : "string"
           },
           "totalReturnPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "cagrPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "maxDrawdownPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "sharpe" : {
-            "type" : "number"
+            "type" : "string"
           },
           "tradesTaken" : {
             "type" : "integer",
@@ -7804,10 +8191,10 @@
             "format" : "int32"
           },
           "winRatePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "profitFactor" : {
-            "type" : "number"
+            "type" : "string"
           },
           "report" : {
             "$ref" : "#/components/schemas/JsonNode"
@@ -7835,17 +8222,17 @@
             "format" : "date"
           },
           "entryPrice" : {
-            "type" : "number"
+            "type" : "string"
           },
           "exitDate" : {
             "type" : "string",
             "format" : "date"
           },
           "exitPrice" : {
-            "type" : "number"
+            "type" : "string"
           },
           "pnlPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "barsHeld" : {
             "type" : "integer",
@@ -7855,7 +8242,7 @@
             "type" : "string"
           },
           "rsRankAtEntry" : {
-            "type" : "number"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "barsHeld", "entryDate", "entryPrice", "exitDate", "exitPrice", "exitReason", "pnlPct", "rsRankAtEntry", "setup", "symbol" ]
@@ -7921,6 +8308,16 @@
           }
         }
       },
+      "IvRollupResponse" : {
+        "type" : "object",
+        "properties" : {
+          "recomputed" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "recomputed" ]
+      },
       "MarginLeg" : {
         "type" : "object",
         "properties" : {
@@ -7976,28 +8373,28 @@
             "type" : [ "string", "null" ]
           },
           "spanMargin" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "exposureMargin" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "equityMargin" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "netBuyPremium" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "additionalMargin" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "totalMargin" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "requiredMargin" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "finalMargin" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "additionalMargin", "equityMargin", "exposureMargin", "finalMargin", "netBuyPremium", "priced", "requiredMargin", "spanMargin", "totalMargin", "unpricedReason" ]
@@ -8074,13 +8471,16 @@
         "type" : "object",
         "properties" : {
           "exchange" : {
-            "type" : "string"
+            "type" : "string",
+            "minLength" : 1
           },
           "tradingsymbol" : {
-            "type" : "string"
+            "type" : "string",
+            "minLength" : 1
           },
           "interval" : {
-            "type" : "string"
+            "type" : "string",
+            "minLength" : 1
           },
           "from" : {
             "type" : "string",
@@ -8090,7 +8490,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "exchange", "from", "interval", "to", "tradingsymbol" ]
       },
       "QueryRequest" : {
         "type" : "object",
@@ -8158,6 +8559,22 @@
             "format" : "date"
           }
         }
+      },
+      "ContinuousBackfillResponse" : {
+        "type" : "object",
+        "properties" : {
+          "root" : {
+            "type" : "string"
+          },
+          "contSymbol" : {
+            "type" : "string"
+          },
+          "contracts" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "contSymbol", "contracts", "root" ]
       },
       "DownloadRequest" : {
         "type" : "object",
@@ -8271,29 +8688,87 @@
         },
         "required" : [ "connected", "kiteUserId", "tokenValidUntil" ]
       },
+      "WorldIndex" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : [ "string", "null" ]
+          },
+          "country" : {
+            "type" : [ "string", "null" ]
+          },
+          "key" : {
+            "type" : "string"
+          },
+          "tradingSymbol" : {
+            "type" : [ "string", "null" ]
+          },
+          "ltp" : {
+            "type" : [ "string", "null" ]
+          },
+          "prevClose" : {
+            "type" : [ "string", "null" ]
+          },
+          "netChange" : {
+            "type" : [ "string", "null" ]
+          },
+          "changePct" : {
+            "type" : [ "string", "null" ]
+          },
+          "open" : {
+            "type" : [ "string", "null" ]
+          },
+          "high" : {
+            "type" : [ "string", "null" ]
+          },
+          "low" : {
+            "type" : [ "string", "null" ]
+          },
+          "asOf" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "latency" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "asOf", "changePct", "country", "high", "key", "latency", "low", "ltp", "name", "netChange", "open", "prevClose", "tradingSymbol" ]
+      },
+      "WorldIndicesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WorldIndex"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
       "VixQuote" : {
         "type" : "object",
         "properties" : {
           "ltp" : {
-            "type" : "number"
+            "type" : "string"
           },
           "dayHigh" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "dayLow" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "dayOpen" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "prevClose" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "change" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "changePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "asOf" : {
             "type" : "string",
@@ -8312,7 +8787,7 @@
             "type" : "string"
           },
           "lastPrice" : {
-            "type" : "number"
+            "type" : "string"
           },
           "cumulativeDayVolume" : {
             "type" : "integer",
@@ -8332,6 +8807,63 @@
           }
         },
         "required" : [ "cumulativeDayVolume", "exchange", "lastPrice", "openInterest", "seq", "timestamp", "tradingsymbol" ]
+      },
+      "SymbolLineageResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SymbolLineageRow"
+            }
+          },
+          "count" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "count", "items" ]
+      },
+      "SymbolLineageRow" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "predecessorSymbol" : {
+            "type" : "string"
+          },
+          "successorSymbol" : {
+            "type" : "string"
+          },
+          "switchDate" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "gapSessions" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "boundaryPrice" : {
+            "type" : [ "string", "null" ]
+          },
+          "confidence" : {
+            "type" : [ "string", "null" ]
+          },
+          "evidence" : {
+            "type" : [ "string", "null" ]
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "statusReason" : {
+            "type" : [ "string", "null" ]
+          },
+          "source" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "boundaryPrice", "confidence", "evidence", "exchange", "gapSessions", "predecessorSymbol", "source", "status", "statusReason", "successorSymbol", "switchDate" ]
       },
       "SubscriptionView" : {
         "type" : "object",
@@ -8360,6 +8892,86 @@
           }
         },
         "required" : [ "exchange", "instrumentToken", "mode", "priority", "subscribers", "tradingsymbol" ]
+      },
+      "MarketSurfaceStatus" : {
+        "type" : "object",
+        "properties" : {
+          "serverTime" : {
+            "type" : "string"
+          },
+          "tradingDay" : {
+            "type" : "boolean"
+          },
+          "marketOpen" : {
+            "type" : "boolean"
+          },
+          "sessionOpen" : {
+            "type" : "string"
+          },
+          "sessionClose" : {
+            "type" : "string"
+          },
+          "nextTradingDay" : {
+            "type" : "string"
+          },
+          "previousTradingDay" : {
+            "type" : "string"
+          },
+          "lastTradingDay" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "lastTradingDay", "marketOpen", "nextTradingDay", "previousTradingDay", "serverTime", "sessionClose", "sessionOpen", "tradingDay" ]
+      },
+      "Row" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "latestClose" : {
+            "type" : "string"
+          },
+          "pastClose" : {
+            "type" : "string"
+          },
+          "value" : {
+            "type" : "string"
+          },
+          "avgVolume" : {
+            "type" : [ "string", "null" ]
+          },
+          "distanceFromHigh52w" : {
+            "type" : [ "string", "null" ]
+          },
+          "label" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "avgVolume", "distanceFromHigh52w", "exchange", "label", "latestClose", "pastClose", "tradingsymbol", "value" ]
+      },
+      "ScreenerResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Row"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "items", "limit", "offset" ]
       },
       "MinerviniBacktestResult" : {
         "type" : "object",
@@ -8413,7 +9025,7 @@
             "format" : "int32"
           },
           "marginPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "rotations" : {
             "type" : "integer",
@@ -8441,16 +9053,16 @@
             "format" : "int32"
           },
           "grossCagrPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "netCagrPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "netDrawdownPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "netSharpe" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "grossCagrPct", "netCagrPct", "netDrawdownPct", "netSharpe", "slots", "tradesSkipped", "tradesTaken" ]
@@ -8471,16 +9083,94 @@
             "format" : "int32"
           },
           "netCagrPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "netDrawdownPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "netSharpe" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "capital", "floorTurnover", "netCagrPct", "netDrawdownPct", "netSharpe", "trades" ]
+      },
+      "MinerviniPlaneDivergence" : {
+        "type" : "object",
+        "properties" : {
+          "screenDate" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "asOfCutoff" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "passersChecked" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "barsCompared" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "barsExcludedAsOf" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "symbolsWithNoHonestBars" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "divergentPassers" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "divergentCandidates" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "thresholdPct" : {
+            "type" : "string"
+          },
+          "lookbackDays" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "names" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/MinerviniPlaneDivergentName"
+            }
+          }
+        },
+        "required" : [ "asOfCutoff", "barsCompared", "barsExcludedAsOf", "divergentCandidates", "divergentPassers", "lookbackDays", "names", "passersChecked", "screenDate", "symbolsWithNoHonestBars", "thresholdPct" ]
+      },
+      "MinerviniPlaneDivergentName" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "maxDivergencePct" : {
+            "type" : "string"
+          },
+          "worstBar" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "sharedBars" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "barsExcludedAsOf" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "candidate" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "barsExcludedAsOf", "candidate", "maxDivergencePct", "sharedBars", "symbol", "worstBar" ]
       },
       "MinerviniFunnel" : {
         "type" : "object",
@@ -8520,10 +9210,10 @@
             "type" : "string"
           },
           "close" : {
-            "type" : "number"
+            "type" : "string"
           },
           "rsRank" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "stage" : {
             "type" : [ "integer", "null" ],
@@ -8533,10 +9223,10 @@
             "type" : "boolean"
           },
           "pivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "cheatPivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "thrust" : {
             "type" : "boolean"
@@ -8545,7 +9235,7 @@
             "type" : [ "string", "null" ]
           },
           "pctToPivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "cheatPivot", "close", "footprint", "isVcp", "pctToPivot", "pivot", "rsRank", "stage", "symbol", "thrust" ]
@@ -8557,7 +9247,7 @@
             "type" : "string"
           },
           "advanceRatio" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sessions" : {
             "type" : "integer",
@@ -8573,7 +9263,7 @@
             "type" : "string"
           },
           "rsRank" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "rsRank", "symbol" ]
@@ -8652,13 +9342,13 @@
             "type" : [ "string", "null" ]
           },
           "pivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "deepestPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "tightestPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "contractionCount" : {
             "type" : [ "integer", "null" ],
@@ -8683,7 +9373,7 @@
             "format" : "int32"
           },
           "cheatPivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "thrust" : {
             "type" : "boolean"
@@ -8711,40 +9401,40 @@
             "type" : "boolean"
           },
           "close" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma150" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma200" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "high52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "low52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pctFromHigh" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pctAboveLow" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "rsRank" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "avgTurnover50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "freeFloatMcapCr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "freeFloatPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "gates" : {
             "type" : "array",
@@ -8835,13 +9525,13 @@
           "variants" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/Report"
+              "$ref" : "#/components/schemas/ManasReport"
             }
           },
           "slotSweep" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/SlotCell"
+              "$ref" : "#/components/schemas/ManasSlotCell"
             }
           },
           "note" : {
@@ -8849,6 +9539,36 @@
           }
         },
         "required" : [ "fromDate", "note", "runAt", "slotSweep", "status", "variants" ]
+      },
+      "ManasSlotCell" : {
+        "type" : "object",
+        "properties" : {
+          "slots" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tradesTaken" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tradesSkipped" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "grossCagrPct" : {
+            "type" : "string"
+          },
+          "netCagrPct" : {
+            "type" : "string"
+          },
+          "netDrawdownPct" : {
+            "type" : "string"
+          },
+          "netSharpe" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "grossCagrPct", "netCagrPct", "netDrawdownPct", "netSharpe", "slots", "tradesSkipped", "tradesTaken" ]
       },
       "ManasFunnel" : {
         "type" : "object",
@@ -8888,31 +9608,31 @@
             "type" : "string"
           },
           "close" : {
-            "type" : "number"
+            "type" : "string"
           },
           "aboveLowPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "setupType" : {
             "type" : [ "string", "null" ]
           },
           "pivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "footprint" : {
             "type" : [ "string", "null" ]
           },
           "pctToPivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "breakoutPivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "vcpPivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "rsRank" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "aboveLowPct", "breakoutPivot", "close", "footprint", "pctToPivot", "pivot", "rsRank", "setupType", "symbol", "vcpPivot" ]
@@ -8934,34 +9654,34 @@
             "type" : "boolean"
           },
           "close" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma200" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "high52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "low52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "withinHighPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "aboveLowPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "avgVol20" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "avgVol50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "turnover50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "withinHigh" : {
             "type" : "boolean"
@@ -8979,10 +9699,10 @@
             "type" : "boolean"
           },
           "freeFloatMcapCr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "freeFloatPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "gates" : {
             "type" : "array",
@@ -9019,7 +9739,7 @@
             "type" : [ "string", "null" ]
           },
           "pivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "baseWeeks" : {
             "type" : [ "integer", "null" ],
@@ -9030,6 +9750,93 @@
           }
         },
         "required" : [ "baseWeeks", "footprint", "pivot", "rejectReason", "setupType", "valid" ]
+      },
+      "LineageScreenImpact" : {
+        "type" : "object",
+        "properties" : {
+          "screen" : {
+            "type" : "string"
+          },
+          "screenDate" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "coverage" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "candidates" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "lineageCoverage" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "lineageCandidates" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "entering" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "leaving" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        },
+        "required" : [ "candidates", "coverage", "entering", "leaving", "lineageCandidates", "lineageCoverage", "screen", "screenDate" ]
+      },
+      "PreOpen" : {
+        "type" : "object",
+        "properties" : {
+          "phase" : {
+            "type" : "string"
+          },
+          "preOpen" : {
+            "type" : "boolean"
+          },
+          "indices" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PreOpenIndex"
+            }
+          }
+        },
+        "required" : [ "indices", "phase", "preOpen" ]
+      },
+      "PreOpenIndex" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "key" : {
+            "type" : "string"
+          },
+          "ltp" : {
+            "type" : [ "string", "null" ]
+          },
+          "prevClose" : {
+            "type" : [ "string", "null" ]
+          },
+          "netChange" : {
+            "type" : [ "string", "null" ]
+          },
+          "changePct" : {
+            "type" : [ "string", "null" ]
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "changePct", "key", "ltp", "name", "netChange", "prevClose" ]
       },
       "DataFreshness" : {
         "type" : "object",
@@ -9077,17 +9884,17 @@
             "format" : "int64"
           },
           "spot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "trend" : {
             "type" : "string",
             "enum" : [ "UP", "DOWN", "FLAT" ]
           },
           "ceLtp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "peLtp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "bucket", "ceLtp", "ceOi", "peLtp", "peOi", "spot", "totalOi", "trend" ]
@@ -9115,22 +9922,22 @@
         "type" : "object",
         "properties" : {
           "strike" : {
-            "type" : "number"
+            "type" : "string"
           },
           "optionType" : {
             "type" : "string"
           },
           "open" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "high" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "low" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "last" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "dayVolume" : {
             "type" : [ "integer", "null" ],
@@ -9141,7 +9948,7 @@
             "format" : "int64"
           },
           "prevClose" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "ohMark" : {
             "type" : "boolean"
@@ -9150,13 +9957,13 @@
             "type" : "boolean"
           },
           "fallPctFromOpen" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "fallPctFromPrevClose" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "oiChangePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "dayVolume", "declineVolume", "fallPctFromOpen", "fallPctFromPrevClose", "high", "last", "low", "ohMark", "oiChangePct", "olMark", "open", "optionType", "prevClose", "strike" ]
@@ -9176,10 +9983,10 @@
             "format" : "date"
           },
           "spot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "atmStrike" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "interval" : {
             "type" : "integer",
@@ -9202,22 +10009,22 @@
             "format" : "date-time"
           },
           "open" : {
-            "type" : "number"
+            "type" : "string"
           },
           "high" : {
-            "type" : "number"
+            "type" : "string"
           },
           "low" : {
-            "type" : "number"
+            "type" : "string"
           },
           "close" : {
-            "type" : "number"
+            "type" : "string"
           },
           "ceClose" : {
-            "type" : "number"
+            "type" : "string"
           },
           "peClose" : {
-            "type" : "number"
+            "type" : "string"
           },
           "volume" : {
             "type" : "integer",
@@ -9237,32 +10044,32 @@
             "format" : "date"
           },
           "callStrike" : {
-            "type" : "number"
+            "type" : "string"
           },
           "putStrike" : {
-            "type" : "number"
+            "type" : "string"
           },
           "interval" : {
             "type" : "string"
           },
           "underlyingLtp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "underlyingDayOpen" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
           },
           "combinedVwap" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "slBufferPoints" : {
-            "type" : "number"
+            "type" : "string"
           },
           "slLevel" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "items" : {
             "type" : "array",
@@ -9300,17 +10107,17 @@
             "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
           },
           "spotDelta" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "oiChange" : {
             "type" : "integer",
             "format" : "int64"
           },
           "oiChangePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "priceChangePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "interpretation", "oiChange", "oiChangePct", "priceChangePct", "spotDelta" ]
@@ -9319,16 +10126,16 @@
         "type" : "object",
         "properties" : {
           "strike" : {
-            "type" : "number"
+            "type" : "string"
           },
           "optionType" : {
             "type" : "string"
           },
           "ltp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "prevLtp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "oi" : {
             "type" : [ "integer", "null" ],
@@ -9339,13 +10146,13 @@
             "format" : "int64"
           },
           "spurtPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "ltpChange" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "ltpChangePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "volume" : {
             "type" : [ "integer", "null" ],
@@ -9368,13 +10175,13 @@
             }
           },
           "atmStrike" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "atmStraddle" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "spot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "asOf" : {
             "type" : [ "string", "null" ],
@@ -9387,16 +10194,16 @@
         "type" : "object",
         "properties" : {
           "strike" : {
-            "type" : "number"
+            "type" : "string"
           },
           "straddle" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "ce" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pe" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "ce", "pe", "straddle", "strike" ]
@@ -9425,13 +10232,13 @@
             "format" : "date-time"
           },
           "atmStrike" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "atmStraddle" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "spot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "atmStraddle", "atmStrike", "bucket", "spot" ]
@@ -9443,22 +10250,102 @@
             "type" : "string"
           },
           "pcr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "spot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "pcr", "spot", "time" ]
+      },
+      "OptCandle" : {
+        "type" : "object",
+        "properties" : {
+          "time" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "open" : {
+            "type" : "string"
+          },
+          "high" : {
+            "type" : "string"
+          },
+          "low" : {
+            "type" : "string"
+          },
+          "close" : {
+            "type" : "string"
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oi" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "iv" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "close", "high", "iv", "low", "oi", "open", "time", "volume" ]
+      },
+      "OptOiChart" : {
+        "type" : "object",
+        "properties" : {
+          "ce" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OptCandle"
+            }
+          },
+          "pe" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OptCandle"
+            }
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "strike" : {
+            "type" : "string"
+          },
+          "ceTradingsymbol" : {
+            "type" : "string"
+          },
+          "peTradingsymbol" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "underlyingLtp" : {
+            "type" : [ "string", "null" ]
+          },
+          "underlyingDayOpen" : {
+            "type" : [ "string", "null" ]
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "ce", "ceTradingsymbol", "expiry", "interval", "pe", "peTradingsymbol", "strike", "underlying", "underlyingDayOpen", "underlyingLtp" ]
       },
       "OiStats" : {
         "type" : "object",
         "properties" : {
           "pcr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "maxPain" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "ceOi" : {
             "type" : "integer",
@@ -9535,7 +10422,159 @@
             "$ref" : "#/components/schemas/DataFreshness"
           }
         },
-        "required" : [ "asOf" ]
+        "required" : [ "asOf", "buckets", "ce", "maxAbs", "pe", "strikes" ]
+      },
+      "OiAnalysis" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikePoint"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "StrikePoint" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "strike" : {
+            "type" : "string"
+          },
+          "optionType" : {
+            "type" : "string"
+          },
+          "ltp" : {
+            "type" : [ "string", "null" ]
+          },
+          "oi" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "oiChange" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "iv" : {
+            "type" : [ "string", "null" ]
+          },
+          "spot" : {
+            "type" : [ "string", "null" ]
+          },
+          "volume" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          }
+        },
+        "required" : [ "bucket", "iv", "ltp", "oi", "oiChange", "optionType", "spot", "strike", "volume" ]
+      },
+      "StrikeSeries" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikePoint"
+            }
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "strike" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "expiry", "interval", "items", "strike", "underlying" ]
+      },
+      "MultipleOi" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OiLeg"
+            }
+          },
+          "spot" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SpotPoint"
+            }
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "expiry", "interval", "items", "spot", "underlying" ]
+      },
+      "OiLeg" : {
+        "type" : "object",
+        "properties" : {
+          "leg" : {
+            "type" : "string"
+          },
+          "points" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OiLinePoint"
+            }
+          }
+        },
+        "required" : [ "leg", "points" ]
+      },
+      "OiLinePoint" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "oi" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          }
+        },
+        "required" : [ "bucket", "oi" ]
+      },
+      "SpotPoint" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "spot" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "bucket", "spot" ]
       },
       "HistoryPoint" : {
         "type" : "object",
@@ -9545,16 +10584,16 @@
             "format" : "date"
           },
           "iv" : {
-            "type" : "number"
+            "type" : [ "string", "null" ]
           },
           "atmIv" : {
-            "type" : "number"
+            "type" : [ "string", "null" ]
           },
           "iv30d" : {
-            "type" : "number"
+            "type" : [ "string", "null" ]
           },
           "spot" : {
-            "type" : "number"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "atmIv", "date", "iv", "iv30d", "spot" ]
@@ -9572,10 +10611,10 @@
             }
           },
           "currentIv" : {
-            "type" : "number"
+            "type" : [ "string", "null" ]
           },
           "rank" : {
-            "type" : "number"
+            "type" : [ "string", "null" ]
           },
           "percentile" : {
             "type" : "integer",
@@ -9669,21 +10708,24 @@
             "format" : "date"
           },
           "spot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "forward" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "forwardSource" : {
             "type" : "string"
           },
           "riskFreeRate" : {
-            "type" : "number"
+            "type" : "string"
           },
           "pcr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "stale" : {
+            "type" : "boolean"
+          },
+          "lastCaptured" : {
             "type" : "boolean"
           },
           "asOf" : {
@@ -9697,7 +10739,7 @@
             }
           }
         },
-        "required" : [ "asOf", "expiry", "forward", "forwardSource", "pcr", "riskFreeRate", "rows", "spot", "stale", "underlying" ]
+        "required" : [ "asOf", "expiry", "forward", "forwardSource", "lastCaptured", "pcr", "riskFreeRate", "rows", "spot", "stale", "underlying" ]
       },
       "Leg" : {
         "type" : "object",
@@ -9709,13 +10751,13 @@
             "type" : "string"
           },
           "ltp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "bid" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "ask" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "volume" : {
             "type" : [ "integer", "null" ],
@@ -9730,40 +10772,40 @@
             "format" : "int64"
           },
           "iv" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "delta" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "gamma" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "theta" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "vega" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "rho" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "vanna" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "charm" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "vomma" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "speed" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "zomma" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "color" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "ivReason" : {
             "type" : [ "string", "null" ]
@@ -9778,7 +10820,7 @@
         "type" : "object",
         "properties" : {
           "strike" : {
-            "type" : "number"
+            "type" : "string"
           },
           "ce" : {
             "$ref" : "#/components/schemas/Leg"
@@ -9788,6 +10830,109 @@
           }
         },
         "required" : [ "ce", "pe", "strike" ]
+      },
+      "ChainHistoryResponse" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "ts" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "rows" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SnapshotRow"
+            }
+          }
+        },
+        "required" : [ "expiry", "rows", "ts", "underlying" ]
+      },
+      "SnapshotRow" : {
+        "type" : "object",
+        "properties" : {
+          "ts" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "strike" : {
+            "type" : "string"
+          },
+          "optionType" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "ltp" : {
+            "type" : [ "string", "null" ]
+          },
+          "bid" : {
+            "type" : [ "string", "null" ]
+          },
+          "ask" : {
+            "type" : [ "string", "null" ]
+          },
+          "volume" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "oi" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "oiChange" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "spotPrice" : {
+            "type" : [ "string", "null" ]
+          },
+          "iv" : {
+            "type" : [ "string", "null" ]
+          },
+          "delta" : {
+            "type" : [ "string", "null" ]
+          },
+          "gamma" : {
+            "type" : [ "string", "null" ]
+          },
+          "theta" : {
+            "type" : [ "string", "null" ]
+          },
+          "vega" : {
+            "type" : [ "string", "null" ]
+          },
+          "rho" : {
+            "type" : [ "string", "null" ]
+          },
+          "ivReason" : {
+            "type" : [ "string", "null" ]
+          },
+          "priceSource" : {
+            "type" : [ "string", "null" ]
+          },
+          "forwardPrice" : {
+            "type" : [ "string", "null" ]
+          },
+          "riskFreeRate" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "ask", "bid", "delta", "expiry", "forwardPrice", "gamma", "iv", "ivReason", "ltp", "oi", "oiChange", "optionType", "priceSource", "rho", "riskFreeRate", "spotPrice", "strike", "theta", "tradingsymbol", "ts", "underlying", "vega", "volume" ]
       },
       "ChainTable" : {
         "type" : "object",
@@ -9800,21 +10945,24 @@
             "format" : "date"
           },
           "spot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "forward" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "forwardSource" : {
             "type" : "string"
           },
           "riskFreeRate" : {
-            "type" : "number"
+            "type" : [ "string", "null" ]
           },
           "pcr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "stale" : {
+            "type" : "boolean"
+          },
+          "lastCaptured" : {
             "type" : "boolean"
           },
           "asOf" : {
@@ -9834,7 +10982,7 @@
             "$ref" : "#/components/schemas/DataFreshness"
           }
         },
-        "required" : [ "asOf", "expiry", "forward", "forwardSource", "interval", "pcr", "riskFreeRate", "rows", "spot", "stale", "underlying" ]
+        "required" : [ "asOf", "expiry", "forward", "forwardSource", "interval", "lastCaptured", "pcr", "riskFreeRate", "rows", "spot", "stale", "underlying" ]
       },
       "ChainTableLeg" : {
         "type" : "object",
@@ -9856,7 +11004,7 @@
         "type" : "object",
         "properties" : {
           "strike" : {
-            "type" : "number"
+            "type" : "string"
           },
           "ce" : {
             "$ref" : "#/components/schemas/ChainTableLeg"
@@ -9875,13 +11023,13 @@
             "format" : "int64"
           },
           "oiChangePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "ltpChange" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "ltpChangePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "interpretation" : {
             "type" : "string",
@@ -9897,7 +11045,7 @@
             "type" : "string"
           },
           "strike" : {
-            "type" : "number"
+            "type" : "string"
           },
           "optionType" : {
             "type" : "string"
@@ -9914,10 +11062,10 @@
             "type" : "string"
           },
           "underlyingLtp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "underlyingDayOpen" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "asOf" : {
             "type" : "string",
@@ -9940,22 +11088,22 @@
             "format" : "date-time"
           },
           "open" : {
-            "type" : "number"
+            "type" : "string"
           },
           "high" : {
-            "type" : "number"
+            "type" : "string"
           },
           "low" : {
-            "type" : "number"
+            "type" : "string"
           },
           "close" : {
-            "type" : "number"
+            "type" : "string"
           },
           "nearClose" : {
-            "type" : "number"
+            "type" : "string"
           },
           "farClose" : {
-            "type" : "number"
+            "type" : "string"
           },
           "volume" : {
             "type" : "integer",
@@ -9984,7 +11132,7 @@
         "type" : "object",
         "properties" : {
           "strike" : {
-            "type" : "number"
+            "type" : "string"
           },
           "optionType" : {
             "type" : "string"
@@ -9998,7 +11146,7 @@
             "format" : "int64"
           },
           "ltp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "ltp", "oi", "oiChange", "optionType", "strike" ]
@@ -10026,19 +11174,19 @@
             "type" : "string"
           },
           "spot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "strike" : {
-            "type" : "number"
+            "type" : "string"
           },
           "optionType" : {
             "type" : "string"
           },
           "ltp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "ltpChange" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "oi" : {
             "type" : [ "integer", "null" ],
@@ -10063,13 +11211,13 @@
             "format" : "date-time"
           },
           "ceIv" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "peIv" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "price" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "bucket", "ceIv", "peIv", "price" ]
@@ -10096,10 +11244,10 @@
         "type" : "object",
         "properties" : {
           "sentimentPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sentimentLevelPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "items" : {
             "type" : "array",
@@ -10149,10 +11297,10 @@
             "format" : "date-time"
           },
           "sentimentPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "levelPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "bucket", "levelPct", "sentimentPct" ]
@@ -10161,7 +11309,7 @@
         "type" : "object",
         "properties" : {
           "strike" : {
-            "type" : "number"
+            "type" : "string"
           },
           "ceOi" : {
             "type" : "integer",
@@ -10173,6 +11321,67 @@
           }
         },
         "required" : [ "ceOi", "peOi", "strike" ]
+      },
+      "MarketStatus" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "preOpen" : {
+            "type" : "boolean"
+          },
+          "asOf" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "exchange", "preOpen", "status" ]
+      },
+      "MarketStatusesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/MarketStatus"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "HolidayEntry" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string"
+          },
+          "day" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "date", "day", "description" ]
+      },
+      "HolidaysResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/HolidayEntry"
+            }
+          },
+          "asOf" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "asOf", "items" ]
       },
       "CrossSourceReport" : {
         "type" : "object",
@@ -10214,10 +11423,10 @@
             "format" : "int32"
           },
           "meanDivergencePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "maxDivergencePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "bucketsCompared", "detail", "expiry", "maxDivergencePct", "meanDivergencePct", "status", "underlying" ]
@@ -10405,7 +11614,7 @@
             "format" : "int64"
           },
           "coveragePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "ok" : {
             "type" : "boolean"
@@ -10439,7 +11648,7 @@
             "format" : "int32"
           },
           "thresholdPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "offenders" : {
             "type" : "array",
@@ -10457,13 +11666,13 @@
             "type" : "string"
           },
           "bhavClose" : {
-            "type" : "number"
+            "type" : "string"
           },
           "kiteClose" : {
-            "type" : "number"
+            "type" : "string"
           },
           "relDiffPct" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "bhavClose", "kiteClose", "relDiffPct", "symbol" ]
@@ -10472,13 +11681,13 @@
         "type" : "object",
         "properties" : {
           "ltp" : {
-            "type" : "number"
+            "type" : "string"
           },
           "prevClose" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "change" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "direction" : {
             "type" : [ "integer", "null" ],
@@ -10502,7 +11711,7 @@
             "format" : "int64"
           },
           "ltp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "oi" : {
             "type" : [ "integer", "null" ],
@@ -10513,10 +11722,10 @@
             "format" : "int64"
           },
           "basisAbsolute" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "basisAnnualized" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "basisAbsolute", "basisAnnualized", "daysToExpiry", "expiry", "ltp", "oi", "tradingsymbol", "volume" ]
@@ -10528,13 +11737,13 @@
             "type" : "string"
           },
           "spot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "state" : {
             "type" : "string"
           },
           "calendarSpread" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "stale" : {
             "type" : "boolean"
@@ -10562,13 +11771,13 @@
             "type" : "string"
           },
           "ltp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "prevClose" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pricePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "oi" : {
             "type" : "integer",
@@ -10579,7 +11788,7 @@
             "format" : "int64"
           },
           "spurtPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "interpretation" : {
             "type" : "string",
@@ -10607,6 +11816,285 @@
         },
         "required" : [ "asOf", "items" ]
       },
+      "FuturesPreOpen" : {
+        "type" : "object",
+        "properties" : {
+          "phase" : {
+            "type" : "string"
+          },
+          "preOpen" : {
+            "type" : "boolean"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "advances" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "declines" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "unchanged" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "stocks" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PreOpenRow"
+            }
+          },
+          "indices" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PreOpenRow"
+            }
+          }
+        },
+        "required" : [ "advances", "asOf", "declines", "indices", "phase", "preOpen", "stocks", "unchanged" ]
+      },
+      "PreOpenRow" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "preOpenPrice" : {
+            "type" : [ "string", "null" ]
+          },
+          "prevClose" : {
+            "type" : [ "string", "null" ]
+          },
+          "change" : {
+            "type" : [ "string", "null" ]
+          },
+          "changePct" : {
+            "type" : [ "string", "null" ]
+          },
+          "prevDayBreak" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "change", "changePct", "preOpenPrice", "prevClose", "prevDayBreak", "symbol" ]
+      },
+      "FutOiCandle" : {
+        "type" : "object",
+        "properties" : {
+          "time" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "open" : {
+            "type" : "string"
+          },
+          "high" : {
+            "type" : "string"
+          },
+          "low" : {
+            "type" : "string"
+          },
+          "close" : {
+            "type" : "string"
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oi" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          }
+        },
+        "required" : [ "close", "high", "low", "oi", "open", "time", "volume" ]
+      },
+      "FutOiChart" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FutOiCandle"
+            }
+          }
+        },
+        "required" : [ "asOf", "expiry", "interval", "items", "tradingsymbol", "underlying" ]
+      },
+      "OiBuzzIndicesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "OiBuzzHeatmap" : {
+        "type" : "object",
+        "properties" : {
+          "index" : {
+            "type" : "string"
+          },
+          "advance" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "decline" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tiles" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Tile"
+            }
+          },
+          "asOf" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "advance", "asOf", "decline", "index", "tiles" ]
+      },
+      "Tile" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "changePct" : {
+            "type" : [ "string", "null" ]
+          },
+          "ltp" : {
+            "type" : "string"
+          },
+          "open" : {
+            "type" : [ "string", "null" ]
+          },
+          "high" : {
+            "type" : [ "string", "null" ]
+          },
+          "low" : {
+            "type" : [ "string", "null" ]
+          },
+          "oi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oiChange" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "interpretation" : {
+            "type" : "string",
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+          }
+        },
+        "required" : [ "changePct", "high", "interpretation", "low", "ltp", "oi", "oiChange", "open", "symbol" ]
+      },
+      "FutAnalysisResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FutPoint"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "FutPoint" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "ltp" : {
+            "type" : [ "string", "null" ]
+          },
+          "oi" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "oiChange" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "dayOpen" : {
+            "type" : [ "string", "null" ]
+          },
+          "dayHigh" : {
+            "type" : [ "string", "null" ]
+          },
+          "dayLow" : {
+            "type" : [ "string", "null" ]
+          },
+          "prevClose" : {
+            "type" : [ "string", "null" ]
+          },
+          "volume" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        },
+        "required" : [ "bucket", "dayHigh", "dayLow", "dayOpen", "expiry", "ltp", "oi", "oiChange", "prevClose", "tradingsymbol", "underlying", "volume" ]
+      },
+      "FutAnalysisSeriesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FutPoint"
+            }
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "interval", "items", "underlying" ]
+      },
       "MoverRow" : {
         "type" : "object",
         "properties" : {
@@ -10614,22 +12102,22 @@
             "type" : "string"
           },
           "ltp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pricePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "oiPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "dayOpen" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "dayHigh" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "dayLow" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "interpretation" : {
             "type" : "string",
@@ -10662,6 +12150,122 @@
           }
         },
         "required" : [ "asOf", "gainers", "losers" ]
+      },
+      "Screen" : {
+        "type" : "object",
+        "properties" : {
+          "longCandidates" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ScreenerRow"
+            }
+          },
+          "shortCandidates" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ScreenerRow"
+            }
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "longCandidates", "shortCandidates" ]
+      },
+      "ScreenerRow" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "ltp" : {
+            "type" : "string"
+          },
+          "pricePct" : {
+            "type" : [ "string", "null" ]
+          },
+          "oiPct" : {
+            "type" : [ "string", "null" ]
+          },
+          "interpretation" : {
+            "type" : "string",
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+          },
+          "breakoutDays" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "openHigh" : {
+            "type" : "boolean"
+          },
+          "openLow" : {
+            "type" : "boolean"
+          },
+          "dailyRsi" : {
+            "type" : [ "string", "null" ]
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "longCandidate" : {
+            "type" : "boolean"
+          },
+          "shortCandidate" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "breakoutDays", "dailyRsi", "interpretation", "longCandidate", "ltp", "oiPct", "openHigh", "openLow", "pricePct", "shortCandidate", "symbol", "volume" ]
+      },
+      "EodResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/EodRow"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "EodRow" : {
+        "type" : "object",
+        "properties" : {
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "open" : {
+            "type" : [ "string", "null" ]
+          },
+          "high" : {
+            "type" : [ "string", "null" ]
+          },
+          "low" : {
+            "type" : [ "string", "null" ]
+          },
+          "close" : {
+            "type" : [ "string", "null" ]
+          },
+          "oiClose" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oiChange" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "close", "high", "low", "oiChange", "oiClose", "open", "tradeDate", "tradingsymbol", "volume" ]
       },
       "BuzzMatrix" : {
         "type" : "object",
@@ -10707,7 +12311,7 @@
             "format" : "date"
           },
           "ltp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "oi" : {
             "type" : "integer",
@@ -10718,11 +12322,11 @@
             "format" : "int64"
           },
           "basis" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "interpretation" : {
             "type" : [ "string", "null" ],
-            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING", null ]
           }
         },
         "required" : [ "basis", "expiry", "interpretation", "ltp", "oi", "oiChange", "tradingsymbol" ]
@@ -10776,10 +12380,10 @@
             "format" : "date"
           },
           "ltp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pricePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "oi" : {
             "type" : "integer",
@@ -10790,14 +12394,74 @@
             "format" : "int64"
           },
           "oiPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "interpretation" : {
             "type" : [ "string", "null" ],
-            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING", null ]
           }
         },
         "required" : [ "expiry", "interpretation", "ltp", "oi", "oiChange", "oiPct", "pricePct", "tradingsymbol", "underlying" ]
+      },
+      "BankAnalysisCell" : {
+        "type" : [ "object", "null" ],
+        "properties" : {
+          "bank" : {
+            "type" : "string"
+          },
+          "ltpPct" : {
+            "type" : [ "string", "null" ]
+          },
+          "oiPct" : {
+            "type" : [ "string", "null" ]
+          },
+          "interpretation" : {
+            "type" : [ "string", "null" ],
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING", null ]
+          }
+        },
+        "required" : [ "bank", "interpretation", "ltpPct", "oiPct" ]
+      },
+      "BankAnalysisResponse" : {
+        "type" : "object",
+        "properties" : {
+          "banks" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "rows" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/BankAnalysisRow"
+            }
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "banks", "interval", "rows" ]
+      },
+      "BankAnalysisRow" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "cells" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/BankAnalysisCell"
+            }
+          }
+        },
+        "required" : [ "bucket", "cells" ]
       },
       "EquityFundamentals" : {
         "type" : "object",
@@ -10809,31 +12473,31 @@
             "type" : [ "string", "null" ]
           },
           "marketCapCr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "freeFloatMcapCr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "freeFloatPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "promoterPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pe" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "roe" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "netProfitCr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "revenueCr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "revenuePrevCr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "asOf" : {
             "type" : [ "string", "null" ],
@@ -10841,6 +12505,188 @@
           }
         },
         "required" : [ "asOf", "freeFloatMcapCr", "freeFloatPct", "isin", "marketCapCr", "netProfitCr", "pe", "promoterPct", "revenueCr", "revenuePrevCr", "roe", "symbol" ]
+      },
+      "ParticipantOi" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ParticipantOiRow"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "ParticipantOiRow" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "clientType" : {
+            "type" : "string"
+          },
+          "futureIndexLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "futureIndexShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "futureStockLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "futureStockShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionIndexCallLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionIndexPutLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionIndexCallShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionIndexPutShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionStockCallLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionStockPutLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionStockCallShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionStockPutShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalLongContracts" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalShortContracts" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "clientType", "futureIndexLong", "futureIndexShort", "futureStockLong", "futureStockShort", "optionIndexCallLong", "optionIndexCallShort", "optionIndexPutLong", "optionIndexPutShort", "optionStockCallLong", "optionStockCallShort", "optionStockPutLong", "optionStockPutShort", "totalLongContracts", "totalShortContracts", "tradeDate" ]
+      },
+      "LongShort" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/LongShortRow"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "LongShortRow" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "fiiLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "fiiShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "ratio" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "fiiLong", "fiiShort", "ratio", "tradeDate" ]
+      },
+      "DerivativeStats" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FiiDerivativeRow"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "FiiDerivativeRow" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "segment" : {
+            "type" : "string"
+          },
+          "buyValue" : {
+            "type" : [ "string", "null" ]
+          },
+          "sellValue" : {
+            "type" : [ "string", "null" ]
+          },
+          "netValue" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "buyValue", "netValue", "segment", "sellValue", "tradeDate" ]
+      },
+      "Cash" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FiiDiiRow"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "FiiDiiRow" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "category" : {
+            "type" : "string"
+          },
+          "buyValue" : {
+            "type" : [ "string", "null" ]
+          },
+          "sellValue" : {
+            "type" : [ "string", "null" ]
+          },
+          "netValue" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "buyValue", "category", "netValue", "sellValue", "tradeDate" ]
       },
       "Bias" : {
         "type" : "object",
@@ -10856,7 +12702,7 @@
             "type" : "string"
           },
           "fiiLongPct" : {
-            "type" : "number"
+            "type" : [ "string", "null" ]
           },
           "callNet" : {
             "type" : "integer",
@@ -10886,7 +12732,7 @@
             "type" : "string"
           },
           "avgChangePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "positive" : {
             "type" : "integer",
@@ -10974,13 +12820,13 @@
             "type" : "string"
           },
           "changePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "close" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "prevClose" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "changePct", "close", "prevClose", "sector", "symbol" ]
@@ -11036,22 +12882,22 @@
             "type" : "string"
           },
           "ltp" : {
-            "type" : "number"
+            "type" : "string"
           },
           "r1d" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "r1w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "r1m" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "r6m" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "r1y" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "industry", "ltp", "r1d", "r1m", "r1w", "r1y", "r6m", "symbol" ]
@@ -11086,16 +12932,16 @@
             "type" : "string"
           },
           "preOpenPrice" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "prevClose" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "change" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "changePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "prevDayBreak" : {
             "type" : [ "string", "null" ]
@@ -11135,19 +12981,19 @@
             "type" : "string"
           },
           "dayOpen" : {
-            "type" : "number"
+            "type" : "string"
           },
           "dayHigh" : {
-            "type" : "number"
+            "type" : "string"
           },
           "dayLow" : {
-            "type" : "number"
+            "type" : "string"
           },
           "ltp" : {
-            "type" : "number"
+            "type" : "string"
           },
           "farPct" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "dayHigh", "dayLow", "dayOpen", "farPct", "ltp", "symbol" ]
@@ -11203,16 +13049,16 @@
             "type" : "string"
           },
           "contribution" : {
-            "type" : "number"
+            "type" : "string"
           },
           "changePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "close" : {
-            "type" : "number"
+            "type" : "string"
           },
           "points" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "changePct", "close", "contribution", "points", "rank", "symbol" ]
@@ -11224,22 +13070,22 @@
             "type" : "string"
           },
           "indexChangePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "advanceTotal" : {
-            "type" : "number"
+            "type" : "string"
           },
           "declineTotal" : {
-            "type" : "number"
+            "type" : "string"
           },
           "indexLevel" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "advancePoints" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "declinePoints" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "advances" : {
             "type" : "array",
@@ -11290,28 +13136,28 @@
             "format" : "date"
           },
           "open" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "high" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "low" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "close" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "ltpChangePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "deliveryPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "dayRange" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "dayRangePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "deliveryQty" : {
             "type" : [ "integer", "null" ],
@@ -11323,6 +13169,54 @@
           }
         },
         "required" : [ "close", "date", "dayRange", "dayRangePct", "deliveryPct", "deliveryQty", "high", "low", "ltpChangePct", "open", "totalTradedQty" ]
+      },
+      "Announcement" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string"
+          },
+          "time" : {
+            "type" : "string"
+          },
+          "symbol" : {
+            "type" : "string"
+          },
+          "company" : {
+            "type" : [ "string", "null" ]
+          },
+          "subject" : {
+            "type" : [ "string", "null" ]
+          },
+          "detail" : {
+            "type" : [ "string", "null" ]
+          },
+          "fileLink" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "company", "date", "detail", "fileLink", "subject", "symbol", "time" ]
+      },
+      "AnnouncementsResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Announcement"
+            }
+          },
+          "from" : {
+            "type" : "string"
+          },
+          "to" : {
+            "type" : "string"
+          },
+          "symbol" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "from", "items", "symbol", "to" ]
       },
       "BhavcopyBackfillStatus" : {
         "type" : "object",
@@ -11395,10 +13289,10 @@
         "type" : "object",
         "properties" : {
           "iv" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "rank" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "percentile" : {
             "type" : [ "integer", "null" ],
@@ -11418,13 +13312,13 @@
         "type" : "object",
         "properties" : {
           "now" : {
-            "type" : "number"
+            "type" : [ "string", "null" ]
           },
           "atOpen" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "drift" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "atOpen", "drift", "now" ]
@@ -11437,7 +13331,7 @@
             "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
           },
           "spotDelta" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "oiChange" : {
             "type" : "integer",
@@ -11473,13 +13367,13 @@
           "oiGainers" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/StrikeMove"
+              "$ref" : "#/components/schemas/OptionsDigestStrikeMove"
             }
           },
           "oiLosers" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/StrikeMove"
+              "$ref" : "#/components/schemas/OptionsDigestStrikeMove"
             }
           },
           "activeStrikes" : {
@@ -11526,23 +13420,40 @@
         },
         "required" : [ "activeStrikes", "asOf", "atmIv", "atmStraddle", "dataTrust", "expiry", "maxPain", "oiGainers", "oiLosers", "oiStructure", "pcr", "trustReasons", "underlying" ]
       },
+      "OptionsDigestStrikeMove" : {
+        "type" : "object",
+        "properties" : {
+          "strike" : {
+            "type" : "string"
+          },
+          "oiChange" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "interpretation" : {
+            "type" : "string",
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+          }
+        },
+        "required" : [ "interpretation", "oiChange", "strike" ]
+      },
       "Pcr" : {
         "type" : "object",
         "properties" : {
           "now" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "atOpen" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "priorEod" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "deltaVsOpen" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "deltaVsPriorEod" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "atOpen", "deltaVsOpen", "deltaVsPriorEod", "now", "priorEod" ]
@@ -11551,16 +13462,16 @@
         "type" : "object",
         "properties" : {
           "atmStrike" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "now" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "atOpen" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "deltaPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "atOpen", "atmStrike", "deltaPct", "now" ]
@@ -11641,16 +13552,16 @@
             "type" : "string"
           },
           "spot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "state" : {
             "type" : "string"
           },
           "calendarSpread" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "nearBasis" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "stale" : {
             "type" : "boolean"
@@ -11676,10 +13587,10 @@
             "format" : "date"
           },
           "ltp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pricePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "oi" : {
             "type" : "integer",
@@ -11690,7 +13601,7 @@
             "format" : "int64"
           },
           "oiPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "interpretation" : {
             "type" : [ "string", "null" ]
@@ -11702,10 +13613,10 @@
         "type" : "object",
         "properties" : {
           "fiiNet" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "diiNet" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "divergent" : {
             "type" : "boolean"
@@ -11721,7 +13632,7 @@
             "format" : "date"
           },
           "net" : {
-            "type" : "number"
+            "type" : "string"
           },
           "streakDays" : {
             "type" : "integer",
@@ -11747,7 +13658,7 @@
             "format" : "date"
           },
           "indexFuturesNet" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "reason" : {
             "type" : [ "string", "null" ]
@@ -11825,10 +13736,10 @@
             "format" : "int64"
           },
           "ratio" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "ratioDelta" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "percentile" : {
             "type" : [ "integer", "null" ],
@@ -11882,16 +13793,16 @@
             "format" : "int64"
           },
           "aPcr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "bPcr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "aSpot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "bSpot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "aPcr", "aSpot", "aTotalOi", "bPcr", "bSpot", "bTotalOi", "bucket" ]
@@ -11950,16 +13861,16 @@
             "format" : "int64"
           },
           "pcr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "spot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "ceLtp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "peLtp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "bucket", "ceLtp", "ceOi", "pcr", "peLtp", "peOi", "spot", "totalOi" ]
@@ -12005,7 +13916,7 @@
             "format" : "int32"
           },
           "pctAbove20" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "universe50" : {
             "type" : "integer",
@@ -12016,7 +13927,7 @@
             "format" : "int32"
           },
           "pctAbove50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "above20", "above50", "pctAbove20", "pctAbove50", "universe20", "universe50" ]
@@ -12045,13 +13956,13 @@
             "format" : "int32"
           },
           "adRatio" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "adRatioPrior" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "adRatioDelta" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "adRatio", "adRatioDelta", "adRatioPrior", "advances", "declines", "total", "tradeDate", "unchanged" ]
@@ -12064,10 +13975,10 @@
             "format" : "int32"
           },
           "advRatioMa" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "threshold" : {
-            "type" : "number"
+            "type" : "string"
           },
           "thrust" : {
             "type" : "boolean"
@@ -12082,13 +13993,13 @@
             "type" : "string"
           },
           "deliveryPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "mean20" : {
-            "type" : "number"
+            "type" : "string"
           },
           "z" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "deliveryPct", "mean20", "symbol", "z" ]
@@ -12184,14 +14095,14 @@
             "type" : "string"
           },
           "indexChangePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "topN" : {
             "type" : "integer",
             "format" : "int32"
           },
           "topShare" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "index", "indexChangePct", "topN", "topShare" ]
@@ -12206,7 +14117,7 @@
             "type" : "string"
           },
           "returnPct" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "returnPct", "sector", "symbol" ]
@@ -12218,7 +14129,7 @@
             "type" : "string"
           },
           "avgChangePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "stocks" : {
             "type" : "integer",
@@ -12302,10 +14213,10 @@
             "type" : [ "string", "null" ]
           },
           "ltp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "changePct" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "changePct", "ltp", "name" ]
@@ -12337,16 +14248,16 @@
             "type" : "string"
           },
           "gapOpenPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "dayRange" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgRange20" : {
-            "type" : "number"
+            "type" : "string"
           },
           "rangeVsAvg" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "direction" : {
             "type" : "string"
@@ -12402,13 +14313,13 @@
         "type" : "object",
         "properties" : {
           "level" : {
-            "type" : "number"
+            "type" : "string"
           },
           "change" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "changePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "band" : {
             "type" : "string"
@@ -12519,16 +14430,16 @@
             "format" : "date-time"
           },
           "open" : {
-            "type" : "number"
+            "type" : "string"
           },
           "high" : {
-            "type" : "number"
+            "type" : "string"
           },
           "low" : {
-            "type" : "number"
+            "type" : "string"
           },
           "close" : {
-            "type" : "number"
+            "type" : "string"
           },
           "volume" : {
             "type" : "integer",
@@ -12621,7 +14532,7 @@
             "format" : "int32"
           },
           "avgDeliveryPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "advances", "avgDeliveryPct", "declines", "total", "tradeDate", "unchanged" ]
@@ -12633,13 +14544,13 @@
             "type" : "string"
           },
           "deliveryPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "close" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pctChange" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "close", "deliveryPct", "pctChange", "symbol" ]
@@ -12709,7 +14620,7 @@
             "format" : "int32"
           },
           "avgDeliveryPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "aboveSma50" : {
             "type" : [ "integer", "null" ],
@@ -12785,6 +14696,22 @@
           }
         },
         "required" : [ "max", "remaining", "used", "window" ]
+      },
+      "Entitlement" : {
+        "type" : "object",
+        "properties" : {
+          "covered" : {
+            "type" : "boolean"
+          },
+          "httpStatus" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "detail" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "covered", "detail", "httpStatus" ]
       },
       "OiBackfillStatus" : {
         "type" : "object",
@@ -12867,7 +14794,7 @@
             "type" : "string"
           },
           "strike" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "instrumentType" : {
             "type" : "string"
@@ -13118,10 +15045,10 @@
             "format" : "date"
           },
           "strike" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "tickSize" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "lotSize" : {
             "type" : [ "integer", "null" ],

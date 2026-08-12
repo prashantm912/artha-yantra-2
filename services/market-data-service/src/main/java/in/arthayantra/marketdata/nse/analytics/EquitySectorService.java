@@ -56,9 +56,9 @@ public class EquitySectorService {
   public record StockChange(
       String symbol,
       String sector,
-      @Schema(types = {"number", "null"}) BigDecimal changePct,
-      @Schema(types = {"number", "null"}) BigDecimal close,
-      @Schema(types = {"number", "null"}) BigDecimal prevClose) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal changePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal close,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal prevClose) {}
 
   /** An index's constituent tiles grouped (client-side) by sector. */
   public record SectorHeatmap(
@@ -79,7 +79,7 @@ public class EquitySectorService {
   /** Per-sector roll-up of the constituents (avg change + advancer/decliner split). */
   public record SectorAgg(
       String sector,
-      @Schema(types = {"number", "null"}) BigDecimal avgChangePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal avgChangePct,
       int positive,
       int negative,
       int total) {}

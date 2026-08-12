@@ -51,11 +51,11 @@ public class PaperMarginController {
   public record MarginHeat(
       boolean priced,
       @Schema(types = {"string", "null"}) String unpricedReason,
-      @Schema(types = {"number", "null"}) BigDecimal spanMargin,
-      @Schema(types = {"number", "null"}) BigDecimal exposureMargin,
-      @Schema(types = {"number", "null"}) BigDecimal totalMargin,
-      @Schema(types = {"number", "null"}) BigDecimal requiredMargin,
-      @Schema(types = {"number", "null"}) BigDecimal finalMargin,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spanMargin,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal exposureMargin,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal totalMargin,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal requiredMargin,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal finalMargin,
       int openPositions,
       int pricedLegs,
       OffsetDateTime asOf) {

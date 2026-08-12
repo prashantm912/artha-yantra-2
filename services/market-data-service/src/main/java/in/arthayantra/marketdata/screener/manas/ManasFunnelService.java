@@ -47,19 +47,19 @@ public class ManasFunnelService {
   @Schema(name = "ManasFunnelRow")
   public record FunnelRow(
       String symbol,
-      BigDecimal close,
-      @Schema(types = {"number", "null"}) BigDecimal aboveLowPct,
+      @Schema(type = "string") BigDecimal close,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal aboveLowPct,
       @Schema(types = {"string", "null"}) String setupType,
-      @Schema(types = {"number", "null"}) BigDecimal pivot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pivot,
       @Schema(types = {"string", "null"}) String footprint,
       // (close - pivot) / pivot, null when no pivot
-      @Schema(types = {"number", "null"}) BigDecimal pctToPivot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pctToPivot,
       // §3.2 consolidation-breakout pivot, null when that setup is invalid
-      @Schema(types = {"number", "null"}) BigDecimal breakoutPivot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal breakoutPivot,
       // §3.3 VCP-contraction pivot, null when that setup is invalid
-      @Schema(types = {"number", "null"}) BigDecimal vcpPivot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal vcpPivot,
       // §4.1/§4.10 cross-sectional RS-rank (the admission sort key), null pre-rank
-      @Schema(types = {"number", "null"}) BigDecimal rsRank) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal rsRank) {}
 
   /**
    * The three-list for a screen date + the market regime (§4.9) the owner should buy WITH.

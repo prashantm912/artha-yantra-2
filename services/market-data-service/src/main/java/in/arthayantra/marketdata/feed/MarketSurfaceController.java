@@ -54,15 +54,19 @@ public class MarketSurfaceController {
 
   /** The Dow global-cue quote: LTP + prev close + signed direction (+1 up / −1 down / 0 flat). */
   public record DowQuote(
-      BigDecimal ltp,
-      @Schema(types = {"number", "null"}) BigDecimal prevClose,
-      @Schema(types = {"number", "null"}) BigDecimal change,
+      @Schema(type = "string") BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal prevClose,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal change,
       @Schema(types = {"integer", "null"}) Integer direction) {}
 
   /**
    * GET /global/dow: the Dow Jones global cue (LTP-direction vs prev close). 422 DATA_GAP when the
-   * global-quote feed is unconfigured (absent unless {@code artha.openalgo.global-quotes-enabled}) or
-   * the quote is unavailable (off-hours / mock) — the scalper Dow read then degrades to neutral.
+   * global-quote feed is unconfigured (absent unless one of {@code artha.openalgo.global-quotes-enabled}
+   * / {@code artha.upstox.global-quotes-enabled} is on) or no USABLE quote exists (off-hours / mock,
+   * but also a quote missing a positive LTP or a prev close — see {@link GlobalQuoteSource#latest},
+   * which refuses those rather than handing on a value that cannot produce a direction). The scalper
+   * Dow read then degrades to neutral. Every such refusal is counted as
+   * {@code ay_global_quote_degraded_total}, so a permanently-422 Dow is diagnosable from metrics alone.
    */
   @GetMapping("/global/dow")
   public DowQuote dow() {
@@ -80,13 +84,13 @@ public class MarketSurfaceController {
 
   /** INDIA VIX quote: LTP + day OHLC + change vs the previous close (the §20.7.4 header VIX). */
   public record VixQuote(
-      BigDecimal ltp,
-      @Schema(types = {"number", "null"}) BigDecimal dayHigh,
-      @Schema(types = {"number", "null"}) BigDecimal dayLow,
-      @Schema(types = {"number", "null"}) BigDecimal dayOpen,
-      @Schema(types = {"number", "null"}) BigDecimal prevClose,
-      @Schema(types = {"number", "null"}) BigDecimal change,
-      @Schema(types = {"number", "null"}) BigDecimal changePct,
+      @Schema(type = "string") BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal dayHigh,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal dayLow,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal dayOpen,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal prevClose,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal change,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal changePct,
       OffsetDateTime asOf) {}
 
   /** GET /vix: the INDIA VIX quote (the pinned index); 422 DATA_GAP when no quote (off-hours / mock). */
@@ -137,7 +141,7 @@ public class MarketSurfaceController {
 
   /** Calendar status: session open/closed, trading day, next trading day. */
   @GetMapping("/status")
-  public Map<String, Object> status() {
+  public MarketSurfaceStatus status() {
     OffsetDateTime now = OffsetDateTime.now(clock).withOffsetSameInstant(Ist.OFFSET);
     LocalDate today = now.toLocalDate();
     boolean tradingDay;
@@ -160,16 +164,31 @@ public class MarketSurfaceController {
       previousTradingDay = null;
       lastTradingDay = null;
     }
-    return Map.of(
-        "serverTime", now.toString(),
-        "tradingDay", tradingDay,
-        "marketOpen", open,
-        "sessionOpen", MarketCalendar.SESSION_OPEN.toString(),
-        "sessionClose", MarketCalendar.SESSION_CLOSE.toString(),
-        "nextTradingDay", nextTradingDay == null ? "" : nextTradingDay.toString(),
-        "previousTradingDay", previousTradingDay == null ? "" : previousTradingDay.toString(),
-        "lastTradingDay", lastTradingDay == null ? "" : lastTradingDay.toString());
+    return new MarketSurfaceStatus(
+        now.toString(),
+        tradingDay,
+        open,
+        MarketCalendar.SESSION_OPEN.toString(),
+        MarketCalendar.SESSION_CLOSE.toString(),
+        nextTradingDay == null ? "" : nextTradingDay.toString(),
+        previousTradingDay == null ? "" : previousTradingDay.toString(),
+        lastTradingDay == null ? "" : lastTradingDay.toString());
   }
+
+  /**
+   * Calendar surface for the SPA. Every date is the {@code LocalDate.toString()} STRING, and the
+   * uncovered-year fallback emits {@code ""} — never null — so all three stay non-nullable. The
+   * pre-D3 {@code Map.of} would have thrown on a null, which is exactly why those ternaries exist.
+   */
+  public record MarketSurfaceStatus(
+      String serverTime,
+      boolean tradingDay,
+      boolean marketOpen,
+      String sessionOpen,
+      String sessionClose,
+      String nextTradingDay,
+      String previousTradingDay,
+      String lastTradingDay) {}
 
   /**
    * NSE trading holidays the bundled calendar covers, date-ascending. Each row carries the ISO date, the
@@ -177,16 +196,27 @@ public class MarketSurfaceController {
    * today. Map-envelope (springdoc does not enumerate it); the calendar covers only the resource's years.
    */
   @GetMapping("/holidays")
-  public Map<String, Object> holidays() {
-    List<Map<String, Object>> items =
+  public HolidaysResponse holidays() {
+    List<HolidayEntry> items =
         calendar.holidayList().stream()
             .map(
                 h ->
-                    Map.<String, Object>of(
-                        "date", h.date().toString(),
-                        "day", h.date().getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.ENGLISH),
-                        "description", h.name()))
+                    new HolidayEntry(
+                        h.date().toString(),
+                        h.date().getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.ENGLISH),
+                        h.name()))
             .toList();
-    return Map.of("items", items, "asOf", OffsetDateTime.now(clock).withOffsetSameInstant(Ist.OFFSET).toString());
+    return new HolidaysResponse(
+        items, OffsetDateTime.now(clock).withOffsetSameInstant(Ist.OFFSET).toString());
   }
+
+  /**
+   * One holiday row. ⚠️ The ITEM was itself an anonymous {@code Map<String,Object>}, so it published
+   * as a bare object and NOTHING about a holiday was enumerated — the exact blindness this
+   * conversion removes. All three components are computed, non-null.
+   */
+  public record HolidayEntry(String date, String day, String description) {}
+
+  /** The {items, asOf} envelope. Multi-key {@code Map.of} before D3 — order NORMALISED. */
+  public record HolidaysResponse(List<HolidayEntry> items, String asOf) {}
 }

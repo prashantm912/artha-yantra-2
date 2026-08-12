@@ -179,7 +179,12 @@ class ScalperStrategyLoadTest {
       assertThat(def.primaryTimeframe()).as(id + " scalps on 3m").isEqualTo("3m");
 
       // §0B hardened bounding-exit rule (T21 #990 round-3): every scalper must carry an exit the
-      // ENGINE can fire — a time_stop or an index-side stop_loss (index_points/percent/atr_multiple).
+      // ENGINE can fire — a time_stop or an index-side stop_loss (index_points/atr_multiple).
+      // NOTE: `percent` was a fourth option until #1284. Every scalper is `options_of_underlying`
+      // (SignalEngine:813-814), and SemanticValidator REFUSES a `percent` level basis on that
+      // plane, so it can no longer reach a scalper at all — do not reintroduce it here. It has
+      // since been removed from `ScalperRisk.ENGINE_SIDE_STOP_BASES` too, and the two gates are
+      // held together by ScalperStopBasisCouplingTest.
       // A premium_pct stop is option-leg-only (paper bracket path) and does not count; a future
       // family declaring premium_pct-only exits with no time_stop must fail HERE, at load shape,
       // not ship with no live engine-side floor.
@@ -366,6 +371,34 @@ class ScalperStrategyLoadTest {
       // dow-confluence un-armed everywhere (Dow = manual checklist `global_cues_ok`, no live feed).
       assertThat(tags.contains("dow-confluence"))
           .as(id + " dow-confluence unarmed (Dow is manual)")
+          .isFalse();
+      // A3 iv-rank-dot un-armed everywhere. The dot's input is suppressed below the 60-trading-day
+      // IvAnalyticsService history floor and would start resolving on a CALENDAR trigger (~late Sep
+      // 2026) — the tag makes that an owner arming decision, so the shipped fleet must stay unarmed
+      // until one is made. Arming ALSO requires a republish (the engine reads the PUBLISHED config).
+      assertThat(tags.contains("iv-rank-dot"))
+          .as(id + " iv-rank-dot unarmed (arming the iv_rank dot is an owner decision)")
+          .isFalse();
+      // F5 U4b dot-null-withheld un-armed everywhere. Unifying the scorer's three missing-input rules
+      // to "input-missing => withheld" CHANGES which signals fire, and is mechanically a LOOSENING for
+      // all remaining ENABLED dots that currently score a gap against the side — the direction in which
+      // every measured entry-gate loosening here (T1, T7, G13, G10) has lost money. Deliberately not a
+      // fixed count: it is fifteen of the default eighteen, but SEVENTEEN on the connect-the-dots
+      // family asserted below, whose armed `iv-per-strike` adds two more opponent-on-missing dots
+      // (iv_slope + iv_abs_band) — and this test is about exactly those live configurations. It ships
+      // inert and earns its case through the `dot-null-withheld` shadow variant; arming needs a republish.
+      assertThat(tags.contains("dot-null-withheld"))
+          .as(id + " dot-null-withheld unarmed (the unified null rule is an owner decision)")
+          .isFalse();
+      // F5 U4b §5.3 dot-coverage-floor un-armed everywhere. Unlike the policy it guards, the floor is
+      // a pure TIGHTENING — it can only refuse bars — so the standing loosening prior does not apply
+      // to it. It is still an owner arming decision: below the floor the confluence becomes INVALID,
+      // which on an OI-suppressed session (a monthly expiry, a feed outage) silences the whole OI
+      // plane's contribution rather than scoring it low, and no forward session has yet run with it
+      // on. Note the gate arms this from EITHER tag (ScalperConfluenceGate.coverageFloorArmed), so
+      // the assertion above is what keeps this one from being armed by implication.
+      assertThat(tags.contains("dot-coverage-floor"))
+          .as(id + " dot-coverage-floor unarmed (the §5.3 coverage floor is an owner decision)")
           .isFalse();
 
       // E2 M4/M6 — the two HARD OI gates with NO soft-dot duplicate in the scorer (the flat-OI stand-aside

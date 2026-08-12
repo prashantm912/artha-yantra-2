@@ -113,9 +113,10 @@ public class StressGuard {
    *
    * @param strategyId the strategy lineage
    * @param latestCachedCandle the latest cached candle date-time (the suggested window end)
-   * @return ordered {@code {from, to}} map (string ISO dates; {@code from} null when never tested)
+   * @return the clean window (string ISO dates; {@code from} null when never tested). The
+   *     controller fills {@code evidencePolicy} — this method knows nothing about it.
    */
-  public Map<String, Object> suggestCleanWindow(
+  public StressWindow suggestCleanWindow(
       String strategyId, OffsetDateTime latestCachedCandle) {
     OffsetDateTime latestTo = null;
     boolean anyLineage = false;
@@ -130,15 +131,11 @@ public class StressGuard {
       throw new NotFoundException(
           ErrorCodes.NOT_FOUND_RESOURCE, "no jobs for strategy: " + strategyId);
     }
-    Map<String, Object> out = new LinkedHashMap<>();
-    if (latestTo == null) {
-      out.put("from", null); // lineage exists but no tested windows — the cache is clean
-    } else {
-      LocalDate nextDay = latestTo.toLocalDate(); // 'to' is exclusive — the next clean day IS this date
-      out.put("from", nextDay.toString());
-    }
-    out.put("to", latestCachedCandle == null ? null : latestCachedCandle.toLocalDate().toString());
-    return out;
+    // lineage exists but no tested windows ⇒ from stays null (the cache is clean); otherwise 'to' is
+    // exclusive, so the next clean day IS that date. evidencePolicy is the controller's to fill.
+    String from = latestTo == null ? null : latestTo.toLocalDate().toString();
+    String to = latestCachedCandle == null ? null : latestCachedCandle.toLocalDate().toString();
+    return new StressWindow(from, to, null);
   }
 
   private static String reuseKey(String strategyId, OffsetDateTime from, OffsetDateTime to) {

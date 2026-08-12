@@ -12,6 +12,7 @@ const chain: ChainTable = {
   riskFreeRate: null,
   pcr: null,
   stale: false,
+  lastCaptured: false,
   asOf: '2026-06-22T15:24:00+05:30',
   interval: '5m',
   rows: [
@@ -64,6 +65,7 @@ function renderPage() {
 }
 
 describe('StrategyBuilderPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3051ms in a full-suite run.
   it('adds a leg from the chain and shows the payoff summary', () => {
     renderPage();
     fireEvent.change(screen.getByLabelText('Strike'), { target: { value: '100' } });
@@ -74,5 +76,5 @@ describe('StrategyBuilderPage', () => {
     expect(screen.getAllByText('100 CE').length).toBeGreaterThan(0);
     expect(screen.getByText('Net Premium')).toBeInTheDocument();
     expect(screen.getByText(/Dr ₹375/)).toBeInTheDocument();
-  });
+  }, 15_000);
 });

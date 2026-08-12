@@ -33,9 +33,9 @@ public class GraduationController {
   /** The thresholds each strategy is scored against (echoed so the board is self-describing). */
   public record Thresholds(
       int minTrades,
-      BigDecimal minProfitFactor,
-      BigDecimal minExpectancy,
-      BigDecimal maxDrawdownPct) {}
+      @Schema(type = "string") BigDecimal minProfitFactor,
+      @Schema(type = "string") BigDecimal minExpectancy,
+      @Schema(type = "string") BigDecimal maxDrawdownPct) {}
 
   /** One scored criterion: its name, the required bound, the actual value, and pass/fail. */
   public record Criterion(String name, String required, String actual, boolean pass) {}
@@ -47,11 +47,11 @@ public class GraduationController {
       String name,
       String stage,
       int trades,
-      BigDecimal netRealized,
-      @Schema(types = {"number", "null"}) BigDecimal winRate,
-      @Schema(types = {"number", "null"}) BigDecimal profitFactor,
-      BigDecimal expectancy,
-      BigDecimal maxDrawdownPct,
+      @Schema(type = "string") BigDecimal netRealized,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal winRate,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal profitFactor,
+      @Schema(type = "string") BigDecimal expectancy,
+      @Schema(type = "string") BigDecimal maxDrawdownPct,
       List<Criterion> criteria) {}
 
   /** The whole board + the thresholds used + the compute time. */
@@ -93,9 +93,9 @@ public class GraduationController {
       UUID strategyId,
       OffsetDateTime graduatedAt,
       int trades,
-      @Schema(types = {"number", "null"}) BigDecimal expectancy,
-      @Schema(types = {"number", "null"}) BigDecimal sharpe,
-      @Schema(types = {"number", "null"}) BigDecimal maxDrawdownPct) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal expectancy,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal sharpe,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal maxDrawdownPct) {}
 
   /** The strategies the F7 evaluator has marked GRADUATED, newest first (measurement only). */
   @GetMapping("/graduation/promotions")

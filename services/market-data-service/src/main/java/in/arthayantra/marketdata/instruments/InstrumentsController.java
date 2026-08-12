@@ -2,6 +2,10 @@ package in.arthayantra.marketdata.instruments;
 
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -66,8 +70,28 @@ public class InstrumentsController {
     return lookups.expiries(underlying);
   }
 
-  /** Strikes for an underlying + expiry. */
+  /**
+   * Strikes for an underlying + expiry.
+   *
+   * <p>{@code ArthaJacksonAutoConfiguration} registers {@code ToStringSerializer} for {@code
+   * BigDecimal} platform-wide, so this array carries JSON STRINGS on the wire
+   * ({@code ["18000","18100"]}) while springdoc infers {@code number} from the element type — the
+   * generated TS client read {@code number[]} and would break on any arithmetic. A bare {@code
+   * List<BigDecimal>} handler return has no record component to hang {@code @Schema} on, so the
+   * element type is corrected here via {@code @ArraySchema}. Safe on THIS shape specifically: the
+   * two documented {@code @ArraySchema} failures elsewhere in this service involve a {@code $ref}
+   * element (which it collapses) and a doubly-nested generic (which it flattens) — this is a
+   * singly-nested PRIMITIVE element, and the captured spec is what verifies it.
+   *
+   * <p>⚠️ A bare {@code @ArraySchema} on this METHOD is a SILENT NO-OP — measured against the
+   * captured spec on 2026-08-02, {@code items} stayed {@code number} and the diff was empty. The
+   * element type only moves through an explicit {@code @ApiResponse} content declaration.
+   */
   @GetMapping("/{underlying}/strikes")
+  @ApiResponse(
+      responseCode = "200",
+      description = "OK",
+      content = @Content(array = @ArraySchema(schema = @Schema(type = "string"))))
   public List<BigDecimal> strikes(
       @PathVariable String underlying, @RequestParam LocalDate expiry) {
     return lookups.strikes(underlying, expiry);

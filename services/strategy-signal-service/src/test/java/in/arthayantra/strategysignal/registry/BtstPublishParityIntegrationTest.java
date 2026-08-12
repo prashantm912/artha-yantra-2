@@ -68,7 +68,7 @@ class BtstPublishParityIntegrationTest extends StrategySignalIntegrationTestBase
   void rejectsBtstTrailingStopAtPublish() {
     assertPublishRejected(
         "trailing-stop",
-        "- { type: trailing_stop, params: { basis: percent, value: 5 } }",
+        "- { type: trailing_stop, params: { basis: premium_pct, value: 5 } }",
         "trailing_stop");
   }
 
@@ -95,9 +95,9 @@ class BtstPublishParityIntegrationTest extends StrategySignalIntegrationTestBase
 
     UUID id = create("Safe " + suffix, yaml);
 
-    Map<String, Object> published = service.publish(id, null, null);
+    var published = service.publish(id, null, null);
 
-    assertThat(published).containsEntry("status", "published");
+    assertThat(published.status()).isEqualTo("published");
   }
 
   /**
@@ -121,7 +121,7 @@ class BtstPublishParityIntegrationTest extends StrategySignalIntegrationTestBase
 
     UUID id = create("Session square-off " + suffix, yaml);
 
-    assertThat(service.publish(id, null, null)).containsEntry("status", "published");
+    assertThat(service.publish(id, null, null).status()).isEqualTo("published");
   }
 
   /** {@code scaled_exit} is refused as a consequence of the ALLOWLIST, not an explicit denylist. */
@@ -150,13 +150,13 @@ class BtstPublishParityIntegrationTest extends StrategySignalIntegrationTestBase
             "intraday-" + suffix,
             "Intraday " + suffix,
             "intraday",
-            "- { type: trailing_stop, params: { basis: percent, value: 5 } }");
+            "- { type: trailing_stop, params: { basis: premium_pct, value: 5 } }");
 
     UUID id = create("Intraday " + suffix, yaml);
 
-    Map<String, Object> published = service.publish(id, null, null);
+    var published = service.publish(id, null, null);
 
-    assertThat(published).containsEntry("status", "published");
+    assertThat(published.status()).isEqualTo("published");
   }
 
   /**
@@ -174,7 +174,7 @@ class BtstPublishParityIntegrationTest extends StrategySignalIntegrationTestBase
                 "precustom-" + suffix,
                 "Pre-close custom " + suffix,
                 "btst",
-                "- { type: trailing_stop, params: { basis: percent, value: 5 } }")
+                "- { type: trailing_stop, params: { basis: premium_pct, value: 5 } }")
             .replace("session: { style: btst }", "session: { style: btst, pre_close_at: \"15:15\" }");
 
     UUID id = create("Pre-close custom " + suffix, yaml);
@@ -198,7 +198,7 @@ class BtstPublishParityIntegrationTest extends StrategySignalIntegrationTestBase
             slug,
             "Reload " + suffix,
             "btst",
-            "- { type: trailing_stop, params: { basis: percent, value: 5 } }"));
+            "- { type: trailing_stop, params: { basis: premium_pct, value: 5 } }"));
     StrategyRepository.VersionRow version =
         repository.findVersion(id, "1.0.0").orElseThrow();
 
@@ -237,7 +237,7 @@ class BtstPublishParityIntegrationTest extends StrategySignalIntegrationTestBase
   }
 
   private UUID create(String name, String yaml) {
-    return (UUID) service.create(name, null, null, yaml).get("id");
+    return service.create(name, null, null, yaml).id();
   }
 
   private static String config(String slug, String name, String style, String exitRules) {

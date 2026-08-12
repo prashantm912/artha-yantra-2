@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.signals;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import in.arthayantra.strategyengine.eval.PremiumLevels;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 
@@ -36,12 +37,13 @@ final class PremiumBracketRules {
       if (pct == null) {
         continue;
       }
-      BigDecimal fraction = pct.divide(new BigDecimal("100"), 6, RoundingMode.HALF_UP);
+      // §9-04: the ONE definition, shared with the backtest's PremiumExitEvaluator.level. This used
+      // to be a copy agreeing with replay only via a javadoc and the equivalence fixture.
       String type = rule.path("type").asText();
       if ("stop_loss".equals(type)) {
-        sl = entryLtp.multiply(BigDecimal.ONE.subtract(fraction)).setScale(2, RoundingMode.HALF_UP);
+        sl = PremiumLevels.paiseRounded(entryLtp, pct, false);
       } else if ("take_profit".equals(type)) {
-        tp = entryLtp.multiply(BigDecimal.ONE.add(fraction)).setScale(2, RoundingMode.HALF_UP);
+        tp = PremiumLevels.paiseRounded(entryLtp, pct, true);
       }
     }
     return new Brackets(sl, tp);

@@ -61,20 +61,27 @@ public class OiBuzzService {
   /**
    * One constituent tile: % change drives size + colour; OHLC + OI back the tooltip. {@code oiChange}
    * (current OI − prev-session close OI) + its 4-state {@code interpretation} are {@code null} until
-   * the prev-day OI cache warms (v2 OI-interpretation badge).
+   * the prev-day OI cache warms (v2 OI-interpretation badge). {@code changePct} is null when the
+   * quote carries no usable prev-close (`live()`'s {@code prevClose.signum() > 0} guard); {@code
+   * open}/{@code high}/{@code low} are null whenever the quote's OHLC block itself is absent — only
+   * {@code ltp} is guaranteed present (the caller skips a pin entirely when the quote has no LTP).
    */
   public record Tile(
       String symbol,
-      BigDecimal changePct,
-      BigDecimal ltp,
-      BigDecimal open,
-      BigDecimal high,
-      BigDecimal low,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal changePct,
+      @Schema(type = "string") BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal open,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal high,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal low,
       Long oi,
       Long oiChange,
       OiInterpretation interpretation) {}
 
   /** The heatmap for one index: tiles (gainers first) + advance/decline counters + the feed time. */
+  // @Schema(name) is load-bearing: OiHeatmapService.Heatmap shares this simple name with a DISJOINT
+  // field set, and springdoc keys components by simple name — until this rename, the oi-buzz-heatmap
+  // endpoint published the options heatmap's fields and none of its own (task_1c04803f).
+  @Schema(name = "OiBuzzHeatmap")
   public record Heatmap(
       String index, int advance, int decline, List<Tile> tiles,
       @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}

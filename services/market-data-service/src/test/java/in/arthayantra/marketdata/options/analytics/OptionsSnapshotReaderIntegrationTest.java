@@ -294,6 +294,42 @@ class OptionsSnapshotReaderIntegrationTest extends MarketDataIntegrationTestBase
         "22480.00");
   }
 
+  /**
+   * As above, with an explicit {@code source} provenance label and no {@code iv} — the shape the
+   * freshness discriminator reads. {@code 'LIVE'} (or NULL, which the column defaults to since V023)
+   * is a real capture; {@code 'UPSTOX_1M'} is the candle-derived stock-chain warm and {@code
+   * 'BACKFILL'} the OI importer, neither of which is a capture.
+   */
+  static void insertSourcedRow(
+      JdbcTemplate jdbc,
+      OffsetDateTime ts,
+      String u,
+      LocalDate exp,
+      String strike,
+      String type,
+      String ltp,
+      Long oi,
+      Long oiChange,
+      String source) {
+    jdbc.update(
+        "INSERT INTO options_chain_snapshots "
+            + "(ts, underlying, expiry, strike, option_type, tradingsymbol, ltp, oi, oi_change,"
+            + " spot_price, source) "
+            + "VALUES (?,?,?,?::numeric,?,?,?::numeric,?,?,?::numeric,?) "
+            + "ON CONFLICT DO NOTHING",
+        java.sql.Timestamp.from(ts.toInstant()),
+        u,
+        java.sql.Date.valueOf(exp),
+        strike,
+        type,
+        u + strike + type,
+        ltp,
+        oi,
+        oiChange,
+        "22480.00",
+        source);
+  }
+
   /** As above, plus an explicit per-leg {@code iv} (the Active Strikes IV series reads it). */
   static void insertRow(
       JdbcTemplate jdbc,

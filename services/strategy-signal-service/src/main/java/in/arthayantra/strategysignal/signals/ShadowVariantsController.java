@@ -35,13 +35,19 @@ public class ShadowVariantsController {
   public record RailOverrideView(
       String rail,
       boolean disable,
-      @Schema(types = {"number", "null"}) BigDecimal threshold,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal threshold,
       @Schema(types = {"string", "null"}) String passWhen) {}
 
-  /** The variant vocabulary body (the {@code spec} column), typed for the contract. */
+  /**
+   * The variant vocabulary body (the {@code spec} column), typed for the contract. Every knob kind
+   * must appear here: the projection is a lenient {@code convertValue}, so an omitted field is
+   * SILENTLY dropped and the API would render the variant as an apparent no-op ({@code nullPolicy}
+   * was added with F5 U4b for exactly that reason).
+   */
   public record VariantSpecView(
       @Schema(types = {"array", "null"}) List<RailOverrideView> rails,
-      @Schema(types = {"number", "null"}) BigDecimal compositeThreshold) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal compositeThreshold,
+      @Schema(types = {"string", "null"}) String nullPolicy) {}
 
   /** One registered variant. */
   public record ShadowVariantView(
@@ -59,8 +65,8 @@ public class ShadowVariantsController {
 
   /**
    * POST body. {@code name} is the immutable variant tag; {@code campaignId} the OPTIONAL soft
-   * campaign ref; {@code spec} the vocabulary BODY ({@code {rails, compositeThreshold}}, strict —
-   * unknown knobs 422); {@code createdBy} the OPTIONAL machine-writer actor (e.g. {@code
+   * campaign ref; {@code spec} the vocabulary BODY ({@code {rails, compositeThreshold, nullPolicy}},
+   * strict — unknown knobs 422); {@code createdBy} the OPTIONAL machine-writer actor (e.g. {@code
    * 'evo:{campaignId}'}).
    */
   public record RegisterRequest(String name, UUID campaignId, JsonNode spec, String createdBy) {}

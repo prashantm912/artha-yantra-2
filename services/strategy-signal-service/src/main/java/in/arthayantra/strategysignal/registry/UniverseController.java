@@ -1,8 +1,6 @@
 package in.arthayantra.strategysignal.registry;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -30,17 +28,11 @@ public class UniverseController {
 
   /** Resolves the universe of a strategy version (latest published/draft, or an explicit version). */
   @GetMapping("/{id}/universe")
-  public Map<String, Object> universe(
+  public RegistryViews.UniverseInfo universe(
       @PathVariable UUID id, @RequestParam(required = false) String version) {
-    JsonNode config = (JsonNode) registry.detail(id, version).get("config");
+    JsonNode config = registry.detail(id, version).config();
     UniverseResolver.ResolvedUniverse u = resolver.resolve(config);
-    Map<String, Object> out = new LinkedHashMap<>();
-    out.put("mode", u.mode());
-    out.put("asOf", u.asOf());
-    out.put("constituentCount", u.items().size());
-    out.put("checksum", u.checksum());
-    out.put("survivorshipCaveat", u.survivorshipCaveat());
-    out.put("items", u.items());
-    return out;
+    return new RegistryViews.UniverseInfo(
+        u.mode(), u.asOf(), u.items().size(), u.checksum(), u.survivorshipCaveat(), u.items());
   }
 }

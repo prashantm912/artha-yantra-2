@@ -106,7 +106,9 @@ public class OpenAlgoConfig {
    * Dedicated OpenAlgo {@code /quotes} client for GLOBAL indices (the Connecting-Dots Dow factor,
    * plan §3). Wired only when {@code artha.openalgo.global-quotes-enabled=true} — separate from
    * {@code source.quotes} (which stays Kite, with no global indices). Its own port type
-   * ({@link GlobalQuoteSource}) keeps it out of the {@code QuoteGateway} bean pool.
+   * ({@link GlobalQuoteSource}) keeps it out of the {@code QuoteGateway} bean pool. Mutually
+   * exclusive with the Upstox implementation ({@code artha.upstox.global-quotes-enabled}) — both on
+   * fails the context at {@code GlobalQuoteSourceExclusivityGuard}.
    */
   @Bean
   @ConditionalOnProperty(name = "artha.openalgo.global-quotes-enabled", havingValue = "true")
@@ -114,14 +116,16 @@ public class OpenAlgoConfig {
       RestClient.Builder restClientBuilder,
       OpenAlgoProperties properties,
       KiteCallExecutor executor,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper,
+      MeterRegistry meterRegistry) {
     return new OpenAlgoGlobalQuoteClient(
         new OpenAlgoQuoteGateway(
             restClientBuilder,
             properties.baseUrl(),
             properties.resolveApiKey(),
             executor,
-            objectMapper));
+            objectMapper),
+        meterRegistry);
   }
 
   /**

@@ -526,6 +526,27 @@ export interface components {
         StressOverrides: {
             slippageMultiplier?: number;
         };
+        BacktestRunAccepted: {
+            jobId: string;
+            status: string;
+            provenance: components["schemas"]["ProvenanceBlock"];
+        };
+        ProvenanceBlock: {
+            engineSha: string | null;
+            engineImage: string | null;
+            configHash: string | null;
+            dataHash: string | null;
+            contentHash: string | null;
+            /** Format: int64 */
+            datasetEpoch: number | null;
+            evidencePolicy: string | null;
+            universeChecksum: string | null;
+            premiumSource: string | null;
+            costClass: string | null;
+            profile: string;
+            warmStatus: string | null;
+            premiumContentUnverified: boolean | null;
+        };
         DeepSwingRunRequest: {
             family?: string;
             from?: string;
@@ -599,6 +620,81 @@ export interface components {
             tags: string[];
             note: string | null;
         };
+        IndicatorMeta: {
+            id: string;
+            label: string;
+            params: components["schemas"]["ParamMeta"][];
+            outputs: string[];
+            render: string;
+            pane: string;
+            requiresContext: boolean;
+        };
+        IndicatorRegistry: {
+            items: components["schemas"]["IndicatorMeta"][];
+        };
+        ParamMeta: {
+            name: string;
+            defaultValue: unknown;
+        };
+        IndicatorSeriesResponse: {
+            series: components["schemas"]["NamedSeries"][];
+        };
+        NamedSeries: {
+            name: string;
+            points: components["schemas"]["Point"][];
+        };
+        Point: {
+            time: string;
+            value: string;
+        };
+        BacktestTradeItem: {
+            /** Format: int32 */
+            seq: number;
+            side: string;
+            /** Format: int64 */
+            qty: number;
+            entryTs: string;
+            entryPrice: string;
+            exitTs: string | null;
+            exitPrice: string | null;
+            pnl: string;
+            pnlPct: string;
+            exitReason: string | null;
+            /** Format: int32 */
+            barsHeld: number;
+            touchBasis: string | null;
+            contributions: components["schemas"]["JsonNode"] | null;
+            exchange: string | null;
+            tradingsymbol: string | null;
+            stopLoss: string | null;
+            takeProfit: string | null;
+        };
+        BacktestTradePage: {
+            items: components["schemas"]["BacktestTradeItem"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+        };
+        RunResult: {
+            metrics: components["schemas"]["JsonNode"];
+            equityCurve: components["schemas"]["JsonNode"];
+            drawdownCurve: components["schemas"]["JsonNode"];
+            benchmarkCurve: components["schemas"]["JsonNode"];
+            dataHash: string | null;
+            /** Format: int64 */
+            seed: number;
+            premiumSource: string | null;
+            strategyId: string | null;
+            ranAt: string | null;
+            exchange: string | null;
+            tradingsymbol: string | null;
+            universeChecksum: string | null;
+            universeAsOf: string | null;
+            engineSha: string | null;
+            engineImage: string | null;
+            caveats: string[];
+        };
         SwingReportCard: {
             /** Format: int32 */
             trades: number;
@@ -606,12 +702,12 @@ export interface components {
             wins: number;
             /** Format: int32 */
             losses: number;
-            battingAvgPct: number;
-            avgWinPct: number;
-            avgLossPct: number;
-            payoffRatio: number;
-            expectancyPct: number;
-            avgBarsHeld: number;
+            battingAvgPct: string;
+            avgWinPct: string;
+            avgLossPct: string;
+            payoffRatio: string;
+            expectancyPct: string;
+            avgBarsHeld: string;
             meetsReliabilityBar: boolean;
             grade: string;
         };
@@ -624,29 +720,30 @@ export interface components {
             reason: string;
             /** Format: int32 */
             bars: number;
-            maxComposite: number | null;
+            maxComposite: string | null;
             /** Format: date-time */
             sampleBucket: string | null;
             sampleBreakdown: components["schemas"]["JsonNode"];
         };
+        BacktestSummaryItem: {
+            strategyVersionId: string | null;
+            runId: string;
+            sharpe: string;
+            totalReturn: string;
+            maxDrawdown: string;
+            completedAt: string;
+            equity: string[];
+        };
+        BacktestSummaryPage: {
+            items: components["schemas"]["BacktestSummaryItem"][];
+        };
+        StressWindow: {
+            from: string | null;
+            to: string | null;
+            evidencePolicy: string | null;
+        };
         SavedViewsResponse: {
             items: components["schemas"]["SavedView"][];
-        };
-        ProvenanceBlock: {
-            engineSha: string | null;
-            engineImage: string | null;
-            configHash: string | null;
-            dataHash: string | null;
-            contentHash: string | null;
-            /** Format: int64 */
-            datasetEpoch: number | null;
-            evidencePolicy: string | null;
-            universeChecksum: string | null;
-            premiumSource: string | null;
-            costClass: string | null;
-            profile: string;
-            warmStatus: string | null;
-            premiumContentUnverified: boolean | null;
         };
         RunComparability: {
             runId: string;
@@ -659,6 +756,46 @@ export interface components {
             engineSha: string | null;
             evidencePolicy: string | null;
             staleEpochs: components["schemas"]["DatasetEpoch"][];
+        };
+        BacktestJobPage: {
+            items: components["schemas"]["BacktestJobSummary"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+        };
+        BacktestJobSummary: {
+            jobId: string;
+            kind: string;
+            status: string;
+            /** Format: int32 */
+            progress: number;
+            /** Format: date-time */
+            createdAt: string;
+            strategyId: string | null;
+            strategyVersion: string | null;
+            totalReturn: string | null;
+            testFrom: string | null;
+            testTo: string | null;
+            interval: string | null;
+            initialCapital: string | null;
+            /** Format: int64 */
+            seed: number | null;
+            tags: string[];
+            note: string | null;
+        };
+        BacktestJobDetail: {
+            jobId: string;
+            kind: string;
+            status: string;
+            /** Format: int32 */
+            progress: number;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            finishedAt: string | null;
+            error: string | null;
+            resultRef: string | null;
         };
         ExperimentListResponse: {
             items: components["schemas"]["ExperimentSummary"][];
@@ -758,14 +895,17 @@ export interface components {
             name: string;
             /** Format: int32 */
             tradeCount: number;
-            netPnlInr: number;
-            grossPremiumPoints: number;
-            winRate: number;
-            expectancyInr: number;
-            maxDrawdownInr: number;
+            netPnlInr: string;
+            grossPremiumPoints: string;
+            winRate: string;
+            expectancyInr: string;
+            maxDrawdownInr: string;
             exitReasonCounts: {
                 [key: string]: number;
             };
+        };
+        JobCancelAccepted: {
+            status: string;
         };
         ErrorResponse: {
             code?: string;
@@ -864,9 +1004,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["BacktestRunAccepted"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1061,9 +1199,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["IndicatorRegistry"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1100,9 +1236,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["IndicatorSeriesResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1272,9 +1406,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["BacktestTradePage"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1305,9 +1437,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["RunResult"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1534,9 +1664,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["BacktestSummaryPage"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1567,9 +1695,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["StressWindow"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1670,9 +1796,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["BacktestJobPage"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1703,9 +1827,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["BacktestJobDetail"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1736,9 +1858,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["JobCancelAccepted"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

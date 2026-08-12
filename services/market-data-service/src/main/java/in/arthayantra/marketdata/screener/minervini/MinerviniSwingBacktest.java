@@ -237,8 +237,12 @@ public final class MinerviniSwingBacktest {
     };
   }
 
-  /** The exit doctrine on bar {@code i}: the 8% protective stop first, then the 50-day-MA close trail. */
-  private static String exitFires(
+  /**
+   * The exit doctrine on bar {@code i}: the 8% protective stop first, then the 50-day-MA close
+   * trail. Package-private (M7, #128) so the swing exit-equivalence characterization fixture
+   * ({@code MinerviniSwingExitEquivalenceTest}) can drive this SAME production formula directly.
+   */
+  static String exitFires(
       int i, double[] close, double[] sma50, double entrySignalClose) {
     if (close[i] <= entrySignalClose * (1.0 - STOP_PCT)) {
       return "STOP_LOSS";

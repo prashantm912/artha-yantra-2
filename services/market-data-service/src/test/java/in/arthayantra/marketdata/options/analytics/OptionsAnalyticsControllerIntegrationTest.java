@@ -48,6 +48,181 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.maxPain").value("22500.00"));
   }
 
+  /**
+   * A WARMED STOCK chain is candle-derived data that is served TODAY, and live is the DEFAULT mode —
+   * so its freshness must read {@code derived}/{@code candle-derived}. {@code oiFreshness} used to
+   * carry a {@code !q.live()} conjunct that made {@code derived} structurally unreachable in live
+   * mode, so {@code StockChainWarmService}'s {@code source='UPSTOX_1M'} rows (candle-derived, iv
+   * null) were published as live captured OI — measured live 2026-08-03 on {@code SBIN}, on both
+   * {@code /oi-stats} and {@code /active-strikes}.
+   */
+  @Test
+  void warmedStockChainReadsAsDerivedInLiveMode() throws Exception {
+    String u = "FRESHWARMSTOCK";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime t0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, t0, u, exp, "22500", "CE", "100", 1000L, 0L, "UPSTOX_1M");
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, t0, u, exp, "22500", "PE", "90", 1500L, 0L, "UPSTOX_1M");
+
+    // live mode = no `mode` param at all (OiQuery.of defaults live=true, date=null)
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-stats")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.freshness.provenance").value("derived"))
+        .andExpect(jsonPath("$.freshness.source").value("candle-derived"));
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/active-strikes")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.freshness.provenance").value("derived"))
+        .andExpect(jsonPath("$.freshness.source").value("candle-derived"));
+  }
+
+  /**
+   * The opposite regression the source-based discriminator must not introduce: a genuine LIVE-captured
+   * INDEX chain whose legs carry NO iv yet (early session, or a forward the solver could not resolve)
+   * must still read {@code live}/{@code capture}. {@code iv == null} is a SYMPTOM of derivation, never
+   * its identity — this fixture is byte-identical to {@code warmedStockChainReadsAsDerivedInLiveMode}'s
+   * except for the {@code source} label, so it isolates the discriminator itself.
+   */
+  @Test
+  void liveCapturedIndexChainReadsAsCaptureEvenWithNullIv() throws Exception {
+    String u = "FRESHLIVEINDEX";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime t0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, t0, u, exp, "22500", "CE", "100", 1000L, 0L, "LIVE");
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, t0, u, exp, "22500", "PE", "90", 1500L, 0L, "LIVE");
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-stats")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.freshness.provenance").value("live"))
+        .andExpect(jsonPath("$.freshness.source").value("capture"));
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/active-strikes")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.freshness.provenance").value("live"))
+        .andExpect(jsonPath("$.freshness.source").value("capture"));
+  }
+
+  /**
+   * MIXED SHAPE 1 (cross-vendor review, #1240) — same bucket, different timestamps, DERIVED wins.
+   * {@code series()} folds each (bucket, strike, optionType) with {@code last(…, ts)}, so the 09:25
+   * warm row wins the 09:20 5-minute bucket over the 09:24 capture and the response carries derived
+   * values. Classifying on "the window holds SOME captured row" answers live here — the same false
+   * live label this PR exists to remove, in a shape a homogeneous fixture cannot reach.
+   */
+  @Test
+  void mixedBucketWhereDerivedRowWinsReadsAsDerived() throws Exception {
+    String u = "FRESHMIXWIN";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    // Both land in bucket [09:20, 09:25) under end-of-window labelling (ts - 1s).
+    OffsetDateTime captured =
+        OffsetDateTime.of(2026, 6, 20, 9, 24, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime warmed = captured.plusMinutes(1); // 09:25 -> still bucket 09:20, and NEWER
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, captured, u, exp, "22500", "CE", "100", 1000L, 0L, "LIVE");
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, warmed, u, exp, "22500", "CE", "111", 1111L, 0L, "UPSTOX_1M");
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-stats")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        // the served OI is the 09:25 warm row's -> the label must follow it
+        .andExpect(jsonPath("$.ceOi").value(1111))
+        .andExpect(jsonPath("$.freshness.provenance").value("derived"))
+        .andExpect(jsonPath("$.freshness.source").value("candle-derived"));
+  }
+
+  /**
+   * MIXED SHAPE 2 (cross-vendor review, #1240) — one derived LEG beside captured legs in the SAME
+   * bucket. Every group is its own {@code last()} fold, so a chain whose 22600 CE is warm-derived is a
+   * partly-derived chain however many captured legs sit beside it; only ALL-captured earns {@code live}.
+   */
+  @Test
+  void mixedStrikesWithOneDerivedLegReadsAsDerived() throws Exception {
+    String u = "FRESHMIXLEG";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime t0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 24, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, t0, u, exp, "22500", "CE", "100", 1000L, 0L, "LIVE");
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, t0, u, exp, "22500", "PE", "90", 1500L, 0L, "LIVE");
+    // one warm leg is enough — this strike's group resolves to UPSTOX_1M
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, t0, u, exp, "22600", "CE", "60", 700L, 0L, "UPSTOX_1M");
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-stats")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.ceOi").value(1700)) // both CE legs really are in the fold
+        .andExpect(jsonPath("$.freshness.provenance").value("derived"))
+        .andExpect(jsonPath("$.freshness.source").value("candle-derived"));
+  }
+
+  /**
+   * The over-correction guard, and the reason the rule is "the WINNER of each group", not "any derived
+   * row taints the window": when the capture arrives LAST it wins its group, so {@code series()}
+   * returns captured values and the read genuinely IS a capture. A blunter "any non-captured row =>
+   * derived" rule would answer derived here and start under-reporting live data — the mirror of the
+   * bug this PR fixes.
+   */
+  @Test
+  void mixedBucketWhereCapturedRowWinsReadsAsCapture() throws Exception {
+    String u = "FRESHMIXCAP";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime warmed =
+        OffsetDateTime.of(2026, 6, 20, 9, 24, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime captured = warmed.plusMinutes(1); // 09:25 -> same bucket, and NEWER
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, warmed, u, exp, "22500", "CE", "111", 1111L, 0L, "UPSTOX_1M");
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, captured, u, exp, "22500", "CE", "100", 1000L, 0L, "LIVE");
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-stats")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.ceOi").value(1000)) // the capture won the fold
+        .andExpect(jsonPath("$.freshness.provenance").value("live"))
+        .andExpect(jsonPath("$.freshness.source").value("capture"));
+  }
+
   @Test
   void unsupportedIntervalIs400WithCode() throws Exception {
     mockMvc
@@ -572,6 +747,145 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.atmStrike").value(org.hamcrest.Matchers.nullValue()));
   }
 
+  /**
+   * The {@code expiry} param (task_e2e01m(b)) used to be parsed by hand ({@code LocalDate.parse}),
+   * so a malformed value threw an uncaught {@code DateTimeParseException} -> the catch-all 500.
+   * Typing the {@code @RequestParam} as {@code LocalDate} (matching {@code ExportController}'s
+   * "expiry" param convention) makes Spring's own conversion failure map to 400 VALIDATION_FAILED.
+   */
+  @Test
+  void strikeSessionStatsBadExpiryIs400NotNpe() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", "SESSBADEXP")
+                .param("expiry", "test"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+  }
+
+  /**
+   * The {@code session} param (task_7cc34a70) used to be hand-parsed ({@code
+   * LocalDate.parse(session)}), so a malformed value threw an uncaught {@code
+   * DateTimeParseException} -> the catch-all 500. Retyped to {@code LocalDate} (same {@code expiry}
+   * convention above) so Spring's own conversion failure maps to 400 VALIDATION_FAILED.
+   */
+  @Test
+  void strikeSessionStatsMalformedSessionIs400NotServerError() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", "SESSBADSESS")
+                .param("expiry", "2026-06-25")
+                .param("session", "not-a-date"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+  }
+
+  /** Absent {@code session} defaults to today IST — unchanged by the retype (no data -> empty items). */
+  @Test
+  void strikeSessionStatsAbsentSessionDefaultsToTodayNot400Or500() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", "SESSABSENTSESS")
+                .param("expiry", "2026-06-25"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(0));
+  }
+
+  /**
+   * A present-but-empty {@code session=} used to hit the SAME hand-rolled {@code LocalDate.parse("")}
+   * as a malformed value (both throw {@code DateTimeParseException} -> 500) — unlike {@code farExpiry},
+   * {@code session} had no explicit blank guard. Spring's {@code @DateTimeFormat} conversion treats a
+   * blank query value as absent (no conversion attempted), so post-fix it now defaults to today exactly
+   * like the absent case above, rather than error at all.
+   */
+  @Test
+  void strikeSessionStatsEmptySessionBehavesLikeAbsentNot500() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", "SESSEMPTYSESS")
+                .param("expiry", "2026-06-25")
+                .param("session", ""))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(0));
+  }
+
+  /**
+   * A negative {@code window} (task_c736e3ca) reached {@link OpenHighStatsService}'s {@code
+   * Stream.limit(2*window+1)} unvalidated, so the limit itself went negative and threw an
+   * uncaught {@code IllegalArgumentException} -> the catch-all 500. A hand-rolled guard (matching
+   * the sibling {@code buckets} check on {@code /trending}) rejects it before the reader/grading
+   * path runs.
+   */
+  @Test
+  void strikeSessionStatsNegativeWindowIs400NotServerError() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", "SESSNEGWIN")
+                .param("expiry", "2026-06-25")
+                .param("window", "-1"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+  }
+
+  /**
+   * {@code window=0} is a genuinely different case from negative. The service computes a radius,
+   * {@code 2 * window + 1}, so window=0 reaches {@code Stream.limit(1)} — legal, and it yields just
+   * the single nearest (ATM) strike rather than an error. It must NOT be rejected by the
+   * negative-window guard above. (An earlier version of this comment said {@code limit(0)}, which
+   * would have yielded an EMPTY result and made the assertion below look wrong — cross-vendor review
+   * caught the arithmetic.)
+   */
+  @Test
+  void strikeSessionStatsZeroWindowKeepsOnlyAtmStrike() throws Exception {
+    String u = "SESSZEROWIN";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime s0 = OffsetDateTime.of(2026, 6, 19, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    // spot is hardcoded 22480.00 in insertRow -> ATM nearest = 22500.
+    OptionsSnapshotReaderIntegrationTest.insertRow(
+        jdbc, s0, u, exp, "22500", "CE", "100.00", 1000L, 0L, 2000L);
+    // decoy strike, OUT of window=0 (must be sliced away).
+    OptionsSnapshotReaderIntegrationTest.insertRow(
+        jdbc, s0, u, exp, "22550", "CE", "50.00", 800L, 0L, 1000L);
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", u)
+                .param("expiry", "2026-06-25")
+                .param("session", "2026-06-19")
+                .param("window", "0")
+                .param("interval", "5"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.atmStrike").value(org.hamcrest.Matchers.startsWith("22500")))
+        .andExpect(jsonPath("$.items.length()").value(1))
+        .andExpect(jsonPath("$.items[0].strike").value(org.hamcrest.Matchers.startsWith("22500")));
+  }
+
+  /**
+   * Recon (task_c736e3ca): unlike {@code window}, a negative {@code interval} needs no new guard.
+   * {@code reader.sessionStats(...)} calls {@code OiInterval.parse(intervalMinutes + "m")} as ITS
+   * OWN first statement (both the live-snapshot {@code OptionsSnapshotReader} and the
+   * candle-derived {@code CandleDerivedChainReader} paths) — before the controller's own later
+   * {@code OiInterval.parse} call even runs — so the interval gate already fires first, same 400
+   * as {@code /oi-stats}'s {@code unsupportedIntervalIs400WithCode}.
+   */
+  @Test
+  void strikeSessionStatsNegativeIntervalIs400NotServerError() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", "SESSNEGIV")
+                .param("expiry", "2026-06-25")
+                .param("interval", "-1"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_INTERVAL_UNSUPPORTED"));
+  }
+
   @Test
   void premiumSeriesTracksAtmStraddlePerBucket() throws Exception {
     String u = "PREMSERIES";
@@ -720,5 +1034,89 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
                 .param("interval", "5m"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.items.length()").value(0));
+  }
+
+  // ── /calendar-spread: farExpiry (task_7cc34a70) ─────────────────────────────────────────────────
+
+  /**
+   * {@code farExpiry} used to be hand-parsed ({@code java.time.LocalDate.parse(farExpiry)}), so a
+   * malformed value threw an uncaught {@code DateTimeParseException} -> the catch-all 500. Retyped to
+   * {@code LocalDate} (same convention as {@code strike-session-stats}'s {@code session}/{@code expiry})
+   * so Spring's own conversion failure maps to 400 VALIDATION_FAILED. No option-chain fixture needed —
+   * the malformed value fails at argument binding, before the handler body (and its chain lookups) ever runs.
+   */
+  @Test
+  void calendarSpreadMalformedFarExpiryIs400NotServerError() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/calendar-spread")
+                .param("name", "CALSPREADBAD")
+                .param("strike", "100")
+                .param("nearExpiry", "2026-06-16")
+                .param("farExpiry", "not-a-date"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+  }
+
+  /**
+   * Absent {@code farExpiry} -> null -> the service defaults it to "the next listed expiry after near"
+   * ({@code CalendarSpreadChartService.nextExpiryAfter}); for an underlying with NO listed expiries at
+   * all that resolves to null, which the service's own 400 catches ("farExpiry must be after
+   * nearExpiry") — a business-rule 400, not a param-binding one. This is the BASELINE the empty-string
+   * case below is compared against.
+   */
+  @Test
+  void calendarSpreadAbsentFarExpiryHitsBusinessValidationNot500() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/calendar-spread")
+                .param("name", "CALSPREADABSENT")
+                .param("strike", "100")
+                .param("nearExpiry", "2026-06-16"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+        .andExpect(jsonPath("$.message").value("farExpiry must be after nearExpiry (2026-06-16)"));
+  }
+
+  /**
+   * The behaviour nuance this task exists to guard: {@code farExpiry=} (present but empty) used to be
+   * explicitly blank-tolerant ({@code farExpiry.isBlank() ? null : ...}) and reach the SAME business
+   * validation as the absent case above (same 400 message). Retyping to {@code LocalDate} must not turn
+   * this into a raw Spring type-mismatch 400 ("Invalid parameter value") instead — that would be a wire
+   * regression (right status, wrong reason) hiding behind an unchanged status code. Asserting the exact
+   * {@code $.message} (not just the status) is what catches that: a MethodArgumentTypeMismatchException
+   * would produce a DIFFERENT message ("Invalid parameter value") from the business-rule one pinned here.
+   */
+  @Test
+  void calendarSpreadEmptyFarExpiryBehavesExactlyLikeAbsent() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/calendar-spread")
+                .param("name", "CALSPREADEMPTY")
+                .param("strike", "100")
+                .param("nearExpiry", "2026-06-16")
+                .param("farExpiry", ""))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+        .andExpect(jsonPath("$.message").value("farExpiry must be after nearExpiry (2026-06-16)"));
+  }
+
+  /**
+   * A syntactically valid, after-near {@code farExpiry} must still parse and pass the near/far
+   * validation (unchanged by the retype) — it proceeds to the per-leg instrument lookup, which 422s for
+   * this unlisted (underlying, strike) pair. That 422 (DATA_GAP), not a 400, is the tell that farExpiry
+   * parsed correctly and cleared the {@code far.isAfter(near)} gate.
+   */
+  @Test
+  void calendarSpreadValidFarExpiryClearsValidationReaches422OnUnlistedStrike() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/calendar-spread")
+                .param("name", "CALSPREADVALID")
+                .param("strike", "100")
+                .param("nearExpiry", "2026-06-16")
+                .param("farExpiry", "2026-06-23"))
+        .andExpect(status().isUnprocessableEntity())
+        .andExpect(jsonPath("$.code").value("DATA_GAP"));
   }
 }

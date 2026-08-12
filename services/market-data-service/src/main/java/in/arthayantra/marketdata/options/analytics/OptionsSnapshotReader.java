@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.options.analytics;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.options.OiInterval;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.Timestamp;
@@ -38,17 +39,52 @@ public class OptionsSnapshotReader {
     this.calendar = calendar;
   }
 
-  /** One downsampled point per (bucket, strike, optionType): last() of each point-in-time stat. */
+  /**
+   * One downsampled point per (bucket, strike, optionType): last() of each point-in-time stat.
+   *
+   * <p>Nullability is load-bearing now that this record is ENUMERATED into the OpenAPI spec (D3:
+   * {@code /oi-analysis} + {@code /oi-analysis/strike-series} stopped returning an opaque {@code
+   * Map}). Only the three PK-derived columns are NOT NULL in V006 ({@code ts} / {@code strike} /
+   * {@code option_type}); {@code ltp} / {@code oi} / {@code volume} / {@code iv} are nullable
+   * columns, {@code oi_change} is nullable by V007_1 and is additionally null for the FIRST bucket
+   * of each leg on the candle-derived path, and {@code spot} is null whenever the bucket carried no
+   * underlying sample. The candle-derived reader leaves {@code iv} null except on the ATM band it
+   * back-solves ({@code CandleDerivedChainReader.enrichIv}) — so a null {@code iv} is a SYMPTOM of
+   * derivation, never its identity, and nothing may key provenance on it. {@code
+   * OptionsAnalyticsController.oiFreshness} used to, and mislabelled both directions; it now asks
+   * {@link #allGroupsCaptured} for the winning row's {@code source} instead.
+   *
+   * <p>Spelled as the 3.1 type union, NOT {@code @Schema(nullable = true)} — the latter is a silent
+   * no-op at OpenAPI 3.1 and would publish these as non-nullable, a lie in the generated TS.
+   *
+   * <p>⚠️ Every {@link BigDecimal} here is declared {@code string}, not {@code number}, because
+   * {@code ArthaJacksonAutoConfiguration} registers {@code ToStringSerializer} for {@code
+   * BigDecimal} platform-wide (money is never a float on our wire). Bare springdoc infers {@code
+   * number} from the Java type and would publish a type the service never emits — which is worse
+   * than the opaque Map this record replaced, since a generated client would now confidently parse
+   * the wrong thing. The {@code Long} columns are genuinely JSON numbers and stay {@code integer}.
+   *
+   * <p>⚠️ <b>SPELLING TRAP, measured here 2026-08-01.</b> {@code types} does NOT replace the
+   * inferred type, it UNIONS with it: {@code @Schema(types = {"string", "null"})} on a {@code
+   * BigDecimal} captures as {@code ["number","string","null"]}, a three-type union that still
+   * advertises the impossible {@code number}. To RETYPE a nullable field you must set the base type
+   * as well — {@code @Schema(type = "string", types = {"string", "null"})} — which captures cleanly
+   * as {@code ["string","null"]}. The bare {@code types}-only form documented in CLAUDE.md is only
+   * correct when the declared base MATCHES what springdoc already inferred (e.g. {@code
+   * {"number","null"}} on a {@code BigDecimal}, or {@code {"integer","null"}} on a {@code Long} —
+   * which is why it has always looked right). Verify any retype by reading the captured spec, not
+   * by trusting the annotation.
+   */
   public record StrikePoint(
       OffsetDateTime bucket,
-      BigDecimal strike,
+      @Schema(type = "string") BigDecimal strike,
       String optionType,
-      BigDecimal ltp,
-      Long oi,
-      Long oiChange,
-      BigDecimal iv,
-      BigDecimal spot,
-      Long volume) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
+      @Schema(types = {"integer", "null"}) Long oi,
+      @Schema(types = {"integer", "null"}) Long oiChange,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal iv,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
+      @Schema(types = {"integer", "null"}) Long volume) {}
 
   /**
    * Session OHLC of the per-strike option premium ({@code ltp}) plus volume, for Open=High grading
@@ -453,6 +489,66 @@ public class OptionsSnapshotReader {
     OffsetDateTime priorBucket = queryBucket(sql + " AND ts <= ?", priorArgs);
     OffsetDateTime earliest = priorBucket == null ? newestBucket : priorBucket;
     return series(underlying, expiry, interval, earliest, newestBucket.plus(interval.bucket()));
+  }
+
+  /**
+   * True iff EVERY (bucket, strike, optionType) group in [{@code from}, {@code to}) resolves to a
+   * LIVE-CAPTURED row — the provenance discriminator behind the OI reads' freshness envelope ({@code
+   * OptionsAnalyticsController.oiFreshness}). False when the window holds no group at all, which is
+   * the candle-derived reader's case (it writes nothing).
+   *
+   * <p><b>Grouped by the SAME key and resolved by the SAME winner as {@link #series}, deliberately.</b>
+   * {@code series} emits one row per (bucket, strike, optionType) whose every value is {@code
+   * last(…, ts)} — the newest row in the group WINS. So the provenance a response actually carries is
+   * the provenance of that winning row, and nothing else. Asking the weaker question "does the window
+   * hold any captured row?" promotes a mixed bucket to {@code live} while serving derived values: a
+   * 09:24 {@code LIVE} row and a 09:25 {@code UPSTOX_1M} row land in the same 5-minute bucket, {@code
+   * last()} takes the 09:25 derived values, and the read is labelled a capture. The same hole opens
+   * across strikes — one derived leg beside captured legs is a partly-derived chain. Cross-vendor
+   * review caught both on #1240; the homogeneous fixtures could not reach either.
+   *
+   * <p>"Live-captured" is the SAME predicate {@code OptionsSnapshotRepository}'s {@code CAPTURED_ONLY}
+   * already uses to decide whether a stored chain may be served back as the live one: {@code source}
+   * is NULL on pre-V023 rows ("read as live by convention", V023's own wording) and {@code 'LIVE'} on
+   * every capture since, while every other label is a DERIVATION rather than a capture — {@code
+   * 'BACKFILL'} (the OI importer's 1m history) and {@code 'UPSTOX_1M'} (the on-demand stock-chain
+   * warm, {@code StockChainWarmService}). The {@code COALESCE(source, 'LIVE')} INSIDE the aggregate
+   * folds the NULL convention in per row, so the classification never depends on whether {@code
+   * last()} propagates or skips a NULL value. Quarantined rows are excluded because every OI fold
+   * excludes them, so they can never be rows a response was built from.
+   *
+   * <p>The {@code +1s} shift on both bounds and the {@code ts - INTERVAL '1 second'} bucket argument
+   * both mirror {@link #series}, so the groups counted here are exactly the groups it returns.
+   *
+   * <p>Shape safety: {@code GROUP BY <expression>, <col>, <col>} is the multi-key form that is SAFE
+   * under TimescaleDB 2.18.2 — identical to {@link #series}, which runs it live — and there is no
+   * {@code ORDER BY}/{@code DISTINCT}/{@code LIMIT} anywhere, so the compressed-batch sorted-merge
+   * planner assertion ({@link #latestPair}) has no pathkey to trip on.
+   */
+  public boolean allGroupsCaptured(
+      String underlying,
+      LocalDate expiry,
+      OiInterval interval,
+      OffsetDateTime from,
+      OffsetDateTime to) {
+    String sql =
+        "SELECT count(*) AS groups, count(*) FILTER (WHERE won <> 'LIVE') AS derived_groups FROM ("
+            + "SELECT public.last(COALESCE(source, 'LIVE'), ts) AS won "
+            + "FROM options_chain_snapshots "
+            + "WHERE underlying = ? AND expiry = ? AND ts >= ? AND ts < ? "
+            + "  AND (quarantined IS NOT TRUE) "
+            + "GROUP BY public.time_bucket(INTERVAL '"
+            + interval.pgInterval()
+            + "', ts - INTERVAL '1 second', 'Asia/Kolkata'), strike, option_type) g";
+    List<Boolean> out =
+        jdbc.query(
+            sql,
+            (rs, n) -> rs.getLong("groups") > 0 && rs.getLong("derived_groups") == 0,
+            underlying,
+            java.sql.Date.valueOf(expiry),
+            Timestamp.from(from.plusSeconds(1).toInstant()),
+            Timestamp.from(to.plusSeconds(1).toInstant()));
+    return !out.isEmpty() && Boolean.TRUE.equals(out.get(0));
   }
 
   /** Runs a single-row bucket aggregate; null when the filtered set is empty. */

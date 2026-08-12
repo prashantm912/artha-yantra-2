@@ -283,15 +283,15 @@ public class SignalCompareReader {
       String side,
       String family,
       String book,
-      @Schema(types = {"number", "null"}) BigDecimal priority,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal priority,
       @Schema(types = {"string", "null"}) String band,
       List<ComponentPoint> components,
-      @Schema(types = {"number", "null"}) BigDecimal optionLegCost,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal optionLegCost,
       String marginEstimate,
-      @Schema(types = {"number", "null"}) BigDecimal riskReward,
-      @Schema(types = {"number", "null"}) BigDecimal entryPrice,
-      @Schema(types = {"number", "null"}) BigDecimal stopLoss,
-      @Schema(types = {"number", "null"}) BigDecimal target,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal riskReward,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal entryPrice,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal stopLoss,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal target,
       String dataTrust,
       List<String> trustReasons,
       String scored) {}
@@ -299,8 +299,8 @@ public class SignalCompareReader {
   /** One priority component's contribution in a compare column (§3.4 render). */
   public record ComponentPoint(
       String key,
-      @Schema(types = {"number", "null"}) BigDecimal points,
-      @Schema(types = {"number", "null"}) BigDecimal c) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal points,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal c) {}
 
   /**
    * A ticket prefill (§11.4) — the owner's browser posts {@code {signalId, qty}} to the existing
@@ -310,6 +310,6 @@ public class SignalCompareReader {
   public record TicketPrefill(
       long signalId, String exchange, String tradingsymbol, String side,
       @Schema(types = {"integer", "null"}) Long qty,
-      @Schema(types = {"number", "null"}) BigDecimal stopLoss,
-      @Schema(types = {"number", "null"}) BigDecimal target) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal stopLoss,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal target) {}
 }

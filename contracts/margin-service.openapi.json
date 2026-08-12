@@ -1,0 +1,510 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "margin-service",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/margin": {
+      "post": {
+        "summary": "Margin",
+        "description": "Raw SPAN (span/exposure/total/hedgeBenefit) for a basket; 503 if no .spn loaded.",
+        "operationId": "margin_api_v1_margin_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarginResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/margin/size": {
+      "post": {
+        "summary": "Size",
+        "description": "Rail-bounded lots/qty + margin + RR target for an order; never blocks (advisory).",
+        "operationId": "size_api_v1_margin_size_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SizeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "summary": "Metrics",
+        "description": "Endpoint that serves Prometheus metrics.",
+        "operationId": "metrics_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "LegIn": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "expiry": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiry"
+          },
+          "strike": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strike"
+          },
+          "optionType": {
+            "type": "string",
+            "title": "Optiontype"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "BUY",
+              "SELL"
+            ],
+            "title": "Side"
+          },
+          "lotSize": {
+            "type": "integer",
+            "title": "Lotsize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "optionType",
+          "side",
+          "lotSize"
+        ],
+        "title": "LegIn",
+        "description": "One option/future leg for the ``/margin/size`` sizing endpoint."
+      },
+      "MarginRequest": {
+        "properties": {
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/PositionIn"
+            },
+            "type": "array",
+            "title": "Positions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "positions"
+        ],
+        "title": "MarginRequest"
+      },
+      "MarginResponse": {
+        "properties": {
+          "span": {
+            "type": "string",
+            "title": "Span"
+          },
+          "exposure": {
+            "type": "string",
+            "title": "Exposure"
+          },
+          "total": {
+            "type": "string",
+            "title": "Total"
+          },
+          "hedgeBenefit": {
+            "type": "string",
+            "title": "Hedgebenefit"
+          },
+          "spnDate": {
+            "type": "string",
+            "title": "Spndate"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "default": "INR"
+          }
+        },
+        "type": "object",
+        "required": [
+          "span",
+          "exposure",
+          "total",
+          "hedgeBenefit",
+          "spnDate"
+        ],
+        "title": "MarginResponse"
+      },
+      "PositionIn": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "expiry": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiry"
+          },
+          "strike": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strike"
+          },
+          "optionType": {
+            "type": "string",
+            "title": "Optiontype"
+          },
+          "netQty": {
+            "type": "integer",
+            "title": "Netqty"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "optionType",
+          "netQty"
+        ],
+        "title": "PositionIn",
+        "description": "One basket leg for the raw ``/margin`` endpoint."
+      },
+      "SizeRequest": {
+        "properties": {
+          "capital": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
+            "title": "Capital"
+          },
+          "maxCapitalPct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
+            "title": "Maxcapitalpct",
+            "default": "0.20"
+          },
+          "dailyLossUsed": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
+            "title": "Dailylossused",
+            "default": "0"
+          },
+          "dailyLossCap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
+            "title": "Dailylosscap"
+          },
+          "entry": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
+            "title": "Entry"
+          },
+          "stop": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop"
+          },
+          "rrTarget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
+            "title": "Rrtarget",
+            "default": "2.0"
+          },
+          "legs": {
+            "items": {
+              "$ref": "#/components/schemas/LegIn"
+            },
+            "type": "array",
+            "title": "Legs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "capital",
+          "dailyLossCap",
+          "entry",
+          "legs"
+        ],
+        "title": "SizeRequest"
+      },
+      "SizeResponse": {
+        "properties": {
+          "lots": {
+            "type": "integer",
+            "title": "Lots"
+          },
+          "qty": {
+            "type": "integer",
+            "title": "Qty"
+          },
+          "marginRequired": {
+            "type": "string",
+            "title": "Marginrequired"
+          },
+          "capitalUsed": {
+            "type": "string",
+            "title": "Capitalused"
+          },
+          "riskAmount": {
+            "type": "string",
+            "title": "Riskamount"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "withinRails": {
+            "type": "boolean",
+            "title": "Withinrails"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "limitingRail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limitingrail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lots",
+          "qty",
+          "marginRequired",
+          "capitalUsed",
+          "riskAmount",
+          "target",
+          "withinRails",
+          "warnings",
+          "limitingRail"
+        ],
+        "title": "SizeResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

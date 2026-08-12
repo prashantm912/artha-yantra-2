@@ -41,6 +41,7 @@ function renderPage() {
 }
 
 describe('FiiDerivativeStatsPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 4239ms in a full-suite run.
   it('renders the four F&O segment columns and the pivoted row', () => {
     stub(data);
     renderPage();
@@ -50,7 +51,7 @@ describe('FiiDerivativeStatsPage', () => {
     }
     // The four segment rows pivot into a single dated row.
     expect(within(table).getByText('2026-06-22')).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it('explains the Upstox analytics flag when there are no rows (flag disabled / mock stack)', () => {
     stub([]);

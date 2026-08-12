@@ -88,7 +88,7 @@ public class ManasScheduler {
         log.info("manas screen skipped ({}) — no daily equity data yet", trigger);
         return;
       }
-      int written = repo.upsertAll(r.screenDate(), r.candidates());
+      int written = repo.replaceAll(r.screenDate(), r.candidates());
       long passing = r.candidates().stream().filter(ManasCandidate::passesAll).count();
       int geo = computeGeometry(r);
       ledger.succeed(runId, written);

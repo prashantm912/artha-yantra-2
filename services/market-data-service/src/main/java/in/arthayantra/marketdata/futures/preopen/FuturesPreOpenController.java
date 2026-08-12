@@ -31,16 +31,10 @@ public class FuturesPreOpenController {
 
   /** The Futures Pre-Open scan envelope (empty/closed shape when Upstox analytics is off). */
   @GetMapping("/pre-open")
-  public Map<String, Object> preOpen() {
-    FuturesPreOpen s = service.scan();
-    return Map.of(
-        "phase", s.phase(),
-        "preOpen", s.preOpen(),
-        "asOf", s.asOf(),
-        "advances", s.advances(),
-        "declines", s.declines(),
-        "unchanged", s.unchanged(),
-        "stocks", s.stocks(),
-        "indices", s.indices());
+  public FuturesPreOpen preOpen() {
+    // the scan record already carries exactly these 8 components, in this order — the pre-D3
+    // Map.of was a field-for-field re-emission of it, and multi-key Map.of order is JVM-salted,
+    // so returning the record directly normalises order rather than changing a fixed one.
+    return service.scan();
   }
 }

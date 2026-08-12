@@ -4,10 +4,13 @@ wiring of the sweep service to real Postgres + Redis + strategy-signal (§D.1)."
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import psycopg
 import redis
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app import (
@@ -23,7 +26,14 @@ from app import (
     suggesters,
 )
 from app.backtest_client import BacktestClient
-from app.errors import ApiError, api_error_handler, invalid_path_handler
+from app.errors import (
+    ApiError,
+    api_error_handler,
+    envelope_validation_responses,
+    invalid_path_handler,
+    unhandled_error_handler,
+    validation_error_handler,
+)
 from app.notify import NtfyClient
 from app.path_grammar import InvalidParameterPath
 from app.repos import EvoRepo, JobsRepo, LiveEvidenceRepo, ReconciliationRepo, TrialsRepo
@@ -43,6 +53,10 @@ def build_app(settings: Settings | None = None) -> FastAPI:
 
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(InvalidParameterPath, invalid_path_handler)
+    # Overrides FastAPI's stock {"detail": [...]} 422 body with the shared envelope.
+    app.add_exception_handler(RequestValidationError, validation_error_handler)
+    # Catch-all: without it ANY unmapped exception left a bare 500 with no error envelope.
+    app.add_exception_handler(Exception, unhandled_error_handler)
 
     redis_client = redis.Redis.from_url(settings.redis_url)
     dispatcher = TrialDispatcher(redis_client)
@@ -237,6 +251,20 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(scheduler.router)
     app.include_router(reports.router)
     Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+
+    # The 422 body is enveloped at RUNTIME (validation_error_handler), so the published spec must
+    # say so too — FastAPI's stock HTTPValidationError would otherwise document a shape the service
+    # never returns. Done once over the finished document rather than per-route: FastAPI attaches
+    # that 422 to every route with a validated param or body, so a per-decorator `responses=` would
+    # be forgotten on the next route added.
+    def custom_openapi() -> dict[str, Any]:
+        if app.openapi_schema is None:
+            app.openapi_schema = envelope_validation_responses(
+                get_openapi(title=app.title, version=app.version, routes=app.routes)
+            )
+        return app.openapi_schema
+
+    app.openapi = custom_openapi
 
     # Arm the background scheduler driver ONLY when explicitly enabled (owner-gated .env flip →
     # the compose passthrough of the SAME name). Default OFF → dormant: campaigns then advance only

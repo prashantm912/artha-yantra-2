@@ -19,6 +19,21 @@ import java.math.BigDecimal;
  * ({@code blockingRail/operand/threshold/margin/reason}) are serialized as JSON {@code null} (key present,
  * value null) to keep the top-level shape identical; the vetoed {@code wouldBeLeg} becomes the actually
  * traded {@code firedLeg}. If the rejection shape ever changes, change this in lockstep.
+ *
+ * <p><b>ONE deliberate exception to that lockstep (F5 U4b Part 1):</b> {@code confluence.withheldAggregate}
+ * + {@code confluence.decisiveLegsHeld} are FIRED-SIDE ONLY. They exist to expose the TIGHTENING half of
+ * the {@code dot-null-withheld} proposal — champion-FIRED entries the unified null rule would have removed
+ * — which by construction has no counterpart on the rejection side. The top level, {@code checks[]} and
+ * {@code dots[]} stay field-for-field, so the §4.2 Stage-2 contrast still joins; these two simply read
+ * NULL if selected from {@code signal_rejections.diagnostic}. Do NOT "complete" the symmetry by adding
+ * them there, and do NOT add them to {@code signals.scalper_detail} — that is the light order/paper
+ * carrier, not a forensics surface.
+ *
+ * <p>The root-level {@code sentimentLevelShadow} object ({@link SentimentLevelShadow}) is NOT such an
+ * exception: it is written IN LOCKSTEP on both sides, because the sentiment operand is read on every
+ * bar that reaches the gate regardless of how that bar resolves. It is measurement only — recorded
+ * after the decision, read by no gate. Same reasoning as above puts it here rather than in
+ * {@code signals.scalper_detail}.
  */
 public final class FiredDiagnosticJson {
 
@@ -71,15 +86,51 @@ public final class FiredDiagnosticJson {
       c.put("vwapAligned", conf.vwapAligned());
       c.put("biasAligned", conf.biasAligned());
       c.put("standAside", conf.standAside());
+      // F5 U4b Part 1 — the ARMED-policy counterfactual, recorded on the FIRED side. Together these
+      // FOUR answer "would the `dot-null-withheld` policy have fired this bar?" —
+      // `decisiveLegsHeld && coverageFloorHeld && withheldAggregate >= threshold` — which is the
+      // ONLY way to see the
+      // TIGHTENING half of the change: a champion-FIRED entry the unified null rule would have
+      // removed. The shadow book covers the loosening half (champion-rejected / armed-fires) but is
+      // structurally blind here, because its writer fires on the rejection path only.
+      //
+      // Deliberately FIRED-SIDE ONLY, so the field-for-field lockstep above holds at the top level
+      // and for checks[]/dots[] but NOT inside confluence{}: selecting these two from
+      // signal_rejections.diagnostic yields NULL, which is the correct reading — the rejected side's
+      // counterfactual is the shadow book's acceptance, not a column. The tightening cell needs no
+      // simulation: those trades really happened and already carry realized PnL, so the measurement
+      // is a subtraction over signals joined on this key, not a second virtual book.
+      c.put("withheldAggregate", conf.withheldAggregate());
+      c.put("decisiveLegsHeld", conf.decisiveLegsHeld());
+      // §5.3: the counterfactual is INCOMPLETE without these. `decisiveLegsHeld` reflects the
+      // CHAMPION's legs, and the champion has the coverage floor unarmed — but the only armable form
+      // of the null policy implies it, so a low-coverage bar that fired here would keep its fired
+      // status under a policy that would have refused it, and the tightening-half subtraction this
+      // key set exists to support would be computed against a wrong population. `coverageFloorHeld`
+      // is the armed policy's coverage verdict, recorded unconditionally; `coverage` is the raw
+      // ratio, so a future re-analysis can re-floor the population without re-deriving it from the
+      // operands in SQL (which is exactly what the 2026-08-03 decision sheet had to do).
+      c.put("coverage", conf.coverage());
+      c.put("coverageFloorHeld", conf.coverageFloorHeld());
       ArrayNode dots = c.putArray("dots");
       for (ConnectTheDotsScorer.DotScore ds : conf.dots()) {
         ObjectNode n = dots.addObject();
         n.put("dot", ds.dot());
         n.put("weight", ds.weight());
         n.put("supports", ds.supports());
+        // F5 U4a — in lockstep with SignalEngine.rejectionDiagnosticJson: `absent` marks a dot whose
+        // INPUT was missing (withheld from BOTH num and den). It qualifies `supports`, which also
+        // reads false for a withheld dot, so the fired-vs-rejected contrast can now separate "no
+        // data" from "data said no" without inferring it from the weight sum.
+        n.put("absent", ds.absent());
         n.put("reason", ds.reason());
       }
     }
+    // MEASUREMENT-ONLY, and in LOCKSTEP with SignalEngine.rejectionDiagnosticJson (unlike the two
+    // U4b keys above, this one has a real counterpart on both sides — the operand is read on every
+    // bar that reaches the gate, whichever way the bar then resolves). Built AFTER the decision from
+    // the context already in hand; nothing here feeds a gate. See SentimentLevelShadow.
+    SentimentLevelShadow.of(d.context() == null ? null : d.context().oi(), d.side()).appendTo(root);
     if (d.context() != null) {
       ScalperGateContext ctx = d.context();
       ObjectNode c = root.putObject("context");

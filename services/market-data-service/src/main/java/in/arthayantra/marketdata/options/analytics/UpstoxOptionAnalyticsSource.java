@@ -21,9 +21,17 @@ import org.springframework.stereotype.Component;
  * OptionsAnalyticsController} consults it via an {@code ObjectProvider} (absent ⇒ native), so the
  * native band-computed values are the default + the transparent fallback.
  *
- * <p>Why Upstox: native PCR is computed over our captured ATM strike band, which omits deep-OTM
- * strikes Upstox's FULL chain includes (verified ~0.1–1.5% low vs Upstox; max-pain matched exactly).
- * Upstox is the full-chain source of record. REQUIRES {@code artha.upstox.analytics.enabled=true}
+ * <p>⚠️ <b>The original "why Upstox" rationale was MEASURED FALSE on 2026-08-11 (ledger row H6) and
+ * the owner has decided to revert to native.</b> It claimed native PCR omits deep-OTM strikes that
+ * Upstox's full chain includes. Re-measured live: native capture covers <b>100% of the listed strike
+ * universe on all 7 NIFTY expiries</b> (93/93, 92/92, 84/84, 103/103, 84/84, 104/104, 79/79), so
+ * there is no band to be short of. Over <b>57 paired 3-minute buckets</b> the median PCR divergence
+ * is <b>−0.01%</b> (mean −0.106%; Upstox higher in 27 and lower in 29 — no systematic direction) and
+ * max-pain is identical in <b>55/57</b>. The earlier "~0.1–1.5% low" figure is not reproducible.
+ *
+ * <p>This class stays in the tree as the alternate source; it is simply no longer the default, and
+ * nothing here should be read as a reason to re-select it. REQUIRES {@code
+ * artha.upstox.analytics.enabled=true}
  * (consumes {@link UpstoxAnalyticsClient}). {@code ceOi}/{@code peOi} stay native — Upstox exposes
  * only the ratio, not the per-side sums.
  */

@@ -348,9 +348,26 @@ services:
       # (no behaviour change); flip false in .env to disarm. Name MUST byte-match application.yml's
       # artha.corporate-actions.enabled placeholder ARTHA_CORPORATE_ACTIONS_ENABLED (#653).
       ARTHA_CORPORATE_ACTIONS_ENABLED: ${ARTHA_CORPORATE_ACTIONS_ENABLED:-true}
+      # Canary allowlist for the CA sweep — comma-separated tradingsymbols; empty = every active
+      # equity. CorporateActionJob has always read artha.corporate-actions.symbols, but without this
+      # passthrough (and the matching yml key) it was unsettable on a deployed stack, so an operator
+      # arming a "2-symbol canary" would have swept all of them.
+      ARTHA_CORPORATE_ACTIONS_SYMBOLS: ${ARTHA_CORPORATE_ACTIONS_SYMBOLS:-}
+      # artha.corporate-actions.rebuild-retry-cooldown-days placeholder (#653).
+      ARTHA_CORPORATE_ACTIONS_REBUILD_RETRY_COOLDOWN_DAYS: ${ARTHA_CORPORATE_ACTIONS_REBUILD_RETRY_COOLDOWN_DAYS:-7}
       # Phase-9 Minervini (MV-9.4): push an ntfy alert when a SEPA funnel candidate transitions into
       # the immediately-buyable band. Default off; flip in the live .env (goes to ARTHA_NTFY_TOPIC).
       ARTHA_MINERVINI_BUYABLE_ALERTS_ENABLED: ${ARTHA_MINERVINI_BUYABLE_ALERTS_ENABLED:-false}
+      # Plane-divergence probe (2026-08-03): after each Minervini screen, re-read every passer on
+      # BOTH price planes (candles@1d is dividend-back-adjusted, nse_eod_bhavcopy is not) and log
+      # which served candidates are priced two ways. Report-only — it never pages and never writes a
+      # price. Default ON because it is a read; these three exist so the owner can disable or retune
+      # it from .env WITHOUT an image rebuild (#653: a @Value default with no passthrough here is
+      # pinned to that default forever). Names MUST byte-match PlaneDivergenceProbe's
+      # artha.minervini.plane-divergence.* placeholders.
+      ARTHA_MINERVINI_PLANE_DIVERGENCE_ENABLED: ${ARTHA_MINERVINI_PLANE_DIVERGENCE_ENABLED:-true}
+      ARTHA_MINERVINI_PLANE_DIVERGENCE_MIN_PCT: ${ARTHA_MINERVINI_PLANE_DIVERGENCE_MIN_PCT:-0.5}
+      ARTHA_MINERVINI_PLANE_DIVERGENCE_LOOKBACK_DAYS: ${ARTHA_MINERVINI_PLANE_DIVERGENCE_LOOKBACK_DAYS:-420}
       # Manas Arora selection screener (a separate swing family from Minervini, its own tables): run
       # the daily 19:40-IST EOD 6-criteria screen + vcp/breakout geometry. Default off so CI/mock/fresh
       # stacks stay clean; the live .env flips it true. On-demand POST /run works regardless of the flag.
@@ -360,10 +377,48 @@ services:
       # way). Added so the owner's ticker flip is a one-line .env change. Default kite (no behaviour change).
       ARTHA_MD_SOURCE_TICKER: ${ARTHA_MD_SOURCE_TICKER:-kite}
       ARTHA_MD_SOURCE_FIIDII: ${ARTHA_MD_SOURCE_FIIDII:-nse}
+      # ---- Evening-chain cron passthroughs (added 2026-08-11) ----
+      # ⚠️ VALUES ARE THE CODE DEFAULTS, BYTE FOR BYTE. This block changes NOTHING about when these
+      # jobs run; it exists because they had no passthrough at all, so setting any of them in `.env`
+      # was silently swallowed and the YAML/code default won with no error (#653). "We set the env
+      # var" and "the job did not move" were both true at the same time.
+      #
+      # None of these ten property names appears in application.yml either — they reach Spring only
+      # through SystemEnvironmentPropertySource's relaxed dot/hyphen-to-underscore resolution
+      # (artha.bhavcopy-close.cron <- ARTHA_BHAVCOPY_CLOSE_CRON). That mechanism was unproven here:
+      # every pre-existing cron passthrough happened to carry a value identical to its code default,
+      # so live state could never have distinguished "the override works" from "the default wins".
+      # upstox contract canary
+      ARTHA_UPSTOX_CANARY_CRON: "${ARTHA_UPSTOX_CANARY_CRON:-0 30 19 * * MON-FRI}"
+      # the bhavcopy fetch the chain waits on
+      ARTHA_BHAVCOPY_EOD_CRON: "${ARTHA_BHAVCOPY_EOD_CRON:-0 30 19 * * MON-FRI}"
+      # NSE FII / participant / DII feeds
+      ARTHA_NSE_EOD_CRON: "${ARTHA_NSE_EOD_CRON:-0 0 19 * * MON-FRI}"
+      # minervini screen
+      ARTHA_MINERVINI_CRON: "${ARTHA_MINERVINI_CRON:-0 50 19 * * MON-FRI}"
+      # manas screen
+      ARTHA_MANAS_ARORA_CRON: "${ARTHA_MANAS_ARORA_CRON:-0 55 19 * * MON-FRI}"
+      # market context
+      ARTHA_CONTEXT_EOD_CRON: "${ARTHA_CONTEXT_EOD_CRON:-0 45 19 * * MON-FRI}"
+      # data-quality sweep
+      ARTHA_DATA_QUALITY_EOD_CRON: "${ARTHA_DATA_QUALITY_EOD_CRON:-0 50 19 * * MON-FRI}"
+      # equity breadth fold
+      ARTHA_BREADTH_MATERIALIZE_CRON: "${ARTHA_BREADTH_MATERIALIZE_CRON:-0 55 19 * * MON-FRI}"
+      # bhavcopy-vs-Kite close reconciliation
+      ARTHA_BHAVCOPY_CLOSE_CRON: "${ARTHA_BHAVCOPY_CLOSE_CRON:-0 10 20 * * MON-FRI}"
+      # buyable alerts (bean is @ConditionalOnProperty-disabled today, so inert)
+      ARTHA_MINERVINI_BUYABLE_ALERTS_CRON: "${ARTHA_MINERVINI_BUYABLE_ALERTS_CRON:-0 58 19 * * MON-FRI}"
       ARTHA_MD_SOURCE_OPTIONANALYTICS: ${ARTHA_MD_SOURCE_OPTIONANALYTICS:-native}
       # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.
       ARTHA_UPSTOX_ANALYTICS_ENABLED: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:-false}
       ARTHA_UPSTOX_CANARY_ENABLED: ${ARTHA_UPSTOX_CANARY_ENABLED:-false}
+      # F&O instrument-master warm: interval is clamped inside the client's 12h refresh window.
+      ARTHA_UPSTOX_FNO_MASTER_WARM_ENABLED: ${ARTHA_UPSTOX_FNO_MASTER_WARM_ENABLED:-true}
+      ARTHA_UPSTOX_FNO_MASTER_WARM_INTERVAL: ${ARTHA_UPSTOX_FNO_MASTER_WARM_INTERVAL:-PT6H}
+      # Connecting-Dots Dow factor off the live Upstox world-indices feed. Name MUST byte-match
+      # application.yml's artha.upstox.global-quotes-enabled placeholder (#653). Default false —
+      # arming changes which signals fire, so it is an owner decision, not a deploy detail.
+      ARTHA_UPSTOX_GLOBAL_QUOTES_ENABLED: ${ARTHA_UPSTOX_GLOBAL_QUOTES_ENABLED:-false}
       # IV rank/percentile trailing-window floor (days). 60 = pinned honest-null default; the
       # iv_rank dot stays dead until capture history (started 2026-06-15) crosses it. Lower ONLY
       # on rollup evidence (signal-analysis findings item #5) — never below ~15 (rank over a
@@ -486,6 +541,16 @@ services:
       ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_ENABLED: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_ENABLED:-true}
       ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_BAR_GAP_MS: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_BAR_GAP_MS:-180000}
       ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_FEED_FRESH_MS: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_FEED_FRESH_MS:-90000}
+      # G9/T23 partial-bucket canary tolerance: benign is diff <= max(absolute, pct% of the
+      # expected 1m sum) AND diff <= 10% of the sum. The absolute knob had NO passthrough before
+      # (its documented live override was unreachable from .env); the pct knob ships DORMANT at 0,
+      # which is byte-identical to the pre-G9 fixed gate. ⚠ Do NOT raise pct until pair-aware
+      # suppression exists: the benign straddle is a ± PAIR whose halves are very different
+      # fractions of their own buckets (07-29: 3.7% vs 11.9%), so any pct that quiets the thick
+      # half leaves the thin half WARNing — manufacturing the "unpaired = real defect" signature
+      # the runbook teaches operators to escalate.
+      ARTHA_SIGNALS_PARTIAL_BUCKET_CANARY_VOLUME_TOLERANCE: ${ARTHA_SIGNALS_PARTIAL_BUCKET_CANARY_VOLUME_TOLERANCE:-650}
+      ARTHA_SIGNALS_PARTIAL_BUCKET_CANARY_VOLUME_TOLERANCE_PCT: ${ARTHA_SIGNALS_PARTIAL_BUCKET_CANARY_VOLUME_TOLERANCE_PCT:-0.0}
       # T9 load-coverage watchdog: ship dormant; owner arms OBSERVE_ONLY, then ARMED.
       ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_MODE: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_MODE:-DISABLED}
       ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_GRACE_MS: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_GRACE_MS:-180000}
@@ -514,6 +579,11 @@ services:
       # mock profile, live values come from .env.
       ARTHA_NOTIFIER_NTFY_URL: ${ARTHA_NOTIFIER_NTFY_URL:-}
       ARTHA_NOTIFIER_NTFY_TOPIC: ${ARTHA_NOTIFIER_NTFY_TOPIC:-}
+      # INT-I4 insight delivery: all channels default off; the common floor defaults to NOTICE.
+      ARTHA_INSIGHTS_DELIVERY_WS: ${ARTHA_INSIGHTS_DELIVERY_WS:-false}
+      ARTHA_INSIGHTS_DELIVERY_NTFY_ENABLED: ${ARTHA_INSIGHTS_DELIVERY_NTFY_ENABLED:-false}
+      ARTHA_INSIGHTS_DELIVERY_TELEGRAM_ENABLED: ${ARTHA_INSIGHTS_DELIVERY_TELEGRAM_ENABLED:-false}
+      ARTHA_INSIGHTS_DELIVERY_SEVERITY_FLOOR: ${ARTHA_INSIGHTS_DELIVERY_SEVERITY_FLOOR:-NOTICE}
       # §18.4: app origin for the scalp alert's /orders deep link. Blank = no link (default); set to the
       # reachable app host (e.g. Tailscale) to arm it. Arm-able via .env without an image rebuild.
       ARTHA_NOTIFIER_APP_BASE_URL: ${ARTHA_NOTIFIER_APP_BASE_URL:-}
@@ -555,6 +625,12 @@ services:
       # whose SIGNAL is older than this (minutes) on a NON-swing book is rejected SIGNAL_STALE. Swing
       # books (minervini / manas-arora) are exempt; 0/negative disables. Default MIRRORS application.yml.
       ARTHA_PAPER_SIGNAL_TAKE_MAX_AGE_MINUTES: ${ARTHA_PAPER_SIGNAL_TAKE_MAX_AGE_MINUTES:-60}
+      # V058 / option D (HOLD, owner-approved 2026-08-03): comma list of books whose OPEN-position key
+      # is STRATEGY-SCOPED, so two strategies entering the same contract hold SEPARATE rows with their
+      # own exits instead of averaging into one. EMPTY = DISARMED = pre-V058 behaviour byte-for-byte;
+      # arming a book CHANGES REALISED P&L on every co-fired trade (owner decision). No capital fork:
+      # one book, one capital row, one kill switch; a sibling inherits the key's sub-account.
+      ARTHA_PAPER_STRATEGY_SCOPED_BOOKS: ${ARTHA_PAPER_STRATEGY_SCOPED_BOOKS:-}
       # F7 auto-promotion: the daily 21:00-IST evaluator that marks a strategy GRADUATED (measurement +
       # ntfy only, never a live action). Default off; flip true to arm the marker pass.
       ARTHA_GRADUATION_PROMOTION_ENABLED: ${ARTHA_GRADUATION_PROMOTION_ENABLED:-false}
@@ -575,8 +651,15 @@ services:
       ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT: ${ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT:-1.0}
       # batch/evaluator crons (Asia/Kolkata) — quoted (the value has spaces)
       ARTHA_GRADUATION_PROMOTION_CRON: "${ARTHA_GRADUATION_PROMOTION_CRON:-0 0 21 * * MON-FRI}"
-      ARTHA_MINERVINI_SWING_CRON: "${ARTHA_MINERVINI_SWING_CRON:-0 0 20 * * MON-FRI}"
-      ARTHA_MANAS_ARORA_SWING_CRON: "${ARTHA_MANAS_ARORA_SWING_CRON:-0 5 20 * * MON-FRI}"
+      ARTHA_MINERVINI_SWING_CRON: "${ARTHA_MINERVINI_SWING_CRON:-0 0 16 * * MON-FRI}"
+      ARTHA_MANAS_ARORA_SWING_CRON: "${ARTHA_MANAS_ARORA_SWING_CRON:-0 2 16 * * MON-FRI}"
+      # ---- Paper reconciler cron passthroughs (added 2026-08-11) ----
+      # Same as the market-data block: values are the code defaults byte for byte, and the only
+      # change is that an .env override now reaches Spring instead of being swallowed (#653).
+      # paper nightly V5/V16 reconciliation
+      ARTHA_PAPER_RECONCILIATION_CRON: "${ARTHA_PAPER_RECONCILIATION_CRON:-0 15 21 * * MON-FRI}"
+      # past-expiry recovery
+      ARTHA_PAPER_PAST_EXPIRY_RECON_CRON: "${ARTHA_PAPER_PAST_EXPIRY_RECON_CRON:-0 20 21 * * MON-FRI}"
       ARTHA_SWING_CANARY_CRON: "${ARTHA_SWING_CANARY_CRON:-0 30 8 * * MON-FRI}"
       # Swing-batch CATCH-UP (2026-07-17 incident): re-runs a batch the stack was down for, pinned to
       # the missed session's daily bar. Runs in the post-close/pre-open window (08:35, after the 08:30
@@ -591,6 +674,12 @@ services:
       # External dead-man's-switch for the swing batches (catches a whole-stack/host OUTAGE, which the
       # in-stack P0-4 canary can't). Blank = dormant; paste a healthchecks.io/UptimeRobot heartbeat URL
       # to arm, and set the external check to expect a ping on 15 20 * * 1-5 (TZ Asia/Kolkata).
+      # The ping is EARNED, not unconditional: it is WITHHELD when an ARMED swing family recorded no
+      # swing_batch_runs marker for the IST session, so a stack that is up but whose batch silently
+      # failed now alarms at 20:15 instead of at the 08:30 canary. An NSE holiday and a disarmed
+      # family still ping (no false alarms). It ALSO withholds past the bundled holiday calendar's
+      # covered years, where a session cannot be judged expected-or-not -- refresh libs/market-calendar
+      # (CD-2) before the horizon canary reddens or expect nightly alarms from that date on.
       ARTHA_HEARTBEAT_URL: "${ARTHA_HEARTBEAT_URL:-}"
       ARTHA_HEARTBEAT_SWING_CRON: "${ARTHA_HEARTBEAT_SWING_CRON:-0 15 20 * * MON-FRI}"
       # Session-cadence dead-man's-switch for the LIVE trading session (the swing ping above proves only
@@ -609,6 +698,7 @@ services:
       ARTHA_SCALPER_OI_SPURT_OI_PCT: ${ARTHA_SCALPER_OI_SPURT_OI_PCT:-15}
       ARTHA_SCALPER_OI_SPURT_PRICE_PCT: ${ARTHA_SCALPER_OI_SPURT_PRICE_PCT:-3}
       ARTHA_SCALPER_OI_VWAP_MIN_DISTANCE_BPS: ${ARTHA_SCALPER_OI_VWAP_MIN_DISTANCE_BPS:-15}
+      ARTHA_SCALPER_OI_DOT_COVERAGE_FLOOR: ${ARTHA_SCALPER_OI_DOT_COVERAGE_FLOOR:-0.90}
       # Shadow book (signal-analysis §7.1/§7.2): open composite-passing REJECTED entries as virtual
       # 1-lot positions so the exit sweep labels them with a real PnL (entry-gate tuning evidence).
       # Code default is false; ON for the stack — separate shadow_positions table, never touches

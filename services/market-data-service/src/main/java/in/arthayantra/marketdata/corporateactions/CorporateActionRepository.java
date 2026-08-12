@@ -24,6 +24,7 @@ public class CorporateActionRepository {
       int anchorsChecked,
       int anchorsDiverged,
       String status,
+      int refreshAttempts,
       OffsetDateTime resolvedAt) {}
 
   private final JdbcTemplate jdbc;
@@ -61,9 +62,13 @@ public class CorporateActionRepository {
     return id;
   }
 
-  /** Lifecycle transition; terminal states stamp {@code resolved_at}. */
+  /**
+   * Lifecycle transition; terminal states stamp {@code resolved_at}. {@code REFRESH_ABANDONED} is
+   * terminal (the retry bound is spent — an operator, not the job, moves it next);
+   * {@code REFRESH_FAILED} is NOT, because the next sweep resumes it (V051).
+   */
   public void updateStatus(UUID id, String status) {
-    boolean terminal = "RESOLVED".equals(status) || "FAILED".equals(status);
+    boolean terminal = isTerminal(status);
     jdbc.update(
         "UPDATE corporate_action_events SET status = ?, resolved_at = "
             + (terminal ? "now()" : "NULL")
@@ -72,12 +77,67 @@ public class CorporateActionRepository {
         id);
   }
 
+  /**
+   * Compare-and-set transition: writes {@code next} only while the row is STILL at
+   * {@code expected}, and reports whether it moved. The async remediation worker and the sweep
+   * thread both write this row, and the worker's decision is made from a status it read seconds or
+   * minutes earlier — so an unconditional write lets a finishing worker RESURRECT a terminal state
+   * the sweep wrote in the meantime (a {@code REFRESH_ABANDONED} row silently becoming
+   * {@code RESOLVED}, or worse {@code FAILED}). Every write that lands on a terminal state, or that
+   * a concurrent sweep could race, goes through here (task_6903cd5e).
+   */
+  public boolean updateStatusIf(UUID id, String expected, String next) {
+    boolean terminal = isTerminal(next);
+    int rows =
+        jdbc.update(
+            "UPDATE corporate_action_events SET status = ?, resolved_at = "
+                + (terminal ? "now()" : "NULL")
+                + " WHERE id = ? AND status = ?",
+            next,
+            id,
+            expected);
+    return rows > 0;
+  }
+
+  /** Terminal states stamp {@code resolved_at}; {@code REFRESH_FAILED} is explicitly NOT one. */
+  private static boolean isTerminal(String status) {
+    return "RESOLVED".equals(status)
+        || "FAILED".equals(status)
+        || "REFRESH_ABANDONED".equals(status);
+  }
+
+  /**
+   * The RECORDED status of one event. A failing remediation reads its own phase back from the row
+   * rather than trusting the in-flight lambda: {@code status} is one overwritten column, so whether
+   * a run committed its base is only knowable from what was actually written (V051).
+   */
+  public Optional<String> statusOf(UUID id) {
+    return jdbc
+        .query(
+            "SELECT status FROM corporate_action_events WHERE id = ?",
+            (rs, n) -> rs.getString("status"),
+            id)
+        .stream()
+        .findFirst();
+  }
+
+  /**
+   * Counts one cagg-refresh ATTEMPT against the event. Recorded before the attempt runs, so the
+   * retry bound holds even when a run dies without unwinding (the OOM kill this checkpoint exists
+   * for) — an in-memory counter would reset on every restart, and the sweep is daily (V051).
+   */
+  public void incrementRefreshAttempts(UUID id) {
+    jdbc.update(
+        "UPDATE corporate_action_events SET refresh_attempts = refresh_attempts + 1 WHERE id = ?",
+        id);
+  }
+
   /** Events for one symbol, newest first. */
   public List<EventRow> eventsFor(String exchange, String tradingsymbol) {
     return jdbc.query(
         """
         SELECT id, exchange, tradingsymbol, detected_at, effective_boundary, ratio,
-               anchors_checked, anchors_diverged, status, resolved_at
+               anchors_checked, anchors_diverged, status, refresh_attempts, resolved_at
         FROM corporate_action_events
         WHERE exchange = ? AND tradingsymbol = ? ORDER BY detected_at DESC
         """,
@@ -94,15 +154,26 @@ public class CorporateActionRepository {
                 rs.getInt("anchors_checked"),
                 rs.getInt("anchors_diverged"),
                 rs.getString("status"),
+                rs.getInt("refresh_attempts"),
                 rs.getObject("resolved_at", OffsetDateTime.class)),
         exchange,
         tradingsymbol);
   }
 
   /**
-   * The MOST-RECENT event for a symbol, or empty. The A14 resume checkpoint reads its status: a
-   * {@code BASE_REBUILT} latest event means a prior remediation re-fetched the base but crashed
-   * before the cagg refresh finished → resume the refresh only, never re-purge.
+   * The MOST-RECENT event for a symbol, or empty. It now has TWO consumers in the sweep, and they
+   * read the same row for opposite purposes:
+   *
+   * <ul>
+   *   <li>the A14 resume checkpoint — a {@code BASE_REBUILT} (crashed mid-refresh) or
+   *       {@code REFRESH_FAILED} (errored mid-refresh) latest event means a prior remediation
+   *       re-fetched the base but never finished the cagg refresh, so resume the refresh ONLY and
+   *       never redo the staged rebuild. No other status is resumable.
+   *   <li>the V057 rebuild cooldown — a {@code FAILED} latest event stamped inside
+   *       {@code artha.corporate-actions.rebuild-retry-cooldown-days} SUPPRESSES re-detection. That
+   *       gate exists because leaving the cache intact (rather than gutting it, as the pre-V057
+   *       purge did) restores nightly re-detection, which is unbounded without it.
+   * </ul>
    */
   public Optional<EventRow> latestEvent(String exchange, String tradingsymbol) {
     List<EventRow> rows = eventsFor(exchange, tradingsymbol);

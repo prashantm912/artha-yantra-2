@@ -46,6 +46,7 @@ public final class SemanticValidator {
     v.checkIndicators(config);
     v.checkGateTree(config.path("entry_rules").path("gate"), "/entry_rules/gate");
     v.checkExitRules(config);
+    v.checkOptionsPlaneLevelBases(config);
     v.checkOptimizeParameters(config);
     return v.errors.isEmpty()
         ? ValidationResult.ok(v.warnings)
@@ -167,6 +168,64 @@ public final class SemanticValidator {
         requireAlias(cross.group(3), path);
       } else {
         checkExpression(text, path);
+      }
+    }
+  }
+
+  /**
+   * An {@code options_of_underlying} strategy may not use {@code basis: percent} on a level rule
+   * ({@code stop_loss} / {@code take_profit}) — the name is ambiguous on the only strategy kind
+   * that has TWO price planes, and every consumer downstream resolves it differently.
+   *
+   * <p>{@code premium_pct} is the OPTION-premium basis: the live bracket chain
+   * ({@code PremiumBracketRules}, {@code PaperSignalListener}) and the backtest's
+   * {@code OptionsPremiumReplay} all key on that exact literal to build the premium bracket.
+   * {@code percent} is the CASH-EQUITY basis (added in #539 for the Minervini 8% initial stop) and
+   * reaches only {@code ExitEvaluator.levelDistance}, which resolves it against the INDEX entry
+   * price. So on an options strategy {@code percent} silently means a percentage of a DIFFERENT
+   * INSTRUMENT than an author writing it almost certainly intends, and builds no premium bracket.
+   *
+   * <p>The two downstream consumers disagreed in OPPOSITE directions, which is what made this
+   * worth refusing rather than documenting: the premium plane honours {@code premium_pct} and
+   * ignores {@code percent}, while {@code ScalperRisk.ENGINE_SIDE_STOP_BASES} counted
+   * {@code percent} as an engine-fireable §0B bounding stop and excluded {@code premium_pct} —
+   * yet {@code levelDistance} computes both with the SAME formula
+   * ({@code entryPrice × value ÷ 100}). A scalper whose only stop was {@code {percent, 25}}
+   * therefore LOADED as bounded while having no enforceable stop on either plane: ~25% of the
+   * index never fires intraday, and no bracket is built. That is precisely the
+   * unbounded-losing-option state the §0B hard-stop rule exists to prevent.
+   *
+   * <p>Deliberately narrow: the other level bases stay legal here because they ARE enforced
+   * index-side by {@code ExitEvaluator} ({@code atr_multiple}, {@code index_points}), so the
+   * position is bounded even though they build no premium bracket either.
+   *
+   * <p>⚠️ <b>This refusal is load-bearing for a rule in another module.</b> {@code ScalperRisk}
+   * has since dropped {@code percent} from its bounding-exit set, but the two decisions are still
+   * joined by nothing except this {@code "options_of_underlying"} literal appearing in both.
+   * Widening the mode keying here, or relaxing the refusal for an unrelated reason, changes what
+   * the §0B hard-stop rule admits at engine load. {@code ScalperStopBasisCouplingTest}
+   * (strategy-signal-service) freezes the joint verdict of the two and goes red on either edit
+   * alone — change this method and expect to answer to it.
+   */
+  private void checkOptionsPlaneLevelBases(JsonNode config) {
+    if (!"options_of_underlying".equals(config.path("universe").path("mode").asText())) {
+      return;
+    }
+    JsonNode exitRules = config.path("exit_rules");
+    for (int i = 0; i < exitRules.size(); i++) {
+      JsonNode rule = exitRules.get(i);
+      String type = rule.path("type").asText();
+      if (!"stop_loss".equals(type) && !"take_profit".equals(type)) {
+        continue;
+      }
+      if ("percent".equals(rule.path("params").path("basis").asText())) {
+        errors.add(
+            new ValidationIssue(
+                "/exit_rules/" + i + "/params/basis",
+                "'percent' is the cash-equity basis and is ambiguous on an options strategy: it"
+                    + " resolves against the INDEX entry price and builds no premium bracket."
+                    + " Use 'premium_pct' for an option-premium level, or"
+                    + " 'index_points'/'atr_multiple' for an index-side level."));
       }
     }
   }

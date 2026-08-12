@@ -12,6 +12,7 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Deterministic mock history (B-11): bucket-keyed synthesis — the same (symbol, interval, bucket)
@@ -28,6 +29,7 @@ public class MockHistoricalCandleGateway implements HistoricalCandleGateway {
   private final BigDecimal corporateActionRatio;
   private final LocalDate corporateActionBoundary;
   private final AtomicBoolean corporateActionActive;
+  private final AtomicReference<String> failOnInterval = new AtomicReference<>("");
 
   /** Wires the synthesizer + CA scenario knobs. */
   public MockHistoricalCandleGateway(
@@ -50,8 +52,24 @@ public class MockHistoricalCandleGateway implements HistoricalCandleGateway {
     corporateActionActive.set(active);
   }
 
+  /**
+   * Makes {@link #fetch} throw for ONE interval ({@code null} disarms) — the planted
+   * upstream-failure scenario, sibling to the planted split above.
+   *
+   * <p>It exists to reach the one state no other fixture can: a corporate-action re-backfill that
+   * dies PART WAY THROUGH, after the 1d leg has already succeeded. That is the exact point the old
+   * purge-then-fetch order had already destroyed the symbol's history by, so it is the fixture that
+   * discriminates the fetch → verify → swap order from the one it replaced.
+   */
+  public void setFailOnInterval(String interval) {
+    failOnInterval.set(interval == null ? "" : interval);
+  }
+
   @Override
   public List<Candle> fetch(InstrumentKey key, String interval, Instant from, Instant to) {
+    if (interval.equals(failOnInterval.get())) {
+      throw new IllegalStateException("planted upstream failure fetching " + interval);
+    }
     List<OffsetDateTime> buckets =
         interval.equals("1d")
             ? tradingBuckets.dayBuckets(from.atOffset(Ist.OFFSET), to.atOffset(Ist.OFFSET))

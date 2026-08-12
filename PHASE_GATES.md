@@ -59,6 +59,146 @@ subset is CI-enforced).
 > via a one-time 08:50 task on 07-28 (expected: clean no-op). Owner items unchanged: B8 clock, T9
 > arming, I4 ~2026-08-09.
 
+> **CURRENCY UPDATE 2026-07-29 (supersedes the 07-28 block above for the SCALPER story):** the
+> scalper→paper path went from dead to bounded in two days, in four shipped pieces. **#1067** revived
+> it (sizing was computed against the INDEX future, so `premium_budget` floored to 0 lots on every
+> entry for three weeks, silently); **#1071** resolved the option's exchange from the instrument
+> master rather than its name (the same field feeds the UNARMED real-money path, so a SENSEX option
+> stamped NSE was a latent landmine); **#1084** added `max_lots` + `min_premium_inr` and made the LIVE
+> path honour both, closing a three-layer disagreement where *replay honoured a param, live ignored
+> it, and the schema forbade it*; **#1086** bound the capital governors at the writer — the deployment
+> cap now refuses the order that CROSSES it, a per-book advisory lock serializes check-plus-write,
+> straddle legs open atomically, and sub-account routing reads deployed capital under that same lock.
+> All four are DEPLOYED and fingerprint-verified.
+>
+> **CURRENCY UPDATE 2026-07-30 (the entry-gate track has a verdict; the frontier moves to the EXIT):**
+> the 07-29/30 run closed the pickup-sheet G-rows (#1111–#1119, live at `f6ba4dab`) and produced one
+> finding that reorders the board: **every measured loosening of the scalper ENTRY gate has lost
+> money — T1 (multiplier, 2W/9L), T7 (threshold, worst book), G13 (IV bloc, undecidable at 6 legs),
+> G10 (time-of-day volume profile, 265 legs, +324.87 gross but −590.95 after 1% cost).** Four tests,
+> three knobs, one direction. G10's profile IS built and reviewed but stays **default-OFF** —
+> recommendation is not to arm. ⚠️ **All four are conditional on the 30-minute `time_stop`, which G11
+> says is itself the dominant term in scalper P&L — so G11 (exit doctrine) is now the highest-leverage
+> open row, and if its exit changes every one of the four must be re-run.** G11 is data-gated on a
+> chop-day observation; **G15 shipped the detector that will announce one** (regime label on each
+> `rollup.md` session row, base rate ~29% ⇒ ~3–4 sessions), which converts an indefinite wait into a
+> short clock. Also closed: **G12** (frozen-operand probe; the `atmIv` freeze turned out to be
+> CORRECT-by-construction — a daily EOD scalar — so the defect belongs to the dot, not the feed) and
+> **G14** (convergence measured: 5–7 strategies on one option key on 6 of 7 sessions, not binding at
+> today's fire rate but directly in the path of any rise). Infrastructure: a required check had been
+> **masking a live Modulith cycle on main** since #1094 by filing a deterministic failure as a flake
+> (#1115 pins structural tests to zero retries; #1116 broke the cycle). D3 burn-down 47 → **37**.
+>
+> **OWNER DECISION 2026-07-29: `budget_inr` HOLDS at ₹15,000 for two weeks; the ₹20,000 raise
+> ([#1075](https://github.com/prashantm912/artha-yantra-2/pull/1075)) stays open and is revisited on
+> LIVE data on 2026-08-12** (scheduled task `revisit-scalper-budget-inr-2026-08-12`). The decision
+> turns on one arithmetic fact: the sub-account allocation is ₹30,000 and the ceiling refuses when
+> projected > allocation, so at ₹15,000 each account holds exactly 2 and the book's 80% cap binds
+> first at 8 — while ANY budget above ₹15,000 drops each account to 1 and concurrency to 5. The cliff
+> is exactly at ₹15,000, and the two numbers that should decide it (real `ZERO_SIZE` rate, real peak
+> concurrency) did not exist yet because the path had been dead.
+>
+> Also live from the same wave: **#1064** (no more phantom zero-volume 1m bars on non-trading days),
+> **#1073** (S24 expiry-day exemption covers the spurt dot), **#1076** (a close this pass did not
+> perform is no longer reported as one), **#1077** (edge-gateway Map-returning handlers typed — D3
+> slice 1), **#1082** (T24: the volume dot tests the floor the RAIL tested; verify task 07-29 16:20),
+> **#1065** (exit-equivalence fixture widened — all copies AGREE). Owner items unchanged: B8 clock,
+> T9 arming, I4 ~2026-08-09, and now budget_inr ~2026-08-12.
+>
+> **LATE 2026-07-29 — architecture-deepening sweep + D3 slice 1 (main `195bfd1b`).** The four §9
+> candidates are resolved: **§9-02 CLOSED** ([#1094](https://github.com/prashantm912/artha-yantra-2/pull/1094),
+> one definition of the CA-adjustment factor), **§9-05** done earlier, **§9-06 DECLINED** (the two
+> 1m→N rollup anchors are mutually exclusive — IST-midnight for `time_bucket` parity vs 09:15
+> SESSION_OPEN for the grid join; 555 minutes makes them identical for 1/3/5/15m and divergent for
+> 10/30/60m, so one definition provably cannot serve both), and **§9-04 BUILT but HELD OPEN**
+> ([#1095](https://github.com/prashantm912/artha-yantra-2/pull/1095) — `PremiumLevels` gives the
+> `premium_pct` formula one home; the ledger gate reads "widen the fixture **+ owner go**", the
+> widening is met via #1065 and the go is not, so it awaits the owner and has had no review round).
+>
+> **D3 slice 1 (Map-return burn-down) moved 68 → 47 handlers**:
+> [#1097](https://github.com/prashantm912/artha-yantra-2/pull/1097) typed the whole signals family
+> (25→18) and [#1098](https://github.com/prashantm912/artha-yantra-2/pull/1098) the paper read
+> envelopes + journal list (18→14). Remaining: market-data 26, strategy-signal 14, backtest 7.
+> These are contract-visibility changes only — no engine, money, parity or migration surface — and
+> **need no deploy**: they alter the published OpenAPI shape and the generated TS client, not
+> runtime behaviour. New chip task_7f57c0d5 (`OpeningSignal`'s three nullable `JsonNode` fields).
+
+> **CURRENCY UPDATE 2026-08-02 (15 PRs #1220–#1235, 3 deploy rounds; main = `aa610b04`; `gh` reports 17
+> merges on the calendar day, the extra two being #1218/#1219, the tail of the preceding E4 session).**
+> Three things changed the live stack, and one thing changed what the ledger can be trusted to say.
+>
+> **LIVE NOW.** **V055 `ck_paper_positions_closed_at_matches_status`**
+> ([#1222](https://github.com/prashantm912/artha-yantra-2/pull/1222) @ `28f95e20`) — a **BICONDITIONAL**
+> (owner-directed), `CHECK (((status = 'CLOSED') = (closed_at IS NOT NULL)))`, so it also forbids a
+> non-CLOSED row carrying a `closed_at`. Applied via `up -d --force-recreate flyway-init` and probed
+> **twice**, per the standing rule that a healthy container proves nothing: by name in `pg_constraint`
+> AND by behaviour (a rollback-only INSERT of a CLOSED row with no `closed_at` was rejected). The
+> invariant had held only by convention — one writer — while `closed_at` is load-bearing for
+> `listClosed`, `PortfolioReader`, `PaperReconciliationRepository`, `GraduationService` and
+> `PaperService.equity()`'s IST-date buckets.
+>
+> **M40 — the 6% aggregate open-risk cap on FRESH Manas entries — is MERGED + DEPLOYED + LIVE**
+> ([#1221](https://github.com/prashantm912/artha-yantra-2/pull/1221) @ `70911904`; ledger row E4). Fresh
+> entries had been unbounded by the doctrine's 5–6% aggregate cap because the existing calculator was
+> wired only to the `isAdd` branch, and `max_open_paper_positions=7` is shared by BOTH Manas strategies
+> through one `Books.MANAS_ARORA` key — so 7 × 1% was reachable **with pyramiding OFF**. ⚠️ **It merged
+> as a DRAWDOWN-control change with the CAGR cost disclosed, NOT on a CAGR argument.** Current numbers
+> are #1228's re-measurement against the semantics that actually shipped: **CAGR −0.88pp (a COST, and
+> its sign FAILS drop-one robustness), maxDD −11.62pp shallower (SURVIVES 8 of 8 cap arms), Sharpe
+> +0.07.** The earlier +4.08pp "benefit" is **WITHDRAWN** — it described a ceiling case production almost
+> never reaches. The correlated-shock question the cap exists for is untouched: maxDD over a historical
+> replay is a realised-path statistic, not a tail bound. Deploy confirmed by jar fingerprint
+> (`ManasGoverningStopCache.class`, a file #1221 added).
+>
+> **The bank-cache eviction is now SELECTIVE** ([#1226](https://github.com/prashantm912/artha-yantra-2/pull/1226)
+> @ `e5e9616b`, owner-directed HOLD — it touches the LIVE signal-eval path). `SignalEngine.reload()` no
+> longer calls `bankCache.clear()`; it retains any bank whose key is still derivable from the freshly
+> loaded set. That closes chip `task_f10a03` in full and **UNBLOCKS the cheap level-triggered 20 s
+> reconcile design for F10**, which had been rejected purely over bank thrash — one strategy's flapping
+> universe used to cold-start all ~38 strategies' warm ta4j banks. **The design is not built and nothing
+> was armed by this;** what changed is that its blocking objection is gone.
+>
+> **DEPLOY STATE — ALL SEVEN SERVICES CURRENT on `aa610b04` as of ~19:40 IST, 13/13 healthy.** A third
+> round rebuilt strategy-signal, market-data, backtest, edge-gateway and frontend-react at ~19:37 IST.
+> ⚠️ **The interesting part is that this line said "five services STALE" forty minutes earlier and was
+> correct at the time** — worth keeping, because the drift was caught by asking the running service
+> what it serves, not by comparing image timestamps. **The same probe failed and then passed:**
+>
+> ```
+> committed      BacktestTradeItem.entryPrice → {"type": "string"}
+> live @ ~19:20                              → {"type": "number"}   FAILED (four Java services stale)
+> live @ ~19:40                              → {"type": "string"}   PASSES after the aa610b04 round
+> ```
+>
+> Runtime money behaviour was never affected — the drift was purely spec-generation — but the live
+> `/v3/api-docs` did genuinely disagree with the committed contract, and only this probe showed it.
+> ⚠️ **Nested-jar trap, hit for real here and it cost a false negative:** #1234's
+> `BigDecimalStringModelConverter`/`Customizer` live in `common-web-core`, so
+> `unzip -l /app/*.jar | grep -c BigDecimalString` returns **0** on all four Java services; extracting
+> `BOOT-INF/lib/common-web-core-*.jar` first returns **3** (two classes + one nested record). A 0 from
+> the outer fat jar is not evidence of absence. Also re-verified after the recreate: M40 classes still
+> present, V055 still enforcing, frontend serving `index-D0wPA9GI.js` — hash-identical to the built
+> `dist/`, an identity check rather than an mtime. ⚠️ **`installed=f` on the newest engine-reload row
+> is NORMAL:** reloads pair up after every deploy and alternate (97→98, 99→100, 101→102, each `t`→`f`,
+> ~38 s apart) — the first installs, the second is the reconcile finding no drift. Judge health on
+> `unresolved == 0` (current row: **38 loaded / 0 unresolved / 0 load_errors**), never on `installed`.
+> Per-service table: ledger §0, the 2026-08-02 closeout block.
+>
+> **AND THE THING THAT CHANGED WHAT THE LEDGER MEANS.** Three audit shards (#1230/#1231/#1232) read the
+> ledger against git/gh/code and found a fabricated-justification row, five stale rows, and **8
+> genuinely-open items invisible to the enumeration recipe** — now promoted to ledger **group H**. Two
+> corrections are load-bearing platform-wide: **(1)** #941's `SessionLivenessHeartbeat` had been
+> **UNARMED for 14 days** and read as armed because the sibling BATCH var is set — it is now
+> **ARMED-UNVERIFIED**, not armed, and a scheduled task proves it Monday; **(2)** T1/T7/G13/G10 revert
+> from FINAL to **CONDITIONAL** — "measured under the 30-minute `time_stop`" was a HARNESS parameter
+> silently upgraded into a claim about armed config, and only 18 of 63 configs (12 of 38 live) actually
+> run 30 min. **No knob was reopened and no verdict was overturned.** The near-term dated gates are
+> **H1** (prove the heartbeat pings — `verify-session-heartbeat-armed-20260803`, 08-03 10:00 IST),
+> **H4** (`zombie-paper-position-audit-20260804`, 08-04 08:30 IST),
+> `verify-ca-repair-and-canaries-20260804` (08-04 17:00 IST), and the `budget_inr` revisit
+> (`revisit-scalper-budget-inr-2026-08-12`). **H2** (18 live `-pe` strategies, 0 signals since 07-21
+> against 69 non-PE) needs no new data — only someone to read the query it already has.
+
 **Re-platformed 2026-06-19 to the OpenAlgo + React master plan.**
 `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` §16.1 is now the
 forward-work authority (Phases 0–6). The legacy **Stage A–G** system in the sections below is the

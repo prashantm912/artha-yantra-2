@@ -1,0 +1,8 @@
+{
+  "comment": "M7/M27 (#128 batch scoping) frozen-output golden for ManasAroraBacktestService. Targets the PRODUCTION headline: PRIMARY_VARIANT=rs-turnover-nopyramid (RS-rank>=70 AND the turnover floor), portfolioRsPriorityNet (RS-priority slots, NET of transaction costs — the realistic-live estimate), NOT the RS-relaxed technical variant or FIFO-gross portfolio(). Captured by ManasBacktestGoldenIntegrationTest.headlineStatsMatchTheFrozenGolden over a fixed, seeded 30-symbol/280-day panel with a genuine per-symbol uptrend-steepness gradient (breakoutPanel, prefix M27MANASGOLD) so weightedRs's cross-sectional RS-rank actually differentiates symbols (a uniform post-hoc price scale cancels out of a % return and was measured to produce a degenerate, 0-trade RS distribution). Re-capture ONLY on a deliberate doctrine/formula change: run the test, copy the printed M27-GOLDEN[Manas] line's values here, and note WHY in a commit message.",
+  "totalTrades": 19,
+  "tradesTaken": 8,
+  "cagrPct": "-99.57",
+  "maxDrawdownPct": "2.94",
+  "sharpe": "0.00"
+}

@@ -8,6 +8,7 @@ import in.arthayantra.marketdata.candles.CandleQueryService;
 import in.arthayantra.marketdata.kite.FuturesContractSource;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.options.OiInterval;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
@@ -49,11 +50,12 @@ public class FuturesOiChartService {
   /** One interval's candle: real per-bucket OHLC + the contract's OI at that bucket (null when absent). */
   public record FutOiCandle(
       OffsetDateTime time,
-      BigDecimal open,
-      BigDecimal high,
-      BigDecimal low,
-      BigDecimal close,
+      @Schema(type = "string") BigDecimal open,
+      @Schema(type = "string") BigDecimal high,
+      @Schema(type = "string") BigDecimal low,
+      @Schema(type = "string") BigDecimal close,
       long volume,
+      @Schema(types = {"integer", "null"})
       Long oi) {}
 
   /** The oi-chart payload: the contract header + the per-interval candle+OI series (ascending). */

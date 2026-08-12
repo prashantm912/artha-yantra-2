@@ -60,6 +60,22 @@ public class FuturesUniverseResolver {
    * reports "resolved every universe". Only {@link #resolveScreener} may treat it as empty, via
    * {@code missingInstrumentIsEmpty}, because there a picked STOCK mover legitimately may be
    * cash-only.
+   *
+   * <p><b>A 200 carrying {@code "contracts": []} follows the SAME asymmetry</b> (H8 /
+   * {@code task_f624fca7}, closing #877's one remaining fused branch). #877 un-fused
+   * {@code !isArray()} from {@code isEmpty()} and gave them different meanings — non-array ⇒
+   * unresolved, empty ⇒ legitimately empty. The second half was a deliberate choice resting on a
+   * cross-service premise ("market-data never returns 200-with-empty-contracts") that was true,
+   * load-bearing, and pinned by nothing. It is pinned now, on the producer side, by
+   * {@code FuturesTermStructureServiceTest}; and on this side an empty array on the INDEX path is
+   * a fault, because every legitimate "nothing to trade" reaches this class through a different
+   * door — a cold chain 503s, off-hours serves a stale non-empty ladder, an unlisted underlying
+   * 404s, and a screener that picked no movers returns empty from {@link #resolveScreener}, a
+   * different site entirely. So reclassifying this branch cannot fire on a legitimate state.
+   *
+   * <p>Full evidence, including why it is unreachable today and why it would nonetheless be a
+   * silent whole-book outage if it ever fired:
+   * {@code docs/signal-analysis/2026-08-03-h8-empty-index-contracts.md}.
    */
   public Optional<List<StrategyDefinition.InstrumentRef>> resolve(
       String underlyingExchange, String underlying, String contract, int rollDaysBeforeExpiry) {
@@ -91,7 +107,25 @@ public class FuturesUniverseResolver {
         return Optional.empty();
       }
       if (contracts.isEmpty()) {
-        log.warn("no futures contracts for underlying {} — empty universe", underlying);
+        if (!missingInstrumentIsEmpty) {
+          // INDEX path: same rule as the 404 below, for the same reason. An index always has listed
+          // futures, so "the ladder is present but empty" can no more be a legitimate stand-aside
+          // than "the ladder is missing" — and reading it as one is the 2026-07-15/16 outage shape:
+          // the strategy is dropped as RESOLVED_EMPTY, which is not counted in `unresolved`, is not
+          // `abnormal()`, and is therefore skipped by the ARMED T9 coverage watchdog. The whole book
+          // can go dark with every counter green and the dedicated pager holding its fire.
+          //
+          // Unreachable from today's producer — FuturesTermStructureService either throws or returns
+          // a non-empty list, now pinned by FuturesTermStructureServiceTest — so this is defence in
+          // depth against that producer being made fail-soft later, not a live fix. Nothing about
+          // live behaviour changes today.
+          log.warn(
+              "empty futures contracts array for INDEX underlying {} — unresolved universe"
+                  + " (an index ladder is never legitimately empty)",
+              underlying);
+          return Optional.empty();
+        }
+        log.warn("no futures contracts for underlying {} — empty universe (screener)", underlying);
         return Optional.of(List.of());
       }
       int index = "next_month".equals(contract) ? 1 : 0;
@@ -121,7 +155,12 @@ public class FuturesUniverseResolver {
     } catch (HttpClientErrorException.NotFound e) {
       if (missingInstrumentIsEmpty && isMissingInstrument(e)) {
         // Screener path ONLY: a picked stock mover with no listed futures is cash-only — skip it.
-        log.warn("no futures contracts for underlying {} — empty universe", underlying);
+        // ⚠️ This message used to be BYTE-IDENTICAL to the empty-array branch's above, which emits
+        // for the opposite reason. A live log line could not tell an upstream fault from a correct
+        // skip, and the H8 investigation's own "zero occurrences" evidence survived only because the
+        // count was zero. Both sites now name their cause.
+        log.warn(
+            "no listed futures for screener-picked underlying {} — skipped (cash-only)", underlying);
         return Optional.of(List.of());
       }
       log.warn("futures universe resolution failed for {}: {}", underlying, e.getMessage());

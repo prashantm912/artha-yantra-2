@@ -28,20 +28,20 @@ public class OrdersController {
 
   /** The broker orderbook — placed orders with their lifecycle status. */
   @GetMapping("/orderbook")
-  public Map<String, Object> orderbook() {
-    return Map.of("items", gateway.orderbook());
+  public OrderReadEnvelopes.Orderbook orderbook() {
+    return new OrderReadEnvelopes.Orderbook(gateway.orderbook());
   }
 
   /** The broker net positions with mark-to-market P&amp;L. */
   @GetMapping("/positions")
-  public Map<String, Object> positions() {
-    return Map.of("items", gateway.positions());
+  public OrderReadEnvelopes.Positions positions() {
+    return new OrderReadEnvelopes.Positions(gateway.positions());
   }
 
   /** The broker tradebook — executed fills. */
   @GetMapping("/tradebook")
-  public Map<String, Object> tradebook() {
-    return Map.of("items", gateway.tradebook());
+  public OrderReadEnvelopes.Tradebook tradebook() {
+    return new OrderReadEnvelopes.Tradebook(gateway.tradebook());
   }
 
   /** The funds/margin snapshot (a single object, not an envelope). */

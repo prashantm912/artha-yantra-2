@@ -63,7 +63,10 @@ class RiskServiceHeatCapTest {
     when(account.equity(BOOK)).thenReturn(new BigDecimal("150000"));
     when(notifier.configured("NTFY")).thenReturn(true);
     RiskService risk =
-        new RiskService(settings, positions, account, margin, notifier, CLOCK, enforcementEnabled);
+        new RiskService(
+            settings, positions, account, margin, notifier, CLOCK, enforcementEnabled,
+            new BigDecimal("6.0"), new ManasGoverningStopCache(),
+            new PyramidRiskCapAuditor(settings, notifier));
     return new Harness(risk, settings, margin, notifier);
   }
 
@@ -75,8 +78,8 @@ class RiskServiceHeatCapTest {
 
   private static PaperMarginClient.Quote priced(String span) {
     return new PaperMarginClient.Quote(
-        true, null, new BigDecimal(span), BigDecimal.ZERO, new BigDecimal(span), new BigDecimal(span),
-        new BigDecimal(span));
+        true, null, new BigDecimal(span), BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+        BigDecimal.ZERO, new BigDecimal(span), new BigDecimal(span), new BigDecimal(span));
   }
 
   @Test

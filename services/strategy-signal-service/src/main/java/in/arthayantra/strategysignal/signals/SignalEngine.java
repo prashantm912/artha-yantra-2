@@ -29,6 +29,7 @@ import in.arthayantra.strategysignal.scalper.ScalperGateContext;
 import in.arthayantra.strategysignal.scalper.ScalperGates;
 import in.arthayantra.strategysignal.scalper.ScalperManualChecks;
 import in.arthayantra.strategysignal.scalper.ScalperRisk;
+import in.arthayantra.strategysignal.scalper.SentimentLevelShadow;
 import in.arthayantra.strategysignal.scalper.StrikePicker;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
@@ -322,6 +323,10 @@ public class SignalEngine {
   // under threshold (V044 composite_rejections). Bounded ASYNC writer so a DB stall can never park
   // the sole signal-eval thread (#866 class).
   private final CompositeRejectionWriter compositeRejections;
+  // MEASUREMENT ONLY, live-only: the per-bar sentiment-operand counterfactual for the E9 D4
+  // confluence-flip EXIT oracle (V056). Bounded ASYNC writer — this rides the PROTECTIVE EXIT path,
+  // where parking the sole signal-eval thread on I/O would be at its most expensive.
+  private final ExitOracleShadowWriter exitOracleShadows;
 
   /**
    * Last-resort exchange resolution for a leg market-data did not key (see {@link
@@ -465,7 +470,8 @@ public class SignalEngine {
   private volatile int lastReloadUnresolvedDrops;
   // Package-visible so tests can shorten it; ONE source of truth (no @Value default to drift from).
   long kiteConnectedReloadDelayMillis = KITE_CONNECTED_RELOAD_DELAY_MILLIS;
-  // Warm ta4j banks per (version|instrument) — cleared on reload/hot-swap (P1-12, D17 live).
+  // Warm ta4j banks per (version|instrument) — swept on reload/hot-swap, keeping only the keys the
+  // freshly loaded set can still mint (P1-12, D17 live; see the sweep in reload()).
   private final Map<String, IndicatorBank> bankCache = new ConcurrentHashMap<>();
   private final Map<String, LocalDate> preCloseDone = new ConcurrentHashMap<>();
   private final ExecutorService evalExecutor =
@@ -537,12 +543,51 @@ public class SignalEngine {
 
   private final Timer evalTimer;
   private final Timer barToEmitTimer;
+  // G8/T26: the telescoping stage split of the bar-close->emit path. INSTRUMENTATION ONLY — every
+  // hook is a nullable-safe no-op and nothing here decides anything. ay_signal_bar_to_emit_seconds
+  // measured 17.0s mean across ALL 20 of 2026-07-29's signals (entries AND exits, one 606ms
+  // outlier), killing the strike-resolution hypothesis without naming a replacement; these stages
+  // are what let the next session's scrape name the stage instead of the total.
+  private final EmitStageRecorder emitStages;
   private final Counter emitted;
   private final Counter evalFailures;
   // One counter per Outcome — see the enum. evalTimer wraps onClosedBar INCLUDING its early
   // returns, so ay_signal_eval_duration_seconds_count can never tell these outcomes apart; that is
   // part of why the chart-stage blind spot hid for so long.
   private final java.util.Map<Outcome, Counter> outcomeCounters = new java.util.EnumMap<>(Outcome.class);
+  // The PER-STRATEGY dimension the meters above deliberately do NOT carry (F5 unit U2 / V053): 63
+  // slugs x 7 outcomes would add 441 Prometheus series to a scrape that exists to be cheap, so the
+  // dimension lives here and its read surface is a database row, not a meter. Keyed by the IST
+  // SESSION DATE OF THE BAR so a count is attributed by the bar it came from rather than by when the
+  // flush happens — that is what lets StrategyEvalDenominatorRepository write plain cumulative values
+  // with no cross-date ambiguity and no checkpoint. Written by the single eval thread, read by
+  // SignalEvalOutcomeRollupJob's scheduler thread: ConcurrentHashMap + LongAdder, never a lock the
+  // eval thread can contend on.
+  private final ConcurrentHashMap<StrategyEvalKey, java.util.concurrent.atomic.LongAdder>
+      strategyEvalCounts = new ConcurrentHashMap<>();
+  // The two session dates strategyEvalCounts retains, advanced ONLY by countEvaluation — i.e. by the
+  // eval thread, which is the sole creator and incrementer of those adders. That is the whole point:
+  // an earlier revision pruned the map from the ROLLUP thread using the FLUSH CLOCK, which cross-vendor
+  // review showed is reachable-unsafe (the single eval FIFO can still hold prior-session bars after a
+  // JDBC or eval stall; such a bar recreates the pruned key FROM ZERO and the next REPLACE upsert
+  // overwrites the larger durable total with the smaller fresh one — losing the session AND regressing
+  // the row). Pruning here removes the cross-thread window entirely: a key can only be dropped by the
+  // very thread that would recreate it, and only once THAT thread has itself counted a bar from a newer
+  // session. `volatile` is belt-and-braces — the eval executor is single-threaded, so these are
+  // effectively thread-confined, but the field is cheap and a future second consumer must not silently
+  // read a stale date.
+  private volatile LocalDate newestCountedSession;
+  private volatile LocalDate previousCountedSession;
+  // The value most recently CONFIRMED durable per V053 key, written by SignalEvalOutcomeRollupJob
+  // ONLY after a successful upsert. It is what makes eviction safe: an out-of-window key is retained
+  // until its live total equals its acknowledgement, so a session whose writes all FAILED can never
+  // be dropped. Round-2 review caught the hole this closes — eviction used to fire on the session
+  // boundary alone, which silently orphaned an unwritten (or partially written) session forever: no
+  // later snapshot could resend it because the source of truth was gone. Also serves as the
+  // write-avoidance filter (see pendingDenominatorWrites), so there is ONE record of "what is
+  // durable" rather than two that can disagree.
+  private final ConcurrentHashMap<StrategyEvalKey, Long> acknowledgedDenominators =
+      new ConcurrentHashMap<>();
   // Identifies THIS generation of the counters above. Born with them and never reassigned, so a
   // restart necessarily yields both zeroed counters and a fresh epoch — the invariant that lets
   // SignalEvalOutcomeRollupJob keep its delta checkpoint in the DB instead of in memory (V045).
@@ -570,11 +615,13 @@ public class SignalEngine {
       RejectionWriter rejectionWriter,
       RiskSuppressionWriter riskSuppressions,
       CompositeRejectionWriter compositeRejections,
+      ExitOracleShadowWriter exitOracleShadows,
       java.util.Optional<EngineReloadLedger> reloadLedger,
       org.springframework.transaction.PlatformTransactionManager transactionManager,
       @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes,
       @Value("${artha.signals.record-composite-rejections:true}") boolean recordCompositeRejections) {
     this.compositeRejections = compositeRejections;
+    this.exitOracleShadows = exitOracleShadows;
     this.exchangeResolver = exchangeResolver.orElse(null);
     this.reloadLedger = reloadLedger.orElse(null);
     this.recordCompositeRejections = recordCompositeRejections;
@@ -599,6 +646,7 @@ public class SignalEngine {
         Timer.builder("ay_signal_bar_to_emit_seconds")
             .publishPercentiles(0.5, 0.95)
             .register(meterRegistry);
+    this.emitStages = new EmitStageRecorder(meterRegistry);
     this.emitted = meterRegistry.counter("ay_signals_emitted_total");
     this.evalFailures = meterRegistry.counter("ay_signal_eval_failures_total");
     // ---- Engine-liveness read surface (chip task_0bed1621) --------------------------------------
@@ -904,8 +952,11 @@ public class SignalEngine {
     // whole design. `container != null` keeps BOOT on the install path — it MUST resubscribe, since
     // that is what registers the kite.status listener the retry chain depends on. Telemetry still
     // refreshes: the published-set snapshot must stay current or the 20s reconcile would see
-    // phantom drift. (The cheap half of chip task_f10a03; its broader unconditional-clear question
-    // is untouched.)
+    // phantom drift. (The cheap half of chip task_f10a03.) NOTE: the selective sweep below now makes
+    // this branch redundant FOR BANK RETENTION specifically — identical identities imply identical
+    // versionIds and universes, so the sweep would evict nothing anyway. It is still what skips the
+    // resubscribe and the reinstall, so it stays; it is simply no longer the only thing standing
+    // between an equal reload and a cold indicator cache.
     if (container != null && freshIdentities.equals(installedIdentities)) {
       this.lastReloadUnresolvedDrops = unresolvedDrops;
       this.lastReloadedPublishedSet = publishedVersionSetOf(all);
@@ -921,7 +972,34 @@ public class SignalEngine {
       }
       return outcome;
     }
-    bankCache.clear(); // definitions/universes may have changed — banks rebuild on next bar (P1-12)
+    // Chip task_f10a03, residual half. The equality early-return above covers an IDENTICAL reload;
+    // what it cannot cover is a FLAPPING universe — one strategy that resolves on attempt N and
+    // differently (or, off the keep-best chain, not at all) on N+1. Its identity differs, so the
+    // early-return does not fire, and the old unconditional clear() then cold-started ALL ~38
+    // strategies' banks because ONE of them flipped.
+    // Evict SELECTIVELY instead: a bank stays valid iff its cache key is still derivable from the
+    // fresh set, and the key IS the whole invalidation surface — IndicatorBank.build(definition,
+    // signal, provider) takes exactly three inputs, each keyed or immutable:
+    //   * definition — keyed by versionId. strategy_versions is structurally immutable: the only two
+    //     UPDATEs anywhere in the repo touch status/published_at (StrategyRepository:255,258, D18),
+    //     and the definition is a pure function of that row's config (StrategyCompiler.compile,
+    //     :796). Same versionId ⇒ same definition, always.
+    //   * signal InstrumentRef — keyed by exchange:tradingsymbol; evaluateAtBarClose constructs the
+    //     ref from those same two key components (:1579).
+    //   * provider — the single injected LiveSeriesStore, never reassigned. Its map is mutated ONLY
+    //     by computeIfAbsent (LiveSeriesStore:48,71,115 — no put/remove/clear/replace), so an
+    //     EngineSeries instance is never SWAPPED for a key: a retained bank's captured series are
+    //     the same objects a rebuilt bank would resolve, and they keep receiving appends.
+    // `book` and `scalper` ride in LoadedIdentity for the INSTALL decision but are NOT bank inputs.
+    // Under-eviction is the dangerous direction (a stale warm bank silently feeding live evaluation,
+    // every test green), so the predicate retains ONLY what the fresh set proves still valid — a
+    // version bump, a universe member leaving, or a strategy dropped all evict exactly as before.
+    // Second line of defence for anything that slips through: the ONLY read is evaluateAtBarClose,
+    // reached only for a strategy in `loaded` and a symbol in ITS universe (:1521-1529), so a key
+    // can be read back only while it is in bankKeysOf(loaded) — an over-retained entry is
+    // unreachable, not mis-served.
+    Set<String> freshBankKeys = bankKeysOf(fresh);
+    bankCache.keySet().removeIf(key -> !freshBankKeys.contains(key));
     this.loaded = List.copyOf(fresh);
     this.lastReloadUnresolvedDrops = unresolvedDrops;
     // Snapshot the published set THIS reload was based on (from the same registry read), so the 20s
@@ -997,6 +1075,32 @@ public class SignalEngine {
                 ? StrategyCoverageSnapshot.TerminalState.DEGRADED_TERMINAL
                 : StrategyCoverageSnapshot.TerminalState.HEALTHY,
             classifications);
+  }
+
+  /**
+   * The warm-bank cache key. ONE definition, shared by the mint site ({@link #evaluateAtBarClose})
+   * and the reload sweep — if those two ever built the string differently the sweep would either
+   * evict every bank (pointless but harmless) or retain one the fresh set never proved valid, which
+   * is the failure that serves stale indicator values to live evaluation.
+   */
+  static String bankKey(UUID versionId, String exchange, String tradingsymbol) {
+    return versionId + "|" + exchange + ":" + tradingsymbol;
+  }
+
+  /**
+   * Every bank key {@code entries} could legitimately mint — the retention set for the reload sweep.
+   * Built from the universe because that is exactly what the mint site is gated on: a context symbol
+   * feeds series only and is {@code continue}d before any evaluation ({@link #onClosedBar}), so no
+   * key outside this set is reachable.
+   */
+  private static Set<String> bankKeysOf(List<Loaded> entries) {
+    Set<String> out = new java.util.HashSet<>();
+    for (Loaded entry : entries) {
+      for (StrategyDefinition.InstrumentRef instrument : entry.universe()) {
+        out.add(bankKey(entry.versionId(), instrument.exchange(), instrument.tradingsymbol()));
+      }
+    }
+    return out;
   }
 
   /** The {@link LoadedIdentity} of every entry — what the engine would LOSE by not installing. */
@@ -1266,6 +1370,112 @@ public class SignalEngine {
   }
 
   /**
+   * One per-strategy evaluation counter: which SESSION the bar belonged to, which strategy evaluated
+   * it, and how it ended. The session date is part of the key rather than inferred at flush time, so
+   * a count produced at 15:58 on Friday still lands on FRIDAY's row when the next flush is Monday
+   * 09:00.
+   *
+   * @param sessionDate IST calendar date of the evaluated bar — sessions never cross IST midnight, so
+   *     the IST date IS the session date
+   * @param slug {@link Loaded#slug()}, the identity that survives a republish
+   */
+  record StrategyEvalKey(LocalDate sessionDate, String slug, Outcome outcome) {}
+
+  /**
+   * A read of every per-strategy evaluation counter, stamped with the epoch they belong to — the
+   * per-strategy twin of {@link OutcomeSnapshot}, and paired with the epoch for the same reason: a
+   * restart yields BOTH a fresh epoch and zeroed adders, and {@code boot_id} is what stops the new
+   * boot's smaller totals from overwriting the previous boot's rows.
+   *
+   * @param counts every observed (session date, slug, outcome); absent keys are genuine zeros
+   */
+  record StrategyEvalSnapshot(UUID epoch, Map<StrategyEvalKey, Long> counts) {}
+
+  /**
+   * A point-in-time read of the per-strategy counters, for {@link SignalEvalOutcomeRollupJob} to
+   * persist (V053).
+   *
+   * <p><b>Costs the eval thread nothing</b> — same reasoning as {@link #outcomeSnapshot()}: a read of
+   * adders already maintained in memory, taken on the rollup's own scheduler thread. The map
+   * iteration is weakly consistent, which is harmless here: a key inserted mid-iteration is simply
+   * picked up by the next flush, and because the persisted value is an absolute cumulative that the
+   * upsert REPLACES, being late can never double count.
+   *
+   * <p>Unlike {@link #outcomeSnapshot()} this does NOT pre-seed every combination with zero. 63 slugs
+   * x 7 outcomes of mostly-zero rows would be noise, and it would say something false: process
+   * liveness is V045's question and V045 still answers it. Here an absent row means "this combination
+   * was never observed", which is exactly what a denominator needs.
+   */
+  StrategyEvalSnapshot strategyEvalSnapshot() {
+    Map<StrategyEvalKey, Long> counts = new LinkedHashMap<>();
+    strategyEvalCounts.forEach((key, adder) -> counts.put(key, adder.sum()));
+    return new StrategyEvalSnapshot(counterEpoch, counts);
+  }
+
+  /**
+   * The counters NOT yet durably persisted at their current value — exactly what a flush must send,
+   * and the only method {@link SignalEvalOutcomeRollupJob} uses to build its statement.
+   *
+   * <p><b>Why the filter lives here rather than in the job.</b> "What is durable" is now load-bearing
+   * twice over: it decides what to write, AND it decides when a key may be evicted. Keeping the two
+   * off one map would let them disagree, which is precisely how round-2 review's Critical arose — a
+   * job-side write cache said "already written" while the engine dropped the key anyway, and the
+   * count was lost with nothing able to resend it.
+   *
+   * <p>Writing all retained keys every tick would be ~124k row-upserts/day against ≤ 441 distinct
+   * rows (mostly rewriting the previous session unchanged, 140 times). In steady state this returns
+   * roughly one key per loaded strategy per tick.
+   */
+  StrategyEvalSnapshot pendingDenominatorWrites() {
+    Map<StrategyEvalKey, Long> pending = new LinkedHashMap<>();
+    strategyEvalCounts.forEach(
+        (key, adder) -> {
+          long total = adder.sum();
+          Long durable = acknowledgedDenominators.get(key);
+          if (durable == null || durable != total) {
+            pending.put(key, total);
+          }
+        });
+    return new StrategyEvalSnapshot(counterEpoch, pending);
+  }
+
+  /**
+   * Records that these exact per-key values are now durable. Called by {@link
+   * SignalEvalOutcomeRollupJob} ONLY after {@code upsertCounts} returns normally — never
+   * speculatively, because an acknowledgement is what permits eviction.
+   *
+   * <p>Safe against the eval thread racing it: if a counter advanced between the snapshot and this
+   * call, the acknowledged value is simply behind the live total, so the key stays pending (it is
+   * re-sent, harmlessly, since the write is an absolute REPLACE) and stays un-evictable. The failure
+   * direction is always "write again", never "drop".
+   */
+  void acknowledgeDenominatorWrites(Map<StrategyEvalKey, Long> written) {
+    acknowledgedDenominators.putAll(written);
+  }
+
+  /** Test seam: what the engine currently believes is durable. */
+  Map<StrategyEvalKey, Long> acknowledgedDenominatorsForTest() {
+    return Map.copyOf(acknowledgedDenominators);
+  }
+
+  /**
+   * The two session dates whose per-strategy counters are retained, for tests and for the field
+   * comments below. {@code previous} is null until a second session has been counted.
+   */
+  record RetainedSessions(LocalDate newest, LocalDate previous) {
+
+    /** True iff counters for {@code sessionDate} are kept — i.e. it is one of the two. */
+    boolean retains(LocalDate sessionDate) {
+      return sessionDate.equals(newest) || sessionDate.equals(previous);
+    }
+  }
+
+  /** What {@link #countEvaluation} currently retains. Test seam; not used by production code. */
+  RetainedSessions retainedSessions() {
+    return new RetainedSessions(newestCountedSession, previousCountedSession);
+  }
+
+  /**
    * True iff any loaded strategy subscribes a 1m channel, so {@link SubscriberHealthCanary} stays
    * quiet when there is nothing to receive (no intraday strategy loaded / all-empty-universe session).
    */
@@ -1317,6 +1527,55 @@ public class SignalEngine {
             log.error("subscriber watchdog: forced re-subscription failed: {}", e.toString());
           }
         });
+  }
+
+  /**
+   * FAULT-INJECTION SEAM (drill only) — stops the CURRENT candle listener container, reproducing the
+   * 2026-07-07 "silent subscription loss" shape so {@link SubscriberHealthCanary}'s receive-side fire
+   * path can be exercised deliberately. Reachable ONLY from {@link SignalFaultInjector}, which does
+   * not exist unless {@code artha.signals.fault-injection.enabled=true} (default OFF).
+   *
+   * <p><b>What this is and is not.</b> A transport-level drop cannot reach the canary at all: the
+   * 2026-08-03 drill killed the pub/sub connection server-side and Lettuce's own
+   * {@code ConnectionWatchdog} reconnected in ~22 ms — four orders of magnitude below the 180 s
+   * {@code bar-gap-ms} threshold, so no bar was missed and nothing was detected. This produces a
+   * <b>detector-equivalent receive stall</b>: the canary-visible state (candle receipt stops while the
+   * producer heartbeat stays fresh) is identical to the 2026-07-07 episode, so the real detection,
+   * recovery, alert and telemetry branch all execute for real.
+   *
+   * <p>It is <b>not</b> a literal reproduction of the 2026-07-07 mechanism. {@code stop()}
+   * intentionally CLOSES the pub/sub subscription connection, so this is a THIRD mechanism — distinct
+   * both from a server-side socket kill and from the hypothesised socket-up listener loss. Nothing
+   * here should be read as evidence for or against that hypothesis; what it validates is the
+   * detector, not the diagnosis. The shared {@code connectionFactory} — and therefore every other
+   * Redis user in this JVM — is untouched, and no watchdog reconnect fires (the close is deliberate).
+   *
+   * <p>Deliberately NOT self-healing here: recovery must come from the watchdog's own
+   * {@link #forceResubscribe} (that is the path under test), with the injector's bounded auto-restore
+   * as the backstop. {@code synchronized} so it serialises with {@link #resubscribe()} rather than
+   * racing a concurrent reload for the {@code container} reference.
+   *
+   * @return false when there was no container to stop (engine not started / already stopped)
+   */
+  synchronized boolean suspendCandleSubscriptionForFaultDrill() {
+    RedisMessageListenerContainer current = this.container;
+    if (current == null) {
+      return false;
+    }
+    current.stop();
+    return true;
+  }
+
+  /**
+   * Whether a candle listener container is currently installed AND running — the confirmation signal
+   * {@link SignalFaultInjector}'s bounded restore retries against, so recovery is verified rather
+   * than merely requested. {@link #resubscribe()} assigns {@code this.container} only AFTER the fresh
+   * container has started, so a failed rebuild leaves the old, stopped one in place and this stays
+   * false; that is exactly what makes it a usable retry predicate.
+   */
+  boolean candleSubscriptionActive() {
+    RedisMessageListenerContainer current = this.container;
+    return current != null && current.isRunning();
   }
 
   /** Redis receive thread: parse + conflate + hand off. NEVER evaluates here. */
@@ -1385,12 +1644,25 @@ public class SignalEngine {
         continue;
       }
       try {
-        if (strategy.definition().primaryTimeframe().equals("1m")) {
-          evaluateAtBarClose(strategy, exchange, tradingsymbol, bar, "1m");
-        } else if (!"btst".equals(strategy.definition().session().style())) {
-          evaluateCoarsePrimary(strategy, exchange, tradingsymbol, bar);
+        // G8/T26: THE bar-driven trace scope, opened here rather than inside the evaluation so it
+        // starts BEFORE any per-strategy work. evaluateCoarsePrimary does synchronous
+        // seriesStore.refreshFromRest calls (primary + every declared higher timeframe) ahead of
+        // the evaluation, so a scope opened deeper would bill that strategy's OWN REST latency to
+        // pre_eval — the bucket that means "queue drain + EARLIER strategies", i.e. it would read
+        // as queueing. That is precisely the misattribution T26 exists to prevent. One scope here
+        // covers all six bar-driven emit sites (1m primary, coarse boundary, intrabar exit); the
+        // clock-driven BTST pre-close path never passes through here and stays untraced by design.
+        emitStages.beginEvaluation(currentBarReceivedAtMs.get(), clock.millis());
+        try {
+          if (strategy.definition().primaryTimeframe().equals("1m")) {
+            evaluateAtBarClose(strategy, exchange, tradingsymbol, bar, "1m");
+          } else if (!"btst".equals(strategy.definition().session().style())) {
+            evaluateCoarsePrimary(strategy, exchange, tradingsymbol, bar);
+          }
+          // btst primaries evaluate ONLY at the pre-close clock (scheduled below)
+        } finally {
+          emitStages.endEvaluation();
         }
-        // btst primaries evaluate ONLY at the pre-close clock (scheduled below)
       } catch (RuntimeException e) {
         // The bar is already consumed off the queue — a failed ENTRY decision for it is gone for
         // good (the next qualifying bar re-fires; EXIT anchors stay ACTIVE and self-heal). The
@@ -1410,10 +1682,11 @@ public class SignalEngine {
     // indicators (EMA/RSI/SUPERTREND) from bar 0 in BigDecimal math — O(n²) over the session on
     // the single eval thread. The underlying EngineSeries instances are mutated in place (never
     // replaced) by LiveSeriesStore, and indicators are pure functions of (series, index), so a
-    // warm bank stays correct as bars append; reload()/hot-swap clears the cache.
+    // warm bank stays correct as bars append; reload()/hot-swap sweeps the cache down to the keys
+    // the newly loaded set can still mint (the key IS the invalidation surface — see reload()).
     IndicatorBank bank =
         bankCache.computeIfAbsent(
-            strategy.versionId() + "|" + exchange + ":" + tradingsymbol,
+            bankKey(strategy.versionId(), exchange, tradingsymbol),
             key ->
                 IndicatorBank.build(
                     strategy.definition(),
@@ -1472,9 +1745,106 @@ public class SignalEngine {
       // construction. Counter-only: this decides nothing and must never alter what is traded.
       Outcome outcome =
           decideEntry(strategy, exchange, tradingsymbol, interval, bar, bank, primary, index);
-      outcomeCounters.get(outcome).increment();
+      countEvaluation(strategy, bar, outcome);
       warnIfUnscoreablePastWarmup(outcome, strategy, exchange, tradingsymbol, interval, bar);
     }
+  }
+
+  /**
+   * Counts ONE completed entry evaluation, at both resolutions: the fleet {@code
+   * ay_signal_eval_outcome_total} meter (persisted by V045) and the per-strategy denominator
+   * (persisted by V053).
+   *
+   * <p><b>Both increments live here so they can never diverge.</b> The single-increment-site
+   * invariant the caller documents — {@code decideEntry} returns exactly one {@link Outcome} on every
+   * path, so Σ(outcomes) == evaluations — now covers the per-strategy dimension too, which means the
+   * per-slug totals SUM to the fleet total by construction rather than by agreement between two call
+   * sites.
+   *
+   * <p><b>Nothing here touches I/O.</b> A {@code Counter.increment()}, one key allocation, one
+   * {@code ConcurrentHashMap} lookup (lock-free on the bin-head fast path, which is the steady state
+   * once a slug/outcome pair has been seen once in a session) and one {@code LongAdder.increment()}.
+   * The database is only ever reached from {@link SignalEvalOutcomeRollupJob}'s own scheduler thread.
+   *
+   * <p><b>The session date comes from the BAR, not the clock.</b> A count belongs to the session it
+   * was produced in, and taking it from {@code bar.bucketStart()} means a late flush cannot
+   * mis-attribute it — this is precisely what V045 cannot do, since a Micrometer counter carries a
+   * total and no timing. Normalized through {@link Ist#OFFSET} first: reading {@code toLocalDate()}
+   * off a UTC-offset value is the repo's standing off-by-one trap.
+   *
+   * <p><b>This method also bounds the map, and it must be the one that does.</b> The per-strategy
+   * adders are dropped for every session except the two most recently COUNTED ones, and the advance
+   * happens right here — on the eval thread, driven by a bar the eval thread has actually processed.
+   * The rejected alternative was pruning from the rollup thread against the flush clock; cross-vendor
+   * review showed that is reachable-unsafe, because the eval FIFO can still hold prior-session bars
+   * after a stall. Such a bar arrives AFTER the prune, is accepted as strictly increasing (it is the
+   * first bar of a freshly recreated series key), recreates the key from ZERO, and the next
+   * {@code SET eval_count = EXCLUDED.eval_count} overwrites the larger durable total with the smaller
+   * fresh one — the session's counts lost and the row regressed. A {@code GREATEST} clamp would not
+   * have fixed it either: it stops the regression while silently dropping the late evaluations.
+   *
+   * <p>Advancing here removes the race rather than narrowing it. A key can only be dropped by the one
+   * thread that could recreate it, and only after that thread has itself counted a bar from a strictly
+   * newer session — so a straggler for the session that just ended still finds its key alive and lands
+   * on its own row. Keeping TWO sessions rather than one is what buys that: at 09:15 the new session
+   * becomes {@code newest} and yesterday becomes {@code previous}, and yesterday's adders survive the
+   * whole day. <b>Not guaranteed</b> (stated plainly, as V045 does): a bar arriving after the eval
+   * thread has advanced through TWO later sessions is dropped from the retained window — which also
+   * requires the FIFO to have delivered bars out of session order across two days, and the stack to
+   * have survived a multi-session eval stall that every canary would have paged for.
+   */
+  void countEvaluation(Loaded strategy, EngineCandle bar, Outcome outcome) {
+    outcomeCounters.get(outcome).increment();
+    LocalDate session = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET).toLocalDate();
+    if (newestCountedSession == null || session.isAfter(newestCountedSession)) {
+      previousCountedSession = newestCountedSession; // null on the first bar of a boot
+      newestCountedSession = session;
+      evictDurableOutOfWindowCounters(retainedSessions());
+    }
+    strategyEvalCounts
+        .computeIfAbsent(
+            new StrategyEvalKey(session, strategy.slug(), outcome),
+            key -> new java.util.concurrent.atomic.LongAdder())
+        .increment();
+  }
+
+  /**
+   * Drops per-strategy counters that are BOTH outside the two-session retention window AND durably
+   * persisted at their current value. Runs on the eval thread, from {@link #countEvaluation} only.
+   *
+   * <p><b>The acknowledgement condition is the whole point.</b> An earlier revision evicted on the
+   * session boundary ALONE, and round-2 cross-vendor review showed that silently destroys data: if
+   * denominator writes failed throughout a session — or a late count landed with no successful flush
+   * after it — the adder was removed anyway, and no future snapshot could resend it because the
+   * source of truth was gone. The damage was invisible in both directions: a partially written row
+   * stayed too small forever, an unwritten one stayed absent forever, and both contradicted the
+   * "a failed write loses nothing" guarantee this design is sold on. Requiring
+   * {@code sum() == acknowledged} means an unwritten session is simply carried until it lands.
+   *
+   * <p>Eviction stays here rather than moving back to the flush thread: the prune must remain on the
+   * one thread that can recreate a key, which is what closed round-1's Critical. Both conditions are
+   * now checked in the same place.
+   *
+   * <p><b>Bound.</b> Normally two sessions (≤ 2 × 63 slugs × 7 outcomes = 882 keys). While writes are
+   * FAILING it grows by ≤ 441 keys/session (~35 KB) — deliberately, because the alternative is losing
+   * them — and every failed flush raises an ops alert, so it is neither silent nor open-ended in
+   * practice. The acknowledgement entry is removed with its counter, so the two maps stay in step.
+   */
+  private void evictDurableOutOfWindowCounters(RetainedSessions retained) {
+    strategyEvalCounts
+        .entrySet()
+        .removeIf(
+            entry -> {
+              if (retained.retains(entry.getKey().sessionDate())) {
+                return false;
+              }
+              Long durable = acknowledgedDenominators.get(entry.getKey());
+              if (durable == null || durable != entry.getValue().sum()) {
+                return false; // never written, or written before later counts arrived — keep it
+              }
+              acknowledgedDenominators.remove(entry.getKey());
+              return true;
+            });
   }
 
   /**
@@ -1937,6 +2307,7 @@ public class SignalEngine {
       Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
       EntryEvaluator.Evaluation evaluation, ScalperConfluenceGate.Decision decision,
       ScalperConfluenceGate.FiredDiagnostic firedDiagnostic) {
+    emitStages.markEmitStart(clock.millis()); // G8/T26: gate_eval ends, leg_resolve begins
     // Per-book risk gate: a daily-loss trip / kill switch / max-open cap pauses ENTRY emission for
     // this strategy's book for the rest of the IST day — exit/stop evaluation (emit()) is NOT gated.
     // entryVeto is behaviourally identical to entryAllowed (a single call, same decision AND audit
@@ -2065,7 +2436,7 @@ public class SignalEngine {
     String scalperDetail =
         decision == null
             ? null
-            : scalperDetailJson(decision, strategy.scalper());
+            : scalperDetailJson(objectMapper, decision, strategy.scalper());
     // INT §13 row 19 / FID P1-8 fired-side rail-operand side-channel: serialize the confluence gate's full
     // condition matrix (built from the SAME evaluation the Decision came from — never re-evaluated, so it
     // is deterministic) mirroring signal_rejections.diagnostic's shape. Built HERE (not inside the tx) so a
@@ -2088,6 +2459,7 @@ public class SignalEngine {
     // scalper_detail and silently fell back to the definition direction (wrong side for a PE scalp).
     BigDecimal stampQty = suggestedQty;
     BigDecimal stopLevel = stopLoss;
+    emitStages.markPersistStart(clock.millis());
     long id =
         tx.execute(
             status -> {
@@ -2105,6 +2477,7 @@ public class SignalEngine {
               }
               return newId;
             });
+    emitStages.markPersistEnd(clock.millis());
     stampEmissionLatency(id);
     if (suggestedQty == null
         && decision != null
@@ -2174,6 +2547,7 @@ public class SignalEngine {
         new SignalEmitted(
             id, strategy.versionId(), exchange, tradingsymbol, side, entryPrice, stopLoss, target,
             evaluation.breakdown().composite(), evaluation.breakdown().threshold(), scalp));
+    emitStages.recordEmitComplete(EmitStageRecorder.DIRECTION_ENTRY, clock.millis());
   }
 
   /**
@@ -2182,9 +2556,12 @@ public class SignalEngine {
    * stamps {@code side:"NEUTRAL"}, the primary (CE) leg in the legacy {@code tradeable/strike/...}
    * fields, and a {@code legs[]} array carrying BOTH BUY legs ({exchange, tradingsymbol, side, option_type,
    * strike, option_ltp, iv, delta}) — the two-leg carrier the order/paper layer reads.
+   *
+   * <p>Static + package-private (no instance state beyond the mapper) so the serialized shape is
+   * directly testable — the same reason {@link #tradeableLeg} is.
    */
-  private String scalperDetailJson(
-      ScalperConfluenceGate.Decision d, ScalperConfig cfg) {
+  static String scalperDetailJson(
+      ObjectMapper objectMapper, ScalperConfluenceGate.Decision d, ScalperConfig cfg) {
     StrikePicker.Candidate c = d.pick().candidate();
     ObjectNode root = objectMapper.createObjectNode();
     root.put("side", d.neutral() ? "NEUTRAL" : d.side().name());
@@ -2209,6 +2586,10 @@ public class SignalEngine {
       n.put("dot", ds.dot());
       n.put("weight", ds.weight());
       n.put("supports", ds.supports());
+      // F5 U4a: absentness is a RECORDED fact. `absent` qualifies `supports` — a withheld dot
+      // (missing input, out of BOTH num and den) also reads supports=false, so without this key the
+      // two are indistinguishable and had to be told apart by arithmetic (see rejectionDiagnosticJson).
+      n.put("absent", ds.absent());
     }
     // #11 (section 3.11) two-leg carrier: only a neutral straddle adds the legs[] array, so the
     // single-leg directional side-channel stays byte-identical. The order/paper layer trades these.
@@ -2257,7 +2638,7 @@ public class SignalEngine {
         strategy.versionId(), strategy.slug(), exchange, tradingsymbol, interval,
         d.side() == null ? null : d.side().name(), d.blockingRail(), d.operand(), d.threshold(),
         d.margin(), d.reason(), d.compositeScore(), d.compositeThreshold(),
-        rejectionDiagnosticJson(d), barTime, d);
+        rejectionDiagnosticJson(objectMapper, d), barTime, d);
     log.info(
         "scalper confluence blocked entry: {} {}:{} rail={} operand={} threshold={} margin={} composite={}/{} ({})",
         strategy.slug(), exchange, tradingsymbol, d.blockingRail(), d.operand(), d.threshold(),
@@ -2298,8 +2679,12 @@ public class SignalEngine {
    * The full rejection diagnostic JSON: the blocking rail + margin, every rail evaluated up to the
    * block, the dot-by-dot Connect-the-Dots confluence (when the composite was reached), and the raw
    * OI/macro/chart context — the complete "why blocked" payload the Rejections page renders.
+   *
+   * <p>Static + package-private (no instance state beyond the mapper) so the serialized shape is
+   * directly testable — the same reason {@link #tradeableLeg} is.
    */
-  private String rejectionDiagnosticJson(ScalperConfluenceGate.RejectionDiagnostic d) {
+  static String rejectionDiagnosticJson(
+      ObjectMapper objectMapper, ScalperConfluenceGate.RejectionDiagnostic d) {
     ObjectNode root = objectMapper.createObjectNode();
     root.put("blockingRail", d.blockingRail());
     root.put("side", d.side() == null ? null : d.side().name());
@@ -2348,9 +2733,20 @@ public class SignalEngine {
         n.put("dot", ds.dot());
         n.put("weight", ds.weight());
         n.put("supports", ds.supports());
+        // F5 U4a / dead-dot A6: `absent` = the dot's INPUT was missing, so it was withheld from BOTH
+        // the numerator and the denominator (it neither supports nor opposes). It qualifies
+        // `supports`: a withheld dot ALSO reads supports=false, so before this key the forensics
+        // could not tell "no data" from "data said no" — the G13 iv-bloc counterfactual had to
+        // reverse-engineer it from the weight sum being 18.80 instead of 19.60. Recorded, not inferred.
+        n.put("absent", ds.absent());
         n.put("reason", ds.reason());
       }
     }
+    // MEASUREMENT-ONLY, in LOCKSTEP with FiredDiagnosticJson: what the two sentiment SIGN tests
+    // (the `sentiment` dot + the `oi-slope-agree` rail) would have said had they read the LEVEL
+    // operand instead of the ΔOI-FLOW one they do read. Built AFTER the block decision from the
+    // context already in hand; nothing here feeds a gate. See SentimentLevelShadow.
+    SentimentLevelShadow.of(d.context() == null ? null : d.context().oi(), d.side()).appendTo(root);
     if (d.context() != null) {
       ScalperGateContext ctx = d.context();
       ObjectNode c = root.putObject("context");
@@ -2407,10 +2803,12 @@ public class SignalEngine {
   private void emit(
       Loaded strategy, String exchange, String tradingsymbol, String interval, String type,
       EngineCandle bar, SignalRepository.SignalRow anchor, String exitReason) {
+    emitStages.markEmitStart(clock.millis()); // G8/T26: gate_eval ends, leg_resolve begins
     String side = "SELL".equals(anchor.side()) ? "BUY" : "SELL"; // the closing side
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
     // Insert + anchor transition commit atomically: a failure between them left the entry ACTIVE
     // next to a persisted EXIT — the next bar then emitted a duplicate EXIT for the same anchor.
+    emitStages.markPersistStart(clock.millis());
     long id =
         tx.execute(
             status -> {
@@ -2423,6 +2821,7 @@ public class SignalEngine {
               signals.transition(anchor.id(), "EXPIRED"); // the entry resolved — the pair is closed
               return newId;
             });
+    emitStages.markPersistEnd(clock.millis());
     stampEmissionLatency(id);
     emitted.increment();
     publisher.publish(
@@ -2434,6 +2833,7 @@ public class SignalEngine {
     events.publishEvent(new SignalExited(anchor.id(), id, exitReason));
     log.info("EXIT signal #{} {} {}:{} at {} ({})", id, strategy.slug(), exchange, tradingsymbol,
         bar.close(), exitReason);
+    emitStages.recordEmitComplete(EmitStageRecorder.DIRECTION_EXIT, clock.millis());
   }
 
   /** Live-only wall-clock side-channel; deterministic replay never enters either emit method. */
@@ -2719,13 +3119,70 @@ public class SignalEngine {
       return false;
     }
     OffsetDateTime istBar = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
-    Optional<ScalperConfluenceGate.Decision> now =
-        scalperGate.get().evaluate(
+    // evaluateOracle is the SAME evaluateInternal invocation the bare evaluate() always made
+    // (enforceOptionSide=false — the oracle must see the TRUE market side, including the one the
+    // strategy will not ENTER); it merely stops discarding the diagnostic it had already built.
+    // NOT evaluateWithDiagnostic, which enforces the option-side constraint and would change which
+    // held positions exit.
+    ScalperConfluenceGate.Result result =
+        scalperGate.get().evaluateOracle(
             strategy.scalper(), bank, future, index, bar.bucketStart().toInstant(),
             istBar.toLocalTime(), istBar.toLocalDate());
-    return now.isPresent()
-        && !now.get().neutral()
-        && ScalperGates.confluenceFlippedAgainst(heldSide, now.get().side().name());
+    Optional<ScalperConfluenceGate.Decision> now = result.decision();
+    boolean flip =
+        now.isPresent()
+            && !now.get().neutral()
+            && ScalperGates.confluenceFlippedAgainst(heldSide, now.get().side().name());
+    // MEASUREMENT ONLY, strictly AFTER the verdict above — the exit decision is already computed and
+    // this cannot alter it. Records what the sentiment operand looked like on THIS oracle bar, and
+    // what the ORACLE would have decided on the level operand, so a future flow->level swap can be
+    // judged on the exit path at all rather than on entries alone (the entry-side diagnostics never
+    // see this path). Enqueue is O(1), bounded and fail-soft: a stalled DB drops counted rows rather
+    // than parking the eval thread mid-exit.
+    //
+    // ⚠️ SCOPE, so nobody reads more into these rows than they carry: this is an ORACLE-DECISION
+    // record, NOT exit timing and NOT P&L. The standard ExitEvaluator runs immediately BELOW this
+    // oracle in the caller, so a bar the counterfactual would not have exited can still be closed on
+    // that same bar by a lower-priority rule (stop/target/trail/time) — the row then shows a decision
+    // change that changed nothing. And where the LIVE position closed, the oracle stops running, so
+    // the counterfactual's later bars are simply absent. Turning these rows into a P&L number needs a
+    // trajectory replay that does not exist; see the V056 header.
+    recordExitOracleShadow(strategy, entry, istBar, heldSide, result, now, flip);
+    return flip;
+  }
+
+  /**
+   * Persists the measurement-only exit-oracle counterfactual (V056). Reads the operands out of
+   * whichever diagnostic the oracle produced — a fired oracle carries {@code FiredDiagnostic}, a
+   * blocked one {@code RejectionDiagnostic}; both carry the side actually scored and the OI context.
+   * Never throws: any failure here must be invisible to the protective exit path.
+   */
+  private void recordExitOracleShadow(
+      Loaded strategy, SignalRepository.SignalRow entry, OffsetDateTime istBar, String heldSide,
+      ScalperConfluenceGate.Result result, Optional<ScalperConfluenceGate.Decision> now,
+      boolean flip) {
+    try {
+      ScalperGateContext ctx =
+          result.fired() != null ? result.fired().context()
+              : result.rejection() != null ? result.rejection().context() : null;
+      OptionType evaluatedSide =
+          result.fired() != null ? result.fired().side()
+              : result.rejection() != null ? result.rejection().side() : null;
+      // The counterfactual is computed for the side the oracle ACTUALLY scored, so it is the
+      // counterfactual of this very evaluation rather than of a hypothetical different one.
+      SentimentLevelShadow shadow =
+          SentimentLevelShadow.of(ctx == null ? null : ctx.oi(), evaluatedSide);
+      exitOracleShadows.record(
+          entry.id(), strategy.slug(), istBar, heldSide,
+          evaluatedSide == null ? null : evaluatedSide.name(),
+          now.isPresent() && !now.get().neutral() ? now.get().side().name() : null,
+          flip, shadow,
+          // The EXACT level-operand verdict, computed inside the gate from the SAME immutable
+          // evaluation snapshot this decision came from — no second fetch, no re-evaluation here.
+          result.sentimentCounterfactual());
+    } catch (RuntimeException e) {
+      log.warn("exit-oracle shadow capture failed for entry {}: {}", entry.id(), e.toString());
+    }
   }
 
   /** A scalper structural stop fires when the bar touches the level: low ≤ stop (long), high ≥ stop (short). */

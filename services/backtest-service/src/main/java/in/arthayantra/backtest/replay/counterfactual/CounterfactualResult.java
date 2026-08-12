@@ -1,5 +1,6 @@
 package in.arthayantra.backtest.replay.counterfactual;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
@@ -41,14 +42,19 @@ public record CounterfactualResult(
    * entry leg through the shared fill simulator even though {@code entryPremium} is an
    * already-executed real fill — a small constant conservative double-count (~1 tick of
    * slippage), identical across variants, so ranking is unaffected.</p>
+   *
+   * <p>Every {@code BigDecimal} carries an explicit {@code type = "string"}: the platform mapper
+   * routes BigDecimal through {@code ToStringSerializer}, so these are decimal STRINGS on the wire
+   * while springdoc would otherwise infer {@code number}. {@code tradeCount} is an {@code int} and
+   * stays {@code integer} — only decimals are string-serialized.
    */
   public record VariantResult(
       String name,
       int tradeCount,
-      BigDecimal netPnlInr,
-      BigDecimal grossPremiumPoints,
-      BigDecimal winRate,
-      BigDecimal expectancyInr,
-      BigDecimal maxDrawdownInr,
+      @Schema(type = "string") BigDecimal netPnlInr,
+      @Schema(type = "string") BigDecimal grossPremiumPoints,
+      @Schema(type = "string") BigDecimal winRate,
+      @Schema(type = "string") BigDecimal expectancyInr,
+      @Schema(type = "string") BigDecimal maxDrawdownInr,
       Map<String, Integer> exitReasonCounts) {}
 }

@@ -39,26 +39,26 @@ public class PreOpenController {
 
   /** {@code {items:[MarketStatus for NSE,BSE,MCX]}} — empty when the Upstox status client is not wired. */
   @GetMapping("/market-status")
-  public Map<String, Object> status() {
+  public MarketStatusesResponse status() {
     UpstoxMarketStatusClient resolved = client.getIfAvailable();
     List<MarketStatus> items = resolved == null ? List.of() : resolved.marketStatuses();
-    return Map.of("items", items);
+    return new MarketStatusesResponse(items);
   }
+
+  /** The {items} envelope. Single-key {@code Map.of} before D3, so key order was never in play. */
+  public record MarketStatusesResponse(List<MarketStatus> items) {}
 
   /**
    * {@code {phase, preOpen, indices:[PreOpenIndex...]}} — the NSE session phase + the four index quotes.
    * When the Upstox client is not wired the phase is {@code "UNKNOWN"} with an empty indices list.
    */
   @GetMapping("/pre-open")
-  public Map<String, Object> preOpen() {
+  public UpstoxMarketStatusClient.PreOpen preOpen() {
     UpstoxMarketStatusClient resolved = client.getIfAvailable();
-    if (resolved == null) {
-      return Map.of("phase", "UNKNOWN", "preOpen", false, "indices", List.of());
-    }
-    UpstoxMarketStatusClient.PreOpen snapshot = resolved.preOpen();
-    return Map.of(
-        "phase", snapshot.phase(),
-        "preOpen", snapshot.preOpen(),
-        "indices", snapshot.indices());
+    // the client's own record already carries exactly these three components — the pre-D3 Map.of was
+    // a field-for-field re-emission of it, and the not-configured branch is that same shape empty
+    return resolved == null
+        ? new UpstoxMarketStatusClient.PreOpen("UNKNOWN", false, List.of())
+        : resolved.preOpen();
   }
 }

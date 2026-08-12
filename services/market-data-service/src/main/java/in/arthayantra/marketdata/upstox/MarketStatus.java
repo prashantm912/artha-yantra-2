@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.upstox;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.OffsetDateTime;
 
 /**
@@ -15,4 +16,10 @@ import java.time.OffsetDateTime;
  * pre-open window). {@code asOf} is the Upstox {@code last_updated} instant (IST offset), or null when
  * unknown.
  */
-public record MarketStatus(String exchange, String status, boolean preOpen, OffsetDateTime asOf) {}
+public record MarketStatus(
+    String exchange,
+    String status,
+    boolean preOpen,
+    // null on the unknown() path — a missing/!status response degrades to status "UNKNOWN" with no
+    // timestamp rather than failing the page (UpstoxMarketStatusClient:261)
+    @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}

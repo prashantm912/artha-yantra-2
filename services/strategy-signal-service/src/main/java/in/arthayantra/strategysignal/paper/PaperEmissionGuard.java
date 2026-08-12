@@ -34,6 +34,7 @@ public class PaperEmissionGuard implements EmissionGuard {
   private final ScalperAccountModel scalperAccounts;
   private final PaperPositionRepository positions;
   private final PaperOrderRejectionRecorder rejections;
+  private final ManasGoverningStopCache governingStopCache;
 
   /** Wires the risk gate + capital model + the scalper 5-account discipline + the position ledger. */
   public PaperEmissionGuard(
@@ -42,13 +43,15 @@ public class PaperEmissionGuard implements EmissionGuard {
       InstrumentMetaClient instruments,
       ScalperAccountModel scalperAccounts,
       PaperPositionRepository positions,
-      PaperOrderRejectionRecorder rejections) {
+      PaperOrderRejectionRecorder rejections,
+      ManasGoverningStopCache governingStopCache) {
     this.risk = risk;
     this.account = account;
     this.instruments = instruments;
     this.scalperAccounts = scalperAccounts;
     this.positions = positions;
     this.rejections = rejections;
+    this.governingStopCache = governingStopCache;
   }
 
   @Override
@@ -70,25 +73,47 @@ public class PaperEmissionGuard implements EmissionGuard {
 
   @Override
   public BigDecimal openRiskInr(String book) {
-    return openRiskInr(positions.listOpen(book));
+    return openRiskInr(positions.listOpen(book), governingStopCache);
   }
 
   /**
-   * Aggregate open risk (₹) over a set of open positions: {@code Σ qty × max(0, avgEntry − stopLoss)},
-   * a stop-less position contributing 0 (no defined risk to sum). Pure + package-visible for a unit test.
+   * Aggregate open risk (₹) over a set of open positions: {@code Σ qty × max(0, avgEntry −
+   * effectiveStop)}, a stop-less position contributing 0 (no defined risk to sum). {@code
+   * effectiveStop} is {@link #effectiveStop} — the IN-MEMORY {@link ManasGoverningStopCache} entry
+   * when cached (Manas only; every other family/position is never cached), else the persisted
+   * {@code stopLoss}. Pure (given the cache) + package-visible for a unit test.
    */
-  static BigDecimal openRiskInr(java.util.List<PaperPositionRepository.PositionRow> open) {
+  static BigDecimal openRiskInr(
+      java.util.List<PaperPositionRepository.PositionRow> open, ManasGoverningStopCache cache) {
     BigDecimal total = BigDecimal.ZERO;
     for (PaperPositionRepository.PositionRow p : open) {
-      if (p.stopLoss() == null) {
+      BigDecimal stop = effectiveStop(p, cache);
+      if (stop == null) {
         continue;
       }
-      BigDecimal perUnit = p.avgEntryPrice().subtract(p.stopLoss());
+      BigDecimal perUnit = p.avgEntryPrice().subtract(stop);
       if (perUnit.signum() > 0) {
         total = total.add(perUnit.multiply(BigDecimal.valueOf(p.qty())));
       }
     }
     return total;
+  }
+
+  /**
+   * M40 Critical 3 fix, round 3 (owner ruling, 2026-08-02): the stop the aggregate open-risk cap
+   * should treat as CURRENTLY governing this position — the {@link ManasGoverningStopCache} entry
+   * once the daily Chandelier trail has armed (Manas only; every other family/position is never
+   * cached), else the persisted {@code stopLoss} (the initial bracket, or the ONLY figure for any
+   * family other than Manas). IN MEMORY ONLY — {@code stopLoss} itself is never read from or
+   * written to by anything in this fix; a cache miss (fresh boot, or before the trail arms) falls
+   * back to it unchanged. Keyed by {@code p.id()} (round 4, cross-vendor review Critical 1) — the
+   * position's own immutable row id, never a symbol tuple, so a different position can never read
+   * this one's cached value. Package-visible + pure (given the cache) for a unit test.
+   */
+  static BigDecimal effectiveStop(
+      PaperPositionRepository.PositionRow p, ManasGoverningStopCache cache) {
+    BigDecimal cached = cache.get(p.id());
+    return cached != null ? cached : p.stopLoss();
   }
 
   @Override
@@ -183,6 +208,42 @@ public class PaperEmissionGuard implements EmissionGuard {
       lots = maxLots;
     }
     return BigDecimal.valueOf(lots * lot);
+  }
+
+  @Override
+  public void recordPyramidRiskCapBreach(String book, String symbol, String detail) {
+    risk.recordPyramidRiskCapBreach(book, symbol, detail);
+  }
+
+  /**
+   * Round 4 fix (cross-vendor review Critical 1, 2026-08-02): resolves the CURRENTLY open position
+   * for this key via a FRESH repository read — never the stale in-loop anchor snapshot {@code
+   * SwingBatchEngine}'s exit pass iterates. This closes the close-race the round-4 review found:
+   * {@code SwingBatchEngine} has no {@code @Transactional} boundary of its own, so a concurrent
+   * manual close (which evicts by id in {@code PaperService#doSettle}) commits and is immediately
+   * visible here.
+   *
+   * <p><b>Round 5 fix (cross-vendor review Critical 1, 2026-08-02): "currently open" is not enough —
+   * it must be the SAME position {@code openingSignalId} was computed from.</b> The round-4 version
+   * resolved WHATEVER row was open for the tuple key, which fixed the read side (a closed key can
+   * never be resurrected) but not the write side: if the anchor's own position closed and a
+   * DIFFERENT position opened on the same key before this write landed, round 4 would have cached
+   * the first position's trail under the second position's perfectly valid id — a wrongly-attributed
+   * entry, not a stale one. {@link PaperPositionRepository#findOpenIdIfOpenedBy} validates the
+   * currently-open row's own {@code opening_signal_id} column equals {@code openingSignalId} before
+   * caching anything — a mismatch (nothing open, or something open but opened by a DIFFERENT signal)
+   * is a safe no-op, never a best-effort attach. {@code opening_signal_id} is retained unchanged
+   * across an averaging add (audit H5, {@code PaperService#upsertPosition}), so a pyramid add onto
+   * the SAME anchor's position still validates correctly — only a genuinely different position is
+   * rejected.
+   */
+  @Override
+  public void cacheManasGoverningStop(
+      String book, String exchange, String tradingsymbol, String side, long openingSignalId,
+      BigDecimal newStop) {
+    positions
+        .findOpenIdIfOpenedBy(book, exchange, tradingsymbol, side, openingSignalId)
+        .ifPresent(id -> governingStopCache.put(id, side, newStop));
   }
 
   @Override

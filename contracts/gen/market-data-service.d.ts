@@ -52,6 +52,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/symbol-lineage/detect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["detectSymbolLineage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/subscriptions": {
         parameters: {
             query?: never;
@@ -516,6 +532,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/symbol-lineage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listSymbolLineage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/status": {
         parameters: {
             query?: never;
@@ -572,6 +604,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["swingBacktestCompare"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/minervini/plane-divergence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["planeDivergence"];
         put?: never;
         post?: never;
         delete?: never;
@@ -796,6 +844,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["attrition_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/lineage-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["lineageScreenImpact"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2377,6 +2441,27 @@ export interface components {
             createdAt: string;
             items: components["schemas"]["ItemRequest"][];
         };
+        WatchlistCreated: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        SymbolLineageDetectResponse: {
+            /** Format: date */
+            asOf: string | null;
+            /** Format: int32 */
+            detected: number;
+            /** Format: int32 */
+            inserted: number;
+            /** Format: int32 */
+            refreshed: number;
+            /** Format: int32 */
+            confirmed: number;
+            /** Format: int32 */
+            inferred: number;
+            /** Format: int32 */
+            refuted: number;
+        };
         SubscribeRequest: {
             exchange?: string;
             tradingsymbol?: string;
@@ -2384,24 +2469,29 @@ export interface components {
             priority?: string;
             subscriber?: string;
         };
+        SubscribeResponse: {
+            exchange: string;
+            tradingsymbol: string;
+            effectiveMode: string;
+        };
         PortfolioStat: {
             /** Format: int32 */
             slots: number;
-            totalReturnPct: number;
-            cagrPct: number;
-            maxDrawdownPct: number;
-            sharpe: number;
+            totalReturnPct: string;
+            cagrPct: string;
+            maxDrawdownPct: string;
+            sharpe: string;
             /** Format: int32 */
             tradesTaken: number;
             /** Format: int32 */
             tradesSkipped: number;
-            avgExposurePct: number;
+            avgExposurePct: string;
             /** Format: int32 */
             months: number;
-            positiveMonthsPct: number;
-            bestMonthPct: number;
-            worstMonthPct: number;
-            avgMonthPct: number;
+            positiveMonthsPct: string;
+            bestMonthPct: string;
+            worstMonthPct: string;
+            avgMonthPct: string;
             annual: components["schemas"]["YearReturn"][];
         };
         Report: {
@@ -2428,15 +2518,15 @@ export interface components {
             wins: number;
             /** Format: int32 */
             losses: number;
-            winRatePct: number;
-            avgWinPct: number;
-            avgLossPct: number;
-            payoffRatio: number;
-            expectancyPct: number;
-            profitFactor: number;
-            avgBarsHeld: number;
-            bestTradePct: number;
-            worstTradePct: number;
+            winRatePct: string;
+            avgWinPct: string;
+            avgLossPct: string;
+            payoffRatio: string;
+            expectancyPct: string;
+            profitFactor: string;
+            avgBarsHeld: string;
+            bestTradePct: string;
+            worstTradePct: string;
             /** Format: int32 */
             longestHoldBars: number;
             /** Format: int32 */
@@ -2445,30 +2535,30 @@ export interface components {
             maxWinStreak: number;
             /** Format: int32 */
             maxLossStreak: number;
-            stopOutPct: number;
+            stopOutPct: string;
         };
         YearReturn: {
             /** Format: int32 */
             year: number;
-            returnPct: number;
+            returnPct: string;
             /** Format: int32 */
             trades: number;
         };
         MinerviniRow: {
             symbol: string;
             exchange: string;
-            close: number;
-            sma50: number | null;
-            sma150: number | null;
-            sma200: number | null;
-            high52w: number | null;
-            low52w: number | null;
-            pctFromHigh: number | null;
-            pctAboveLow: number | null;
-            rsRank: number | null;
-            avgTurnover50: number | null;
-            freeFloatMcapCr: number | null;
-            freeFloatPct: number | null;
+            close: string;
+            sma50: string | null;
+            sma150: string | null;
+            sma200: string | null;
+            high52w: string | null;
+            low52w: string | null;
+            pctFromHigh: string | null;
+            pctAboveLow: string | null;
+            rsRank: string | null;
+            avgTurnover50: string | null;
+            freeFloatMcapCr: string | null;
+            freeFloatPct: string | null;
             gates: boolean[];
             /** Format: int32 */
             gatesPassed: number;
@@ -2509,38 +2599,108 @@ export interface components {
             horizonSessions: number;
             /** Format: int32 */
             sampleCount: number;
-            winRatePct: number | null;
-            beatBenchmarkRatePct: number | null;
-            meanReturnPct: number | null;
-            meanBenchmarkReturnPct: number | null;
-            meanExcessReturnPct: number | null;
-            medianReturnPct: number | null;
+            winRatePct: string | null;
+            beatBenchmarkRatePct: string | null;
+            meanReturnPct: string | null;
+            meanBenchmarkReturnPct: string | null;
+            meanExcessReturnPct: string | null;
+            medianReturnPct: string | null;
+        };
+        ManasPortfolioStat: {
+            /** Format: int32 */
+            slots: number;
+            totalReturnPct: string;
+            cagrPct: string;
+            maxDrawdownPct: string;
+            sharpe: string;
+            /** Format: int32 */
+            tradesTaken: number;
+            /** Format: int32 */
+            tradesSkipped: number;
+            avgExposurePct: string;
+            /** Format: int32 */
+            months: number;
+            positiveMonthsPct: string;
+            bestMonthPct: string;
+            worstMonthPct: string;
+            avgMonthPct: string;
+            annual: components["schemas"]["ManasYearReturn"][];
+        };
+        ManasReport: {
+            status: string;
+            variant: string | null;
+            /** Format: date */
+            fromDate: string | null;
+            runAt: string | null;
+            /** Format: int32 */
+            symbolsScanned: number;
+            /** Format: int32 */
+            totalTrades: number;
+            setups: components["schemas"]["ManasSetupStat"][];
+            portfolio: components["schemas"]["ManasPortfolioStat"] | null;
+            portfolioRsPriority: components["schemas"]["ManasPortfolioStat"] | null;
+            portfolioRsPriorityNet: components["schemas"]["ManasPortfolioStat"] | null;
+            note: string | null;
+        };
+        ManasSetupStat: {
+            setup: string;
+            /** Format: int32 */
+            trades: number;
+            /** Format: int32 */
+            wins: number;
+            /** Format: int32 */
+            losses: number;
+            winRatePct: string;
+            avgWinPct: string;
+            avgLossPct: string;
+            payoffRatio: string;
+            expectancyPct: string;
+            profitFactor: string;
+            avgBarsHeld: string;
+            bestTradePct: string;
+            worstTradePct: string;
+            /** Format: int32 */
+            longestHoldBars: number;
+            /** Format: int32 */
+            shortestHoldBars: number;
+            /** Format: int32 */
+            maxWinStreak: number;
+            /** Format: int32 */
+            maxLossStreak: number;
+            stopOutPct: string;
+        };
+        ManasYearReturn: {
+            /** Format: int32 */
+            year: number;
+            returnPct: string;
+            /** Format: int32 */
+            trades: number;
         };
         ManasRow: {
             symbol: string;
             exchange: string;
-            close: number;
-            sma50: number | null;
-            sma200: number | null;
-            high52w: number | null;
-            low52w: number | null;
-            avgVol20: number | null;
-            avgVol50: number | null;
-            turnover50: number | null;
-            withinHighPct: number | null;
-            aboveLowPct: number | null;
+            close: string;
+            sma50: string | null;
+            sma200: string | null;
+            high52w: string | null;
+            low52w: string | null;
+            avgVol20: string | null;
+            avgVol50: string | null;
+            turnover50: string | null;
+            withinHighPct: string | null;
+            aboveLowPct: string | null;
             withinHigh: boolean;
             aboveSma50: boolean;
             liquidVolume: boolean;
             liquidDepth: boolean;
             lowCap: boolean;
-            freeFloatMcapCr: number | null;
-            freeFloatPct: number | null;
+            freeFloatMcapCr: string | null;
+            freeFloatPct: string | null;
             gates: boolean[];
             /** Format: int32 */
             gatesPassed: number;
             passesAll: boolean;
-            rsRank: number | null;
+            rsRank: string | null;
         };
         ManasScreenResponse: {
             items: components["schemas"]["ManasRow"][];
@@ -2572,17 +2732,17 @@ export interface components {
             runAt: string;
             /** Format: int32 */
             symbolsScanned: number;
-            capital: number;
-            totalReturnPct: number;
-            cagrPct: number;
-            maxDrawdownPct: number;
-            sharpe: number;
+            capital: string;
+            totalReturnPct: string;
+            cagrPct: string;
+            maxDrawdownPct: string;
+            sharpe: string;
             /** Format: int32 */
             tradesTaken: number;
             /** Format: int32 */
             tradesSkipped: number;
-            winRatePct: number;
-            profitFactor: number;
+            winRatePct: string;
+            profitFactor: string;
             report: components["schemas"]["JsonNode"];
             trades: components["schemas"]["DeepSwingTrade"][];
         };
@@ -2591,15 +2751,15 @@ export interface components {
             setup: string;
             /** Format: date */
             entryDate: string;
-            entryPrice: number;
+            entryPrice: string;
             /** Format: date */
             exitDate: string;
-            exitPrice: number;
-            pnlPct: number;
+            exitPrice: string;
+            pnlPct: string;
             /** Format: int32 */
             barsHeld: number;
             exitReason: string;
-            rsRankAtEntry: number;
+            rsRankAtEntry: string | null;
         };
         JsonNode: unknown;
         WarmStatus: {
@@ -2628,6 +2788,10 @@ export interface components {
             /** Format: date */
             to?: string;
         };
+        IvRollupResponse: {
+            /** Format: int32 */
+            recomputed: number;
+        };
         MarginLeg: {
             exchange?: string;
             underlying?: string;
@@ -2647,14 +2811,14 @@ export interface components {
         MarginResponse: {
             priced: boolean;
             unpricedReason: string | null;
-            spanMargin: number | null;
-            exposureMargin: number | null;
-            equityMargin: number | null;
-            netBuyPremium: number | null;
-            additionalMargin: number | null;
-            totalMargin: number | null;
-            requiredMargin: number | null;
-            finalMargin: number | null;
+            spanMargin: string | null;
+            exposureMargin: string | null;
+            equityMargin: string | null;
+            netBuyPremium: string | null;
+            additionalMargin: string | null;
+            totalMargin: string | null;
+            requiredMargin: string | null;
+            finalMargin: string | null;
         };
         RefreshResponse: {
             available: boolean;
@@ -2685,13 +2849,13 @@ export interface components {
             bse: components["schemas"]["BhavcopyExchangeResult"];
         };
         RefreshRequest: {
-            exchange?: string;
-            tradingsymbol?: string;
-            interval?: string;
+            exchange: string;
+            tradingsymbol: string;
+            interval: string;
             /** Format: date-time */
-            from?: string;
+            from: string;
             /** Format: date-time */
-            to?: string;
+            to: string;
         };
         QueryRequest: {
             sql?: string;
@@ -2715,6 +2879,12 @@ export interface components {
             expiry?: string;
             /** Format: date */
             date?: string;
+        };
+        ContinuousBackfillResponse: {
+            root: string;
+            contSymbol: string;
+            /** Format: int32 */
+            contracts: number;
         };
         DownloadRequest: {
             exchange?: string;
@@ -2759,21 +2929,40 @@ export interface components {
             /** Format: date-time */
             tokenValidUntil: string;
         };
+        WorldIndex: {
+            name: string | null;
+            country: string | null;
+            key: string;
+            tradingSymbol: string | null;
+            ltp: string | null;
+            prevClose: string | null;
+            netChange: string | null;
+            changePct: string | null;
+            open: string | null;
+            high: string | null;
+            low: string | null;
+            /** Format: date-time */
+            asOf: string | null;
+            latency: string | null;
+        };
+        WorldIndicesResponse: {
+            items: components["schemas"]["WorldIndex"][];
+        };
         VixQuote: {
-            ltp: number;
-            dayHigh: number | null;
-            dayLow: number | null;
-            dayOpen: number | null;
-            prevClose: number | null;
-            change: number | null;
-            changePct: number | null;
+            ltp: string;
+            dayHigh: string | null;
+            dayLow: string | null;
+            dayOpen: string | null;
+            prevClose: string | null;
+            change: string | null;
+            changePct: string | null;
             /** Format: date-time */
             asOf: string;
         };
         NormalizedTick: {
             exchange: string;
             tradingsymbol: string;
-            lastPrice: number;
+            lastPrice: string;
             /** Format: int64 */
             cumulativeDayVolume: number;
             /** Format: int64 */
@@ -2782,6 +2971,26 @@ export interface components {
             timestamp: string;
             /** Format: int64 */
             seq: number;
+        };
+        SymbolLineageResponse: {
+            items: components["schemas"]["SymbolLineageRow"][];
+            /** Format: int32 */
+            count: number;
+        };
+        SymbolLineageRow: {
+            exchange: string;
+            predecessorSymbol: string;
+            successorSymbol: string;
+            /** Format: date */
+            switchDate: string | null;
+            /** Format: int32 */
+            gapSessions: number | null;
+            boundaryPrice: string | null;
+            confidence: string | null;
+            evidence: string | null;
+            status: string;
+            statusReason: string | null;
+            source: string;
         };
         SubscriptionView: {
             exchange: string;
@@ -2794,6 +3003,33 @@ export interface components {
             priority: "PINNED_INDEX" | "STRATEGY" | "UI" | "SPECULATIVE";
             /** Format: int32 */
             subscribers: number;
+        };
+        MarketSurfaceStatus: {
+            serverTime: string;
+            tradingDay: boolean;
+            marketOpen: boolean;
+            sessionOpen: string;
+            sessionClose: string;
+            nextTradingDay: string;
+            previousTradingDay: string;
+            lastTradingDay: string;
+        };
+        Row: {
+            exchange: string;
+            tradingsymbol: string;
+            latestClose: string;
+            pastClose: string;
+            value: string;
+            avgVolume: string | null;
+            distanceFromHigh52w: string | null;
+            label: string | null;
+        };
+        ScreenerResponse: {
+            items: components["schemas"]["Row"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
         };
         MinerviniBacktestResult: {
             status: string;
@@ -2809,7 +3045,7 @@ export interface components {
         RotationResult: {
             /** Format: int32 */
             slots: number;
-            marginPct: number;
+            marginPct: string;
             /** Format: int32 */
             rotations: number;
             net: components["schemas"]["PortfolioStat"];
@@ -2821,10 +3057,10 @@ export interface components {
             tradesTaken: number;
             /** Format: int32 */
             tradesSkipped: number;
-            grossCagrPct: number;
-            netCagrPct: number;
-            netDrawdownPct: number;
-            netSharpe: number;
+            grossCagrPct: string;
+            netCagrPct: string;
+            netDrawdownPct: string;
+            netSharpe: string;
         };
         SweepCell: {
             /** Format: int64 */
@@ -2833,9 +3069,42 @@ export interface components {
             floorTurnover: number;
             /** Format: int32 */
             trades: number;
-            netCagrPct: number;
-            netDrawdownPct: number;
-            netSharpe: number;
+            netCagrPct: string;
+            netDrawdownPct: string;
+            netSharpe: string;
+        };
+        MinerviniPlaneDivergence: {
+            /** Format: date */
+            screenDate: string | null;
+            /** Format: date-time */
+            asOfCutoff: string | null;
+            /** Format: int32 */
+            passersChecked: number;
+            /** Format: int32 */
+            barsCompared: number;
+            /** Format: int32 */
+            barsExcludedAsOf: number;
+            /** Format: int32 */
+            symbolsWithNoHonestBars: number;
+            /** Format: int32 */
+            divergentPassers: number;
+            /** Format: int32 */
+            divergentCandidates: number;
+            thresholdPct: string;
+            /** Format: int32 */
+            lookbackDays: number;
+            names: components["schemas"]["MinerviniPlaneDivergentName"][];
+        };
+        MinerviniPlaneDivergentName: {
+            symbol: string;
+            maxDivergencePct: string;
+            /** Format: date */
+            worstBar: string | null;
+            /** Format: int32 */
+            sharedBars: number;
+            /** Format: int32 */
+            barsExcludedAsOf: number;
+            candidate: boolean;
         };
         MinerviniFunnel: {
             /** Format: date */
@@ -2847,26 +3116,26 @@ export interface components {
         };
         MinerviniFunnelRow: {
             symbol: string;
-            close: number;
-            rsRank: number | null;
+            close: string;
+            rsRank: string | null;
             /** Format: int32 */
             stage: number | null;
             isVcp: boolean;
-            pivot: number | null;
-            cheatPivot: number | null;
+            pivot: string | null;
+            cheatPivot: string | null;
             thrust: boolean;
             footprint: string | null;
-            pctToPivot: number | null;
+            pctToPivot: string | null;
         };
         Regime: {
             regime: string;
-            advanceRatio: number | null;
+            advanceRatio: string | null;
             /** Format: int32 */
             sessions: number;
         };
         DiffRow: {
             symbol: string;
-            rsRank: number | null;
+            rsRank: string | null;
         };
         ScreenDiff: {
             /** Format: date */
@@ -2894,9 +3163,9 @@ export interface components {
         Geometry: {
             isVcp: boolean;
             footprint: string | null;
-            pivot: number | null;
-            deepestPct: number | null;
-            tightestPct: number | null;
+            pivot: string | null;
+            deepestPct: string | null;
+            tightestPct: string | null;
             /** Format: int32 */
             contractionCount: number | null;
             /** Format: int32 */
@@ -2907,7 +3176,7 @@ export interface components {
             shakeout: boolean;
             /** Format: int32 */
             baseCount: number | null;
-            cheatPivot: number | null;
+            cheatPivot: string | null;
             thrust: boolean;
             rejectReason: string | null;
         };
@@ -2917,18 +3186,18 @@ export interface components {
             /** Format: date */
             screenDate: string | null;
             scanned: boolean;
-            close: number | null;
-            sma50: number | null;
-            sma150: number | null;
-            sma200: number | null;
-            high52w: number | null;
-            low52w: number | null;
-            pctFromHigh: number | null;
-            pctAboveLow: number | null;
-            rsRank: number | null;
-            avgTurnover50: number | null;
-            freeFloatMcapCr: number | null;
-            freeFloatPct: number | null;
+            close: string | null;
+            sma50: string | null;
+            sma150: string | null;
+            sma200: string | null;
+            high52w: string | null;
+            low52w: string | null;
+            pctFromHigh: string | null;
+            pctAboveLow: string | null;
+            rsRank: string | null;
+            avgTurnover50: string | null;
+            freeFloatMcapCr: string | null;
+            freeFloatPct: string | null;
             gates: boolean[];
             /** Format: int32 */
             gatesPassed: number;
@@ -2963,9 +3232,21 @@ export interface components {
             /** Format: date */
             fromDate: string | null;
             runAt: string | null;
-            variants: components["schemas"]["Report"][];
-            slotSweep: components["schemas"]["SlotCell"][];
+            variants: components["schemas"]["ManasReport"][];
+            slotSweep: components["schemas"]["ManasSlotCell"][];
             note: string;
+        };
+        ManasSlotCell: {
+            /** Format: int32 */
+            slots: number;
+            /** Format: int32 */
+            tradesTaken: number;
+            /** Format: int32 */
+            tradesSkipped: number;
+            grossCagrPct: string;
+            netCagrPct: string;
+            netDrawdownPct: string;
+            netSharpe: string;
         };
         ManasFunnel: {
             /** Format: date */
@@ -2977,15 +3258,15 @@ export interface components {
         };
         ManasFunnelRow: {
             symbol: string;
-            close: number;
-            aboveLowPct: number | null;
+            close: string;
+            aboveLowPct: string | null;
             setupType: string | null;
-            pivot: number | null;
+            pivot: string | null;
             footprint: string | null;
-            pctToPivot: number | null;
-            breakoutPivot: number | null;
-            vcpPivot: number | null;
-            rsRank: number | null;
+            pctToPivot: string | null;
+            breakoutPivot: string | null;
+            vcpPivot: string | null;
+            rsRank: string | null;
         };
         ManasCandidateAnalysis: {
             symbol: string;
@@ -2993,23 +3274,23 @@ export interface components {
             /** Format: date */
             screenDate: string | null;
             scanned: boolean;
-            close: number | null;
-            sma50: number | null;
-            sma200: number | null;
-            high52w: number | null;
-            low52w: number | null;
-            withinHighPct: number | null;
-            aboveLowPct: number | null;
-            avgVol20: number | null;
-            avgVol50: number | null;
-            turnover50: number | null;
+            close: string | null;
+            sma50: string | null;
+            sma200: string | null;
+            high52w: string | null;
+            low52w: string | null;
+            withinHighPct: string | null;
+            aboveLowPct: string | null;
+            avgVol20: string | null;
+            avgVol50: string | null;
+            turnover50: string | null;
             withinHigh: boolean;
             aboveSma50: boolean;
             liquidVolume: boolean;
             liquidDepth: boolean;
             lowCap: boolean;
-            freeFloatMcapCr: number | null;
-            freeFloatPct: number | null;
+            freeFloatMcapCr: string | null;
+            freeFloatPct: string | null;
             gates: boolean[];
             /** Format: int32 */
             gatesPassed: number;
@@ -3020,10 +3301,40 @@ export interface components {
             setupType: string;
             valid: boolean;
             footprint: string | null;
-            pivot: number | null;
+            pivot: string | null;
             /** Format: int32 */
             baseWeeks: number | null;
             rejectReason: string | null;
+        };
+        LineageScreenImpact: {
+            screen: string;
+            /** Format: date */
+            screenDate: string | null;
+            /** Format: int32 */
+            coverage: number;
+            /** Format: int32 */
+            candidates: number;
+            /** Format: int32 */
+            lineageCoverage: number;
+            /** Format: int32 */
+            lineageCandidates: number;
+            entering: string[];
+            leaving: string[];
+        };
+        PreOpen: {
+            phase: string;
+            preOpen: boolean;
+            indices: components["schemas"]["PreOpenIndex"][];
+        };
+        PreOpenIndex: {
+            name: string;
+            key: string;
+            ltp: string | null;
+            prevClose: string | null;
+            netChange: string | null;
+            changePct: string | null;
+            /** Format: date-time */
+            asOf: string;
         };
         DataFreshness: {
             /** Format: date-time */
@@ -3045,11 +3356,11 @@ export interface components {
             ceOi: number;
             /** Format: int64 */
             peOi: number;
-            spot: number | null;
+            spot: string | null;
             /** @enum {string} */
             trend: "UP" | "DOWN" | "FLAT";
-            ceLtp: number | null;
-            peLtp: number | null;
+            ceLtp: string | null;
+            peLtp: string | null;
         };
         TrendSeries: {
             items: components["schemas"]["OiTrendPoint"][];
@@ -3058,22 +3369,22 @@ export interface components {
             freshness?: components["schemas"]["DataFreshness"];
         };
         StrikeSessionStat: {
-            strike: number;
+            strike: string;
             optionType: string;
-            open: number | null;
-            high: number | null;
-            low: number | null;
-            last: number | null;
+            open: string | null;
+            high: string | null;
+            low: string | null;
+            last: string | null;
             /** Format: int64 */
             dayVolume: number | null;
             /** Format: int64 */
             declineVolume: number | null;
-            prevClose: number | null;
+            prevClose: string | null;
             ohMark: boolean;
             olMark: boolean;
-            fallPctFromOpen: number | null;
-            fallPctFromPrevClose: number | null;
-            oiChangePct: number | null;
+            fallPctFromOpen: string | null;
+            fallPctFromPrevClose: string | null;
+            oiChangePct: string | null;
         };
         StrikeSessionStats: {
             /** Format: date-time */
@@ -3081,8 +3392,8 @@ export interface components {
             underlying: string;
             /** Format: date */
             expiry: string;
-            spot: number | null;
-            atmStrike: number | null;
+            spot: string | null;
+            atmStrike: string | null;
             /** Format: int32 */
             interval: number;
             items: components["schemas"]["StrikeSessionStat"][];
@@ -3090,12 +3401,12 @@ export interface components {
         StraddleCandle: {
             /** Format: date-time */
             time: string;
-            open: number;
-            high: number;
-            low: number;
-            close: number;
-            ceClose: number;
-            peClose: number;
+            open: string;
+            high: string;
+            low: string;
+            close: string;
+            ceClose: string;
+            peClose: string;
             /** Format: int64 */
             volume: number;
         };
@@ -3103,16 +3414,16 @@ export interface components {
             underlying: string;
             /** Format: date */
             expiry: string;
-            callStrike: number;
-            putStrike: number;
+            callStrike: string;
+            putStrike: string;
             interval: string;
-            underlyingLtp: number | null;
-            underlyingDayOpen: number | null;
+            underlyingLtp: string | null;
+            underlyingDayOpen: string | null;
             /** Format: date-time */
             asOf: string;
-            combinedVwap: number | null;
-            slBufferPoints: number;
-            slLevel: number | null;
+            combinedVwap: string | null;
+            slBufferPoints: string;
+            slLevel: string | null;
             items: components["schemas"]["StraddleCandle"][];
         };
         SpurtChain: {
@@ -3124,24 +3435,24 @@ export interface components {
         SpurtSummary: {
             /** @enum {string} */
             interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
-            spotDelta: number | null;
+            spotDelta: string | null;
             /** Format: int64 */
             oiChange: number;
-            oiChangePct: number | null;
-            priceChangePct: number | null;
+            oiChangePct: string | null;
+            priceChangePct: string | null;
         };
         StrikeSpurt: {
-            strike: number;
+            strike: string;
             optionType: string;
-            ltp: number | null;
-            prevLtp: number | null;
+            ltp: string | null;
+            prevLtp: string | null;
             /** Format: int64 */
             oi: number | null;
             /** Format: int64 */
             oiChange: number;
-            spurtPct: number | null;
-            ltpChange: number | null;
-            ltpChangePct: number | null;
+            spurtPct: string | null;
+            ltpChange: string | null;
+            ltpChangePct: string | null;
             /** Format: int64 */
             volume: number | null;
             /** @enum {string} */
@@ -3149,17 +3460,17 @@ export interface components {
         };
         PremiumChain: {
             items: components["schemas"]["PremiumRow"][];
-            atmStrike: number | null;
-            atmStraddle: number | null;
-            spot: number | null;
+            atmStrike: string | null;
+            atmStraddle: string | null;
+            spot: string | null;
             /** Format: date-time */
             asOf: string | null;
         };
         PremiumRow: {
-            strike: number;
-            straddle: number | null;
-            ce: number | null;
-            pe: number | null;
+            strike: string;
+            straddle: string | null;
+            ce: string | null;
+            pe: string | null;
         };
         PremiumSeries: {
             items: components["schemas"]["PremiumSeriesPoint"][];
@@ -3169,18 +3480,46 @@ export interface components {
         PremiumSeriesPoint: {
             /** Format: date-time */
             bucket: string;
-            atmStrike: number | null;
-            atmStraddle: number | null;
-            spot: number | null;
+            atmStrike: string | null;
+            atmStraddle: string | null;
+            spot: string | null;
         };
         PcrSeriesPoint: {
             time: string;
-            pcr: number | null;
-            spot: number | null;
+            pcr: string | null;
+            spot: string | null;
+        };
+        OptCandle: {
+            /** Format: date-time */
+            time: string;
+            open: string;
+            high: string;
+            low: string;
+            close: string;
+            /** Format: int64 */
+            volume: number;
+            /** Format: int64 */
+            oi: number | null;
+            iv: string | null;
+        };
+        OptOiChart: {
+            ce: components["schemas"]["OptCandle"][];
+            pe: components["schemas"]["OptCandle"][];
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            strike: string;
+            ceTradingsymbol: string;
+            peTradingsymbol: string;
+            interval: string;
+            underlyingLtp: string | null;
+            underlyingDayOpen: string | null;
+            /** Format: date-time */
+            asOf: string;
         };
         OiStats: {
-            pcr: number | null;
-            maxPain: number | null;
+            pcr: string | null;
+            maxPain: string | null;
             /** Format: int64 */
             ceOi: number;
             /** Format: int64 */
@@ -3198,29 +3537,82 @@ export interface components {
             value: number | null;
         };
         Heatmap: {
-            buckets?: string[];
-            strikes?: string[];
-            ce?: components["schemas"]["Cell"][];
-            pe?: components["schemas"]["Cell"][];
+            buckets: string[];
+            strikes: string[];
+            ce: components["schemas"]["Cell"][];
+            pe: components["schemas"]["Cell"][];
             /** Format: int64 */
-            maxAbs?: number | null;
+            maxAbs: number | null;
             /** Format: date-time */
             asOf: string | null;
             freshness?: components["schemas"]["DataFreshness"];
         };
+        OiAnalysis: {
+            items: components["schemas"]["StrikePoint"][];
+        };
+        StrikePoint: {
+            /** Format: date-time */
+            bucket: string;
+            strike: string;
+            optionType: string;
+            ltp: string | null;
+            /** Format: int64 */
+            oi: number | null;
+            /** Format: int64 */
+            oiChange: number | null;
+            iv: string | null;
+            spot: string | null;
+            /** Format: int64 */
+            volume: number | null;
+        };
+        StrikeSeries: {
+            items: components["schemas"]["StrikePoint"][];
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            strike: string;
+            interval: string;
+            /** Format: date-time */
+            asOf: string;
+        };
+        MultipleOi: {
+            items: components["schemas"]["OiLeg"][];
+            spot: components["schemas"]["SpotPoint"][];
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            interval: string;
+            /** Format: date-time */
+            asOf: string;
+        };
+        OiLeg: {
+            leg: string;
+            points: components["schemas"]["OiLinePoint"][];
+        };
+        OiLinePoint: {
+            /** Format: date-time */
+            bucket: string;
+            /** Format: int64 */
+            oi: number | null;
+        };
+        SpotPoint: {
+            /** Format: date-time */
+            bucket: string;
+            spot: string | null;
+        };
         HistoryPoint: {
             /** Format: date */
             date: string;
-            iv: number;
-            atmIv: number;
-            iv30d: number;
-            spot: number;
+            iv: string | null;
+            atmIv: string | null;
+            iv30d: string | null;
+            spot: string | null;
         };
         IvHistory: {
             underlying: string;
             series: components["schemas"]["HistoryPoint"][];
-            currentIv: number;
-            rank: number;
+            currentIv: string | null;
+            rank: string | null;
             /** Format: int32 */
             percentile: number;
             /** Format: int32 */
@@ -3250,12 +3642,13 @@ export interface components {
             underlying: string;
             /** Format: date */
             expiry: string;
-            spot: number | null;
-            forward: number | null;
+            spot: string | null;
+            forward: string | null;
             forwardSource: string;
-            riskFreeRate: number;
-            pcr: number | null;
+            riskFreeRate: string;
+            pcr: string | null;
             stale: boolean;
+            lastCaptured: boolean;
             /** Format: date-time */
             asOf: string;
             rows: components["schemas"]["StrikeRow"][];
@@ -3263,45 +3656,84 @@ export interface components {
         Leg: {
             exchange: string | null;
             tradingsymbol: string;
-            ltp: number | null;
-            bid: number | null;
-            ask: number | null;
+            ltp: string | null;
+            bid: string | null;
+            ask: string | null;
             /** Format: int64 */
             volume: number | null;
             /** Format: int64 */
             oi: number | null;
             /** Format: int64 */
             prevOi: number | null;
-            iv: number | null;
-            delta: number | null;
-            gamma: number | null;
-            theta: number | null;
-            vega: number | null;
-            rho: number | null;
-            vanna: number | null;
-            charm: number | null;
-            vomma: number | null;
-            speed: number | null;
-            zomma: number | null;
-            color: number | null;
+            iv: string | null;
+            delta: string | null;
+            gamma: string | null;
+            theta: string | null;
+            vega: string | null;
+            rho: string | null;
+            vanna: string | null;
+            charm: string | null;
+            vomma: string | null;
+            speed: string | null;
+            zomma: string | null;
+            color: string | null;
             ivReason: string | null;
             priceSource: string | null;
         };
         StrikeRow: {
-            strike: number;
+            strike: string;
             ce: components["schemas"]["Leg"];
             pe: components["schemas"]["Leg"];
+        };
+        ChainHistoryResponse: {
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            /** Format: date-time */
+            ts: string;
+            rows: components["schemas"]["SnapshotRow"][];
+        };
+        SnapshotRow: {
+            /** Format: date-time */
+            ts: string;
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            strike: string;
+            optionType: string;
+            tradingsymbol: string;
+            ltp: string | null;
+            bid: string | null;
+            ask: string | null;
+            /** Format: int64 */
+            volume: number | null;
+            /** Format: int64 */
+            oi: number | null;
+            /** Format: int64 */
+            oiChange: number | null;
+            spotPrice: string | null;
+            iv: string | null;
+            delta: string | null;
+            gamma: string | null;
+            theta: string | null;
+            vega: string | null;
+            rho: string | null;
+            ivReason: string | null;
+            priceSource: string | null;
+            forwardPrice: string | null;
+            riskFreeRate: string | null;
         };
         ChainTable: {
             underlying: string;
             /** Format: date */
             expiry: string;
-            spot: number | null;
-            forward: number | null;
+            spot: string | null;
+            forward: string | null;
             forwardSource: string;
-            riskFreeRate: number;
-            pcr: number | null;
+            riskFreeRate: string | null;
+            pcr: string | null;
             stale: boolean;
+            lastCaptured: boolean;
             /** Format: date-time */
             asOf: string;
             interval: string;
@@ -3313,30 +3745,30 @@ export interface components {
             deltas: components["schemas"]["LegDeltas"] | null;
         };
         ChainTableRow: {
-            strike: number;
+            strike: string;
             ce: components["schemas"]["ChainTableLeg"];
             pe: components["schemas"]["ChainTableLeg"];
         };
         LegDeltas: {
             /** Format: int64 */
             oiChange: number | null;
-            oiChangePct: number | null;
-            ltpChange: number | null;
-            ltpChangePct: number | null;
+            oiChangePct: string | null;
+            ltpChange: string | null;
+            ltpChangePct: string | null;
             /** @enum {string} */
             interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         CalendarSpreadChart: {
             underlying: string;
-            strike: number;
+            strike: string;
             optionType: string;
             /** Format: date */
             nearExpiry: string;
             /** Format: date */
             farExpiry: string;
             interval: string;
-            underlyingLtp: number | null;
-            underlyingDayOpen: number | null;
+            underlyingLtp: string | null;
+            underlyingDayOpen: string | null;
             /** Format: date-time */
             asOf: string;
             items: components["schemas"]["SpreadCandle"][];
@@ -3344,12 +3776,12 @@ export interface components {
         SpreadCandle: {
             /** Format: date-time */
             time: string;
-            open: number;
-            high: number;
-            low: number;
-            close: number;
-            nearClose: number;
-            farClose: number;
+            open: string;
+            high: string;
+            low: string;
+            close: string;
+            nearClose: string;
+            farClose: string;
             /** Format: int64 */
             volume: number;
         };
@@ -3359,13 +3791,13 @@ export interface components {
             asOf: string | null;
         };
         BigOiRow: {
-            strike: number;
+            strike: string;
             optionType: string;
             /** Format: int64 */
             oi: number;
             /** Format: int64 */
             oiChange: number;
-            ltp: number | null;
+            ltp: string | null;
         };
         BigOiLog: {
             items: components["schemas"]["LogEvent"][];
@@ -3374,11 +3806,11 @@ export interface components {
         };
         LogEvent: {
             time: string;
-            spot: number | null;
-            strike: number;
+            spot: string | null;
+            strike: string;
             optionType: string;
-            ltp: number | null;
-            ltpChange: number | null;
+            ltp: string | null;
+            ltpChange: string | null;
             /** Format: int64 */
             oi: number | null;
             /** Format: int64 */
@@ -3389,9 +3821,9 @@ export interface components {
         ActiveStrikeIvPoint: {
             /** Format: date-time */
             bucket: string;
-            ceIv: number | null;
-            peIv: number | null;
-            price: number | null;
+            ceIv: string | null;
+            peIv: string | null;
+            price: string | null;
         };
         ActiveStrikeOiPoint: {
             /** Format: date-time */
@@ -3402,8 +3834,8 @@ export interface components {
             peOi: number;
         };
         ActiveStrikesResponse: {
-            sentimentPct: number | null;
-            sentimentLevelPct?: number;
+            sentimentPct: string | null;
+            sentimentLevelPct?: string;
             items: components["schemas"]["StrikeView"][];
             sentimentSeries?: components["schemas"]["SentimentPoint"][];
             activeStrikeOiSeries?: components["schemas"]["ActiveStrikeOiPoint"][];
@@ -3416,15 +3848,34 @@ export interface components {
         SentimentPoint: {
             /** Format: date-time */
             bucket: string;
-            sentimentPct: number | null;
-            levelPct: number | null;
+            sentimentPct: string | null;
+            levelPct: string | null;
         };
         StrikeView: {
-            strike: number;
+            strike: string;
             /** Format: int64 */
             ceOi: number;
             /** Format: int64 */
             peOi: number;
+        };
+        MarketStatus: {
+            exchange: string;
+            status: string;
+            preOpen: boolean;
+            /** Format: date-time */
+            asOf: string | null;
+        };
+        MarketStatusesResponse: {
+            items: components["schemas"]["MarketStatus"][];
+        };
+        HolidayEntry: {
+            date: string;
+            day: string;
+            description: string;
+        };
+        HolidaysResponse: {
+            items: components["schemas"]["HolidayEntry"][];
+            asOf: string;
         };
         CrossSourceReport: {
             status: string;
@@ -3440,8 +3891,8 @@ export interface components {
             detail: string;
             /** Format: int32 */
             bucketsCompared: number;
-            meanDivergencePct: number | null;
-            maxDivergencePct: number | null;
+            meanDivergencePct: string | null;
+            maxDivergencePct: string | null;
         };
         BoardReport: {
             /** Format: date-time */
@@ -3507,7 +3958,7 @@ export interface components {
             expected: number;
             /** Format: int64 */
             present: number;
-            coveragePct: number | null;
+            coveragePct: string | null;
             ok: boolean;
             detail: string | null;
             /** Format: date-time */
@@ -3521,19 +3972,19 @@ export interface components {
             compared: number;
             /** Format: int32 */
             divergent: number;
-            thresholdPct: number;
+            thresholdPct: string;
             offenders: components["schemas"]["CloseMismatch"][];
         };
         CloseMismatch: {
             symbol: string;
-            bhavClose: number;
-            kiteClose: number;
-            relDiffPct: number;
+            bhavClose: string;
+            kiteClose: string;
+            relDiffPct: string;
         };
         DowQuote: {
-            ltp: number;
-            prevClose: number | null;
-            change: number | null;
+            ltp: string;
+            prevClose: string | null;
+            change: string | null;
             /** Format: int32 */
             direction: number | null;
         };
@@ -3543,19 +3994,19 @@ export interface components {
             expiry: string;
             /** Format: int64 */
             daysToExpiry: number;
-            ltp: number | null;
+            ltp: string | null;
             /** Format: int64 */
             oi: number | null;
             /** Format: int64 */
             volume: number | null;
-            basisAbsolute: number | null;
-            basisAnnualized: number | null;
+            basisAbsolute: string | null;
+            basisAnnualized: string | null;
         };
         TermStructure: {
             underlying: string;
-            spot: number | null;
+            spot: string | null;
             state: string;
-            calendarSpread: number | null;
+            calendarSpread: string | null;
             stale: boolean;
             /** Format: date-time */
             asOf: string;
@@ -3564,14 +4015,14 @@ export interface components {
         };
         FutSpurt: {
             tradingsymbol: string;
-            ltp: number | null;
-            prevClose: number | null;
-            pricePct: number | null;
+            ltp: string | null;
+            prevClose: string | null;
+            pricePct: string | null;
             /** Format: int64 */
             oi: number;
             /** Format: int64 */
             oiChange: number;
-            spurtPct: number | null;
+            spurtPct: string | null;
             /** @enum {string} */
             interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
@@ -3581,14 +4032,114 @@ export interface components {
             asOf: string | null;
             freshness?: components["schemas"]["DataFreshness"];
         };
+        FuturesPreOpen: {
+            phase: string;
+            preOpen: boolean;
+            /** Format: date-time */
+            asOf: string;
+            /** Format: int32 */
+            advances: number;
+            /** Format: int32 */
+            declines: number;
+            /** Format: int32 */
+            unchanged: number;
+            stocks: components["schemas"]["PreOpenRow"][];
+            indices: components["schemas"]["PreOpenRow"][];
+        };
+        PreOpenRow: {
+            symbol: string;
+            preOpenPrice: string | null;
+            prevClose: string | null;
+            change: string | null;
+            changePct: string | null;
+            prevDayBreak: string | null;
+        };
+        FutOiCandle: {
+            /** Format: date-time */
+            time: string;
+            open: string;
+            high: string;
+            low: string;
+            close: string;
+            /** Format: int64 */
+            volume: number;
+            /** Format: int64 */
+            oi: number | null;
+        };
+        FutOiChart: {
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            tradingsymbol: string;
+            interval: string;
+            /** Format: date-time */
+            asOf: string;
+            items: components["schemas"]["FutOiCandle"][];
+        };
+        OiBuzzIndicesResponse: {
+            items: string[];
+        };
+        OiBuzzHeatmap: {
+            index: string;
+            /** Format: int32 */
+            advance: number;
+            /** Format: int32 */
+            decline: number;
+            tiles: components["schemas"]["Tile"][];
+            /** Format: date-time */
+            asOf: string | null;
+        };
+        Tile: {
+            symbol: string;
+            changePct: string | null;
+            ltp: string;
+            open: string | null;
+            high: string | null;
+            low: string | null;
+            /** Format: int64 */
+            oi: number;
+            /** Format: int64 */
+            oiChange: number;
+            /** @enum {string} */
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+        };
+        FutAnalysisResponse: {
+            items: components["schemas"]["FutPoint"][];
+        };
+        FutPoint: {
+            /** Format: date-time */
+            bucket: string;
+            underlying: string;
+            tradingsymbol: string;
+            ltp: string | null;
+            /** Format: int64 */
+            oi: number | null;
+            /** Format: int64 */
+            oiChange: number | null;
+            dayOpen: string | null;
+            dayHigh: string | null;
+            dayLow: string | null;
+            prevClose: string | null;
+            /** Format: int64 */
+            volume: number | null;
+            /** Format: date */
+            expiry: string;
+        };
+        FutAnalysisSeriesResponse: {
+            items: components["schemas"]["FutPoint"][];
+            underlying: string;
+            interval: string;
+            /** Format: date-time */
+            asOf: string;
+        };
         MoverRow: {
             tradingsymbol: string;
-            ltp: number | null;
-            pricePct: number | null;
-            oiPct: number | null;
-            dayOpen: number | null;
-            dayHigh: number | null;
-            dayLow: number | null;
+            ltp: string | null;
+            pricePct: string | null;
+            oiPct: string | null;
+            dayOpen: string | null;
+            dayHigh: string | null;
+            dayLow: string | null;
             /** @enum {string} */
             interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
@@ -3598,6 +4149,47 @@ export interface components {
             /** Format: date-time */
             asOf: string | null;
             freshness?: components["schemas"]["DataFreshness"];
+        };
+        Screen: {
+            longCandidates: components["schemas"]["ScreenerRow"][];
+            shortCandidates: components["schemas"]["ScreenerRow"][];
+            /** Format: date-time */
+            asOf: string;
+        };
+        ScreenerRow: {
+            symbol: string;
+            ltp: string;
+            pricePct: string | null;
+            oiPct: string | null;
+            /** @enum {string} */
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            /** Format: int32 */
+            breakoutDays: number;
+            openHigh: boolean;
+            openLow: boolean;
+            dailyRsi: string | null;
+            /** Format: int64 */
+            volume: number;
+            longCandidate: boolean;
+            shortCandidate: boolean;
+        };
+        EodResponse: {
+            items: components["schemas"]["EodRow"][];
+        };
+        EodRow: {
+            tradingsymbol: string;
+            /** Format: date */
+            tradeDate: string;
+            open: string | null;
+            high: string | null;
+            low: string | null;
+            close: string | null;
+            /** Format: int64 */
+            oiClose: number;
+            /** Format: int64 */
+            oiChange: number;
+            /** Format: int64 */
+            volume: number;
         };
         BuzzMatrix: {
             contracts: string[];
@@ -3610,12 +4202,12 @@ export interface components {
             tradingsymbol: string;
             /** Format: date */
             expiry: string;
-            ltp: number | null;
+            ltp: string | null;
             /** Format: int64 */
             oi: number;
             /** Format: int64 */
             oiChange: number;
-            basis: number | null;
+            basis: string | null;
             /** @enum {string|null} */
             interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING" | null;
         };
@@ -3635,37 +4227,126 @@ export interface components {
             tradingsymbol: string;
             /** Format: date */
             expiry: string;
-            ltp: number | null;
-            pricePct: number | null;
+            ltp: string | null;
+            pricePct: string | null;
             /** Format: int64 */
             oi: number;
             /** Format: int64 */
             oiChange: number;
-            oiPct: number | null;
+            oiPct: string | null;
             /** @enum {string|null} */
             interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING" | null;
+        };
+        BankAnalysisCell: {
+            bank: string;
+            ltpPct: string | null;
+            oiPct: string | null;
+            /** @enum {string|null} */
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING" | null;
+        } | null;
+        BankAnalysisResponse: {
+            banks: string[];
+            rows: components["schemas"]["BankAnalysisRow"][];
+            interval: string;
+            /** Format: date-time */
+            asOf: string | null;
+        };
+        BankAnalysisRow: {
+            /** Format: date-time */
+            bucket: string;
+            cells: components["schemas"]["BankAnalysisCell"][];
         };
         EquityFundamentals: {
             symbol: string;
             isin: string | null;
-            marketCapCr: number | null;
-            freeFloatMcapCr: number | null;
-            freeFloatPct: number | null;
-            promoterPct: number | null;
-            pe: number | null;
-            roe: number | null;
-            netProfitCr: number | null;
-            revenueCr: number | null;
-            revenuePrevCr: number | null;
+            marketCapCr: string | null;
+            freeFloatMcapCr: string | null;
+            freeFloatPct: string | null;
+            promoterPct: string | null;
+            pe: string | null;
+            roe: string | null;
+            netProfitCr: string | null;
+            revenueCr: string | null;
+            revenuePrevCr: string | null;
             /** Format: date */
             asOf: string | null;
+        };
+        ParticipantOi: {
+            items: components["schemas"]["ParticipantOiRow"][];
+        };
+        ParticipantOiRow: {
+            /** Format: date */
+            tradeDate: string;
+            clientType: string;
+            /** Format: int64 */
+            futureIndexLong: number;
+            /** Format: int64 */
+            futureIndexShort: number;
+            /** Format: int64 */
+            futureStockLong: number;
+            /** Format: int64 */
+            futureStockShort: number;
+            /** Format: int64 */
+            optionIndexCallLong: number;
+            /** Format: int64 */
+            optionIndexPutLong: number;
+            /** Format: int64 */
+            optionIndexCallShort: number;
+            /** Format: int64 */
+            optionIndexPutShort: number;
+            /** Format: int64 */
+            optionStockCallLong: number;
+            /** Format: int64 */
+            optionStockPutLong: number;
+            /** Format: int64 */
+            optionStockCallShort: number;
+            /** Format: int64 */
+            optionStockPutShort: number;
+            /** Format: int64 */
+            totalLongContracts: number;
+            /** Format: int64 */
+            totalShortContracts: number;
+        };
+        LongShort: {
+            items: components["schemas"]["LongShortRow"][];
+        };
+        LongShortRow: {
+            /** Format: date */
+            tradeDate: string;
+            /** Format: int64 */
+            fiiLong: number;
+            /** Format: int64 */
+            fiiShort: number;
+            ratio: string | null;
+        };
+        DerivativeStats: {
+            items: components["schemas"]["FiiDerivativeRow"][];
+        };
+        FiiDerivativeRow: {
+            /** Format: date */
+            tradeDate: string;
+            segment: string;
+            buyValue: string | null;
+            sellValue: string | null;
+            netValue: string | null;
+        };
+        Cash: {
+            items: components["schemas"]["FiiDiiRow"][];
+        };
+        FiiDiiRow: {
+            /** Format: date */
+            tradeDate: string;
+            category: string;
+            buyValue: string | null;
+            sellValue: string | null;
+            netValue: string | null;
         };
         Bias: {
             /** Format: date */
             tradeDate: string;
             fiiClassification: string;
             bias: string;
-            fiiLongPct: number;
+            fiiLongPct: string | null;
             /** Format: int64 */
             callNet: number;
             /** Format: int64 */
@@ -3677,7 +4358,7 @@ export interface components {
         };
         SectorAgg: {
             sector: string;
-            avgChangePct: number | null;
+            avgChangePct: string | null;
             /** Format: int32 */
             positive: number;
             /** Format: int32 */
@@ -3706,9 +4387,9 @@ export interface components {
         StockChange: {
             symbol: string;
             sector: string;
-            changePct: number | null;
-            close: number | null;
-            prevClose: number | null;
+            changePct: string | null;
+            close: string | null;
+            prevClose: string | null;
         };
         SectorHeatmap: {
             index: string;
@@ -3726,12 +4407,12 @@ export interface components {
         ReturnsRow: {
             symbol: string;
             industry: string;
-            ltp: number;
-            r1d: number | null;
-            r1w: number | null;
-            r1m: number | null;
-            r6m: number | null;
-            r1y: number | null;
+            ltp: string;
+            r1d: string | null;
+            r1w: string | null;
+            r1m: string | null;
+            r6m: string | null;
+            r1y: string | null;
         };
         PreOpenScanView: {
             /** Format: date */
@@ -3741,10 +4422,10 @@ export interface components {
         };
         ScanRow: {
             symbol: string;
-            preOpenPrice: number | null;
-            prevClose: number | null;
-            change: number | null;
-            changePct: number | null;
+            preOpenPrice: string | null;
+            prevClose: string | null;
+            change: string | null;
+            changePct: string | null;
             prevDayBreak: string | null;
         };
         OpenHigh: {
@@ -3756,11 +4437,11 @@ export interface components {
         };
         Setup: {
             symbol: string;
-            dayOpen: number;
-            dayHigh: number;
-            dayLow: number;
-            ltp: number;
-            farPct: number;
+            dayOpen: string;
+            dayHigh: string;
+            dayLow: string;
+            ltp: string;
+            farPct: string;
         };
         News: {
             symbol: string;
@@ -3779,19 +4460,19 @@ export interface components {
             /** Format: int32 */
             rank: number;
             symbol: string;
-            contribution: number;
-            changePct: number;
-            close: number;
-            points: number | null;
+            contribution: string;
+            changePct: string;
+            close: string;
+            points: string | null;
         };
         IndexContribution: {
             index: string;
-            indexChangePct: number;
-            advanceTotal: number;
-            declineTotal: number;
-            indexLevel: number | null;
-            advancePoints: number | null;
-            declinePoints: number | null;
+            indexChangePct: string;
+            advanceTotal: string;
+            declineTotal: string;
+            indexLevel: string | null;
+            advancePoints: string | null;
+            declinePoints: string | null;
             advances: components["schemas"]["ContribRow"][];
             declines: components["schemas"]["ContribRow"][];
             /** Format: date */
@@ -3807,18 +4488,33 @@ export interface components {
         DeliveryDay: {
             /** Format: date */
             date: string;
-            open: number | null;
-            high: number | null;
-            low: number | null;
-            close: number | null;
-            ltpChangePct: number | null;
-            deliveryPct: number | null;
-            dayRange: number | null;
-            dayRangePct: number | null;
+            open: string | null;
+            high: string | null;
+            low: string | null;
+            close: string | null;
+            ltpChangePct: string | null;
+            deliveryPct: string | null;
+            dayRange: string | null;
+            dayRangePct: string | null;
             /** Format: int64 */
             deliveryQty: number | null;
             /** Format: int64 */
             totalTradedQty: number | null;
+        };
+        Announcement: {
+            date: string;
+            time: string;
+            symbol: string;
+            company: string | null;
+            subject: string | null;
+            detail: string | null;
+            fileLink: string | null;
+        };
+        AnnouncementsResponse: {
+            items: components["schemas"]["Announcement"][];
+            from: string;
+            to: string;
+            symbol: string;
         };
         BhavcopyBackfillStatus: {
             jobId: string | null;
@@ -3842,8 +4538,8 @@ export interface components {
             changedCount: number;
         };
         AtmIv: {
-            iv: number | null;
-            rank: number | null;
+            iv: string | null;
+            rank: string | null;
             /** Format: int32 */
             percentile: number | null;
             /** Format: int32 */
@@ -3851,14 +4547,14 @@ export interface components {
             insufficientHistory: boolean;
         };
         MaxPain: {
-            now: number;
-            atOpen: number | null;
-            drift: number | null;
+            now: string | null;
+            atOpen: string | null;
+            drift: string | null;
         };
         OiStructure: {
             /** @enum {string} */
             verdict: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
-            spotDelta: number | null;
+            spotDelta: string | null;
             /** Format: int64 */
             oiChange: number;
         };
@@ -3868,8 +4564,8 @@ export interface components {
             expiry: string;
             pcr: components["schemas"]["Pcr"] | null;
             maxPain: components["schemas"]["MaxPain"] | null;
-            oiGainers: components["schemas"]["StrikeMove"][];
-            oiLosers: components["schemas"]["StrikeMove"][];
+            oiGainers: components["schemas"]["OptionsDigestStrikeMove"][];
+            oiLosers: components["schemas"]["OptionsDigestStrikeMove"][];
             activeStrikes: components["schemas"]["ActiveStrikeMigration"] | null;
             atmStraddle: components["schemas"]["Straddle"] | null;
             atmIv: components["schemas"]["AtmIv"] | null;
@@ -3879,18 +4575,25 @@ export interface components {
             dataTrust: string;
             trustReasons: string[];
         };
+        OptionsDigestStrikeMove: {
+            strike: string;
+            /** Format: int64 */
+            oiChange: number;
+            /** @enum {string} */
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+        };
         Pcr: {
-            now: number | null;
-            atOpen: number | null;
-            priorEod: number | null;
-            deltaVsOpen: number | null;
-            deltaVsPriorEod: number | null;
+            now: string | null;
+            atOpen: string | null;
+            priorEod: string | null;
+            deltaVsOpen: string | null;
+            deltaVsPriorEod: string | null;
         };
         Straddle: {
-            atmStrike: number | null;
-            now: number | null;
-            atOpen: number | null;
-            deltaPct: number | null;
+            atmStrike: string | null;
+            now: string | null;
+            atOpen: string | null;
+            deltaPct: string | null;
         };
         BanksSummary: {
             /** Format: int32 */
@@ -3917,10 +4620,10 @@ export interface components {
         };
         TermStructureState: {
             underlying: string;
-            spot: number | null;
+            spot: string | null;
             state: string;
-            calendarSpread: number | null;
-            nearBasis: number | null;
+            calendarSpread: string | null;
+            nearBasis: string | null;
             stale: boolean;
             /** Format: date-time */
             asOf: string;
@@ -3930,24 +4633,24 @@ export interface components {
             tradingsymbol: string;
             /** Format: date */
             expiry: string;
-            ltp: number | null;
-            pricePct: number | null;
+            ltp: string | null;
+            pricePct: string | null;
             /** Format: int64 */
             oi: number;
             /** Format: int64 */
             oiChange: number;
-            oiPct: number | null;
+            oiPct: string | null;
             interpretation: string | null;
         };
         DiiDivergence: {
-            fiiNet: number | null;
-            diiNet: number | null;
+            fiiNet: string | null;
+            diiNet: string | null;
             divergent: boolean;
         };
         FiiCash: {
             /** Format: date */
             tradeDate: string;
-            net: number;
+            net: string;
             /** Format: int32 */
             streakDays: number;
             streakSide: string;
@@ -3957,7 +4660,7 @@ export interface components {
             available: boolean;
             /** Format: date */
             tradeDate: string | null;
-            indexFuturesNet: number | null;
+            indexFuturesNet: string | null;
             reason: string | null;
         };
         FiiDigest: {
@@ -3978,8 +4681,8 @@ export interface components {
             indexLong: number;
             /** Format: int64 */
             indexShort: number;
-            ratio: number | null;
-            ratioDelta: number | null;
+            ratio: string | null;
+            ratioDelta: string | null;
             /** Format: int32 */
             percentile: number | null;
             /** Format: int32 */
@@ -4003,10 +4706,10 @@ export interface components {
             aTotalOi: number | null;
             /** Format: int64 */
             bTotalOi: number | null;
-            aPcr: number | null;
-            bPcr: number | null;
-            aSpot: number | null;
-            bSpot: number | null;
+            aPcr: string | null;
+            bPcr: string | null;
+            aSpot: string | null;
+            bSpot: string | null;
         };
         ExpiryCompare: {
             underlying: string;
@@ -4027,10 +4730,10 @@ export interface components {
             ceOi: number;
             /** Format: int64 */
             peOi: number;
-            pcr: number | null;
-            spot: number | null;
-            ceLtp: number | null;
-            peLtp: number | null;
+            pcr: string | null;
+            spot: string | null;
+            ceLtp: string | null;
+            peLtp: string | null;
         };
         ExpirySide: {
             /** Format: date */
@@ -4046,12 +4749,12 @@ export interface components {
             universe20: number;
             /** Format: int32 */
             above20: number;
-            pctAbove20: number | null;
+            pctAbove20: string | null;
             /** Format: int32 */
             universe50: number;
             /** Format: int32 */
             above50: number;
-            pctAbove50: number | null;
+            pctAbove50: string | null;
         };
         AdvanceDecline: {
             /** Format: date */
@@ -4064,22 +4767,22 @@ export interface components {
             unchanged: number;
             /** Format: int32 */
             total: number;
-            adRatio: number | null;
-            adRatioPrior: number | null;
-            adRatioDelta: number | null;
+            adRatio: string | null;
+            adRatioPrior: string | null;
+            adRatioDelta: string | null;
         };
         BreadthThrust: {
             /** Format: int32 */
             windowSessions: number;
-            advRatioMa: number | null;
-            threshold: number;
+            advRatioMa: string | null;
+            threshold: string;
             thrust: boolean;
         };
         DeliveryOutlier: {
             symbol: string;
-            deliveryPct: number;
-            mean20: number;
-            z: number;
+            deliveryPct: string;
+            mean20: string;
+            z: string;
         };
         EquityDigest: {
             /** Format: date */
@@ -4101,19 +4804,19 @@ export interface components {
         };
         IndexConcentration: {
             index: string;
-            indexChangePct: number | null;
+            indexChangePct: string | null;
             /** Format: int32 */
             topN: number;
-            topShare: number | null;
+            topShare: string | null;
         };
         ReturnLeader: {
             symbol: string;
             sector: string;
-            returnPct: number;
+            returnPct: string;
         };
         SectorRotation: {
             sector: string;
-            avgChangePct: number;
+            avgChangePct: string;
             /** Format: int32 */
             stocks: number;
             /** Format: int32 */
@@ -4139,8 +4842,8 @@ export interface components {
         };
         GlobalCue: {
             name: string | null;
-            ltp: number | null;
-            changePct: number;
+            ltp: string | null;
+            changePct: string;
         };
         HolidayProximity: {
             holidayToday: boolean;
@@ -4152,10 +4855,10 @@ export interface components {
         };
         IndexPriceAction: {
             symbol: string;
-            gapOpenPct: number | null;
-            dayRange: number;
-            avgRange20: number;
-            rangeVsAvg: number | null;
+            gapOpenPct: string | null;
+            dayRange: string;
+            avgRange20: string;
+            rangeVsAvg: string | null;
             direction: string;
             rangeState: string | null;
             /** Format: date */
@@ -4174,9 +4877,9 @@ export interface components {
             stale: boolean;
         };
         Vix: {
-            level: number;
-            change: number | null;
-            changePct: number | null;
+            level: string;
+            change: string | null;
+            changePct: string | null;
             band: string;
             /** Format: date-time */
             asOf: string | null;
@@ -4222,10 +4925,10 @@ export interface components {
             interval: string;
             /** Format: date-time */
             bucket: string;
-            open: number;
-            high: number;
-            low: number;
-            close: number;
+            open: string;
+            high: string;
+            low: string;
+            close: string;
             /** Format: int64 */
             volume: number;
             /** Format: int64 */
@@ -4262,13 +4965,13 @@ export interface components {
             unchanged: number;
             /** Format: int32 */
             total: number;
-            avgDeliveryPct: number | null;
+            avgDeliveryPct: string | null;
         };
         DeliveryRow: {
             symbol: string;
-            deliveryPct: number;
-            close: number | null;
-            pctChange: number | null;
+            deliveryPct: string;
+            close: string | null;
+            pctChange: string | null;
         };
         LiveBreadth: {
             index: string;
@@ -4298,7 +5001,7 @@ export interface components {
             unchanged: number;
             /** Format: int32 */
             total: number;
-            avgDeliveryPct: number | null;
+            avgDeliveryPct: string | null;
             /** Format: int32 */
             aboveSma50: number | null;
             /** Format: int32 */
@@ -4327,6 +5030,12 @@ export interface components {
             max: number;
             /** Format: int32 */
             remaining: number;
+        };
+        Entitlement: {
+            covered: boolean;
+            /** Format: int32 */
+            httpStatus: number;
+            detail: string;
         };
         OiBackfillStatus: {
             jobId: string | null;
@@ -4357,7 +5066,7 @@ export interface components {
         ExportContract: {
             exchange: string;
             tradingsymbol: string;
-            strike: number | null;
+            strike: string | null;
             instrumentType: string;
         };
         ExpiredBackfillStatus: {
@@ -4456,8 +5165,8 @@ export interface components {
             underlyingTradingsymbol: string | null;
             /** Format: date */
             expiry: string | null;
-            strike: number | null;
-            tickSize: number | null;
+            strike: string | null;
+            tickSize: string | null;
             /** Format: int32 */
             lotSize: number | null;
             active: boolean;
@@ -4672,9 +5381,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["WatchlistCreated"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4755,6 +5462,35 @@ export interface operations {
             };
         };
     };
+    detectSymbolLineage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SymbolLineageDetectResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_1: {
         parameters: {
             query?: never;
@@ -4805,9 +5541,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SubscribeResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4994,7 +5728,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["Report"];
+                    "*/*": components["schemas"]["ManasReport"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5025,7 +5759,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["Report"];
+                    "*/*": components["schemas"]["ManasReport"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5225,9 +5959,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["IvRollupResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5551,9 +6283,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ContinuousBackfillResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5809,9 +6539,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["WorldIndicesResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5887,6 +6615,38 @@ export interface operations {
             };
         };
     };
+    listSymbolLineage: {
+        parameters: {
+            query?: {
+                exchange?: string;
+                activeOnly?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SymbolLineageResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     status_1: {
         parameters: {
             query?: never;
@@ -5902,9 +6662,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["MarketSurfaceStatus"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5945,9 +6703,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ScreenerResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -6012,6 +6768,37 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["MinerviniBacktestResult"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    planeDivergence: {
+        parameters: {
+            query?: {
+                asOf?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["MinerviniPlaneDivergence"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -6469,6 +7256,38 @@ export interface operations {
             };
         };
     };
+    lineageScreenImpact: {
+        parameters: {
+            query?: {
+                screen?: string;
+                asOf?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["LineageScreenImpact"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     preOpen: {
         parameters: {
             query?: never;
@@ -6484,9 +7303,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["PreOpen"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -6812,9 +7629,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["OptOiChart"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -6993,9 +7808,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["OiAnalysis"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7031,9 +7844,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["StrikeSeries"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7069,9 +7880,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["MultipleOi"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7202,9 +8011,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ChainHistoryResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7449,9 +8256,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["MarketStatusesResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7480,9 +8285,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["HolidaysResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7757,9 +8560,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["FuturesPreOpen"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7794,9 +8595,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["FutOiChart"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7825,9 +8624,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["OiBuzzIndicesResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7859,7 +8656,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["Heatmap"];
+                    "*/*": components["schemas"]["OiBuzzHeatmap"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7894,9 +8691,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["FutAnalysisResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7931,9 +8726,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["FutAnalysisSeriesResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8002,9 +8795,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Screen"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8037,9 +8828,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["EodResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8175,9 +8964,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["BankAnalysisResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8247,9 +9034,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ParticipantOi"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8281,9 +9066,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["LongShort"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8315,9 +9098,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["DerivativeStats"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8349,9 +9130,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Cash"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8661,9 +9440,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["AnnouncementsResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -9109,9 +9886,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Entitlement"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -9389,7 +10164,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": number[];
+                    "*/*": string[];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

@@ -24,9 +24,9 @@ import org.springframework.stereotype.Service;
  * pure; ALL IO (trust reads, book-heat reads, persistence) is here at the edge — so the generators
  * stay unit-testable against fixtures and the whole set replays byte-identically (§10.1).
  *
- * <p><b>I1 is shadow mode.</b> Insights are written as rows only — NO ntfy/Telegram/WS delivery
- * (that arms in I3/I4). Dedupe (one OPEN row per {@code dedupe_key}, refreshed in place) is the noise
- * control that runs now; {@code cooldown_until} is recorded for the delivery floors that arm later.
+ * <p>Insights are written as durable rows first; delivery remains gated by the configured I4 channel
+ * flags. Dedupe (one OPEN row per {@code dedupe_key}, refreshed in place), cooldown, and owner mutes
+ * are applied before a row can publish.
  */
 @Service
 public class InsightEngine {
@@ -197,6 +197,22 @@ public class InsightEngine {
   private void persist(InsightCandidate c, OffsetDateTime now) {
     try {
       OffsetDateTime cooldownUntil = c.cooldownMinutes() == null ? null : now.plusMinutes(c.cooldownMinutes());
+      // The delivery decision needs the prior occurrence BEFORE the upsert overwrites/replaces it.
+      // Severity escalation is judged against the LATEST row of ANY status (round 3): ACK/DISMISS
+      // removes the OPEN row, and a worsening condition must page even against an ACKed prior.
+      // Cooldown-cycle expiry only matters for an OPEN prior — a non-OPEN latest means the upsert
+      // INSERTS, and the insert branch below already delivers (suppression permitting).
+      Insight prior = repository.findLatest(c.dedupeKey()).orElse(null);
+      boolean escalated =
+          prior != null && c.severity().compareTo(Severity.valueOf(prior.severity())) > 0;
+      boolean cooldownExpired =
+          prior != null
+              && Insight.Status.OPEN.name().equals(prior.status())
+              && prior.cooldownUntil() != null
+              && !prior.cooldownUntil().isAfter(now);
+      // An escalating refresh is never cooldown-suppressed: a condition getting WORSE must page
+      // even inside the pacing window (pre-arm review round 2 — WARN→CRITICAL / floor crossing).
+      boolean suppressed = c.suppressed() || (repository.isCooling(c.dedupeKey(), now) && !escalated);
       Insight row =
           new Insight(
               UUID.randomUUID(),
@@ -213,19 +229,28 @@ public class InsightEngine {
               c.trustReasons(),
               c.dedupeKey(),
               cooldownUntil,
-              c.suppressed(),
+              suppressed,
               Insight.Status.OPEN.name(),
               c.expiresAt(),
               stamp.engineVersion(),
               stamp.configHash());
-      repository.insertOrRefresh(row);
+      InsightRepository.Upsert upsert = repository.insertOrRefresh(row);
       meters.counter("ay_insights_generated_total", "type", c.type().name()).increment();
-      if (c.suppressed()) {
+      if (suppressed) {
         meters.counter("ay_insights_suppressed_total").increment();
       }
       // Stage-1 WS delivery (§9.3): the publisher no-ops in shadow mode (flag default OFF), so nothing
       // pushes until the owner arms it — the durable row above is always the record of truth.
-      publisher.publish(row);
+      // Delivery fires on a NEW occurrence (insert, review M1), a severity ESCALATION on refresh
+      // (review round 2 — WARN→CRITICAL / floor crossing must page; publish() applies the floor),
+      // or a COOLDOWN-CYCLE EXPIRY (paced re-alerts, the CONTEXT_SHIFT design). An unchanged
+      // refresh inside its cooldown stays silent — the M1 win. No last-delivered column is needed:
+      // the upsert's cooldown CASE re-stamps cooldown_until exactly when an expired cycle
+      // refreshes, so the prior row's stamp read above IS the delivered-cycle marker and an
+      // expired-cycle redelivery re-arms its own window (never a refresh-loop self-re-arm).
+      if (upsert.inserted() || escalated || cooldownExpired) {
+        publisher.publish(upsert.insight());
+      }
     } catch (RuntimeException e) {
       log.warn("insight persist failed ({}): {}", c.dedupeKey(), e.toString());
     }

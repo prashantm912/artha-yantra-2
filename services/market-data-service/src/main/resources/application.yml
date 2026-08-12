@@ -65,6 +65,27 @@ artha:
     # the operator needs a one-line .env disarm without a code change. Name MUST byte-match the
     # docker-compose passthrough key ARTHA_CORPORATE_ACTIONS_ENABLED (#653).
     enabled: ${ARTHA_CORPORATE_ACTIONS_ENABLED:true}
+    # ⚠️ CANARY ALLOWLIST — comma-separated tradingsymbols; EMPTY (the default) means EVERY active
+    # equity, which is the pre-existing behaviour.
+    #
+    # CorporateActionJob has read `artha.corporate-actions.symbols` since it was written, but the key
+    # existed in NO yml and had NO compose passthrough, so it could not be set on a deployed stack at
+    # all. Setting ARTHA_CORPORATE_ACTIONS_SYMBOLS in .env would have been silently inert and the
+    # sweep would have taken the whole universe — a knob that looks armed and does nothing, on the
+    # exact path whose remediation OOM-crashed live Postgres three times.
+    #
+    # Found 2026-08-10 while arming a 2-symbol canary after V057 made the rebuild safe to re-enable
+    # (owner: "canary first"). The name MUST byte-match the compose passthrough
+    # ARTHA_CORPORATE_ACTIONS_SYMBOLS (#653) — a mismatch swallows the override with no error.
+    symbols: ${ARTHA_CORPORATE_ACTIONS_SYMBOLS:}
+    # V057 rebuild retry cooldown (days). A FAILED staged rebuild suppresses re-detection for this
+    # long. Needed because the staged swap leaves the cache INTACT on failure, which restores nightly
+    # re-detection — unbounded, that is a ~196-page Kite re-fetch per symbol per night against the
+    # shared limiter for any symbol that can never pass verification. Given a placeholder + compose
+    # passthrough deliberately: a bare @Value default is pinned until an image rebuild (#653), and
+    # this is exactly the knob whose right value is only learnable from live behaviour. Name MUST
+    # byte-match the docker-compose passthrough key ARTHA_CORPORATE_ACTIONS_REBUILD_RETRY_COOLDOWN_DAYS.
+    rebuild-retry-cooldown-days: ${ARTHA_CORPORATE_ACTIONS_REBUILD_RETRY_COOLDOWN_DAYS:7}
   market:
     # A10 (owner decision 2026-07-12): retention horizon (days) for the compressed
     # options_chain_snapshots hypertable. OptionsSnapshotPruneJob drops whole 1-day chunks older
@@ -113,6 +134,16 @@ artha:
       base-url: ${ARTHA_UPSTOX_ANALYTICS_BASE_URL:https://api.upstox.com}
       token-file: ${ARTHA_UPSTOX_ANALYTICS_TOKEN_FILE:/run/secrets/upstox_analytics_token}
     canary-enabled: ${ARTHA_UPSTOX_CANARY_ENABLED:false}   # U7 daily contract drift probe (ntfy on drift)
+    # Connecting-Dots Dow factor off the ALREADY-LIVE Upstox world-indices feed (GLOBAL_INDEX|^DJI).
+    # HOLD-tier: arming makes the Dow dot real, which CHANGES WHICH SIGNALS FIRE (today it contributes
+    # Neutral to every composite) — owner decision after forward measurement. Requires analytics.enabled;
+    # mutually exclusive with artha.openalgo.global-quotes-enabled (both on ⇒ context refuses to start).
+    global-quotes-enabled: ${ARTHA_UPSTOX_GLOBAL_QUOTES_ENABLED:false}
+    fno-master:
+      # Default-on when the F&O master client is bound. The canary overrides it off because its
+      # WireMock stubs are installed after ApplicationReadyEvent; failed loads retry after 5 minutes.
+      warm-enabled: ${ARTHA_UPSTOX_FNO_MASTER_WARM_ENABLED:true}
+      warm-interval: ${ARTHA_UPSTOX_FNO_MASTER_WARM_INTERVAL:PT6H}
 
 # B-3: the per-endpoint-family resilience stack — exactly one resilience
 # dependency. Limiter saturation queues up to 5s (virtual threads), then 429
@@ -232,7 +263,7 @@ artha:
       expiry-horizon-days: ${ARTHA_OPTIONS_ATM_PINNER_EXPIRY_HORIZON_DAYS:7}
   data-quality:
     # FID P2-4: settled-day per-symbol completeness (chain capture, primary 1m, NSE EQ bhavcopy).
-    eod-cron: "0 50 19 * * MON-FRI"
+    eod-cron: "${ARTHA_DATA_QUALITY_EOD_CRON:0 50 19 * * MON-FRI}"
     enabled: true
     chain-expected-passes: 187
     chain-min-coverage-pct: 80
@@ -252,7 +283,7 @@ artha:
   nse:
     base-url: https://www.nseindia.com
     archives-url: https://nsearchives.nseindia.com
-    eod-cron: "0 0 19 * * MON-FRI"
+    eod-cron: "${ARTHA_NSE_EOD_CRON:0 0 19 * * MON-FRI}"
     bhavcopy:
       # NSE series projected into candles as 1d source=BHAVCOPY (cash equities). EQ = rolling
       # settlement, BE = trade-to-trade. Non-equity series (GS gilts, etc.) stay raw-only.
@@ -264,7 +295,7 @@ artha:
     # Self-healing EOD universe backfill (Phase A/B). Runs daily after both exchanges publish
     # (NSE ~19:00, BSE ~18:00 IST) and on startup; catches up every missing trading day from the
     # table watermark to today. ca-lookback-days bounds the corporate-action ratio refresh (Phase C).
-    eod-cron: "0 30 19 * * MON-FRI"
+    eod-cron: "${ARTHA_BHAVCOPY_EOD_CRON:0 30 19 * * MON-FRI}"
     # Deep universe history (~1 year): the first boot backfills a year of daily candles so the
     # split/bonus adjustment reaches old corporate actions, and a long downtime self-heals back that
     # far. The full-window anti-join (reconcile == window) re-scans the whole span each run, skipping

@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.futures.preopen;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
@@ -29,10 +30,15 @@ public final class FuturesPreOpenScan {
   /** One scanned symbol — the shape both the stock and index tables render. */
   public record PreOpenRow(
       String symbol,
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal preOpenPrice,
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal prevClose,
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal change,
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal changePct,
+      @Schema(types = {"string", "null"})
       String prevDayBreak) {}
 
   /**

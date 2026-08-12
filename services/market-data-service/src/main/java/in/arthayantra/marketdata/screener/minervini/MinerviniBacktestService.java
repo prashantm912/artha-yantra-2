@@ -74,45 +74,51 @@ public class MinerviniBacktestService {
   // v7 slot sweep: does adding concurrent positions capture more of the signal flood?
   private static final int[] SLOT_SWEEP = {8, 12, 16, 20, 24};
 
+  // The five records below keep their PLAIN component names: they are the INCUMBENT owners of
+  // SetupStat / YearReturn / PortfolioStat / Report / SlotCell in the published spec, and the
+  // ManasAroraBacktestService twins that used to collapse into them are the ones that got renamed
+  // (task_1c04803f). Removing a published component name breaks generated clients even when the
+  // JSON is byte-identical, and openapi-diff cannot see it — so the split is additive by design.
+
   /** Per-setup aggregate over the backtest window. Decimals ride as JSON strings. */
   public record SetupStat(
       String setup,
       int trades,
       int wins,
       int losses,
-      BigDecimal winRatePct,
-      BigDecimal avgWinPct,
-      BigDecimal avgLossPct,
-      BigDecimal payoffRatio,
-      BigDecimal expectancyPct,
-      BigDecimal profitFactor,
-      BigDecimal avgBarsHeld,
-      BigDecimal bestTradePct,
-      BigDecimal worstTradePct,
+      @Schema(type = "string") BigDecimal winRatePct,
+      @Schema(type = "string") BigDecimal avgWinPct,
+      @Schema(type = "string") BigDecimal avgLossPct,
+      @Schema(type = "string") BigDecimal payoffRatio,
+      @Schema(type = "string") BigDecimal expectancyPct,
+      @Schema(type = "string") BigDecimal profitFactor,
+      @Schema(type = "string") BigDecimal avgBarsHeld,
+      @Schema(type = "string") BigDecimal bestTradePct,
+      @Schema(type = "string") BigDecimal worstTradePct,
       int longestHoldBars,
       int shortestHoldBars,
       int maxWinStreak,
       int maxLossStreak,
-      BigDecimal stopOutPct) {}
+      @Schema(type = "string") BigDecimal stopOutPct) {}
 
   /** One calendar year's realised portfolio return + the trades that closed in it. */
-  public record YearReturn(int year, BigDecimal returnPct, int trades) {}
+  public record YearReturn(int year, @Schema(type = "string") BigDecimal returnPct, int trades) {}
 
   /** Portfolio-level stats for one variant (all setups combined through the slot-limited book). */
   public record PortfolioStat(
       int slots,
-      BigDecimal totalReturnPct,
-      BigDecimal cagrPct,
-      BigDecimal maxDrawdownPct,
-      BigDecimal sharpe,
+      @Schema(type = "string") BigDecimal totalReturnPct,
+      @Schema(type = "string") BigDecimal cagrPct,
+      @Schema(type = "string") BigDecimal maxDrawdownPct,
+      @Schema(type = "string") BigDecimal sharpe,
       int tradesTaken,
       int tradesSkipped,
-      BigDecimal avgExposurePct,
+      @Schema(type = "string") BigDecimal avgExposurePct,
       int months,
-      BigDecimal positiveMonthsPct,
-      BigDecimal bestMonthPct,
-      BigDecimal worstMonthPct,
-      BigDecimal avgMonthPct,
+      @Schema(type = "string") BigDecimal positiveMonthsPct,
+      @Schema(type = "string") BigDecimal bestMonthPct,
+      @Schema(type = "string") BigDecimal worstMonthPct,
+      @Schema(type = "string") BigDecimal avgMonthPct,
       List<YearReturn> annual) {}
 
   /**
@@ -143,26 +149,26 @@ public class MinerviniBacktestService {
       long capital,
       long floorTurnover,
       int trades,
-      BigDecimal netCagrPct,
-      BigDecimal netDrawdownPct,
-      BigDecimal netSharpe) {}
+      @Schema(type = "string") BigDecimal netCagrPct,
+      @Schema(type = "string") BigDecimal netDrawdownPct,
+      @Schema(type = "string") BigDecimal netSharpe) {}
 
   /** One slot-sweep row: the RS-priority portfolio at {@code slots} concurrent positions (v7). */
   public record SlotCell(
       int slots,
       int tradesTaken,
       int tradesSkipped,
-      BigDecimal grossCagrPct,
-      BigDecimal netCagrPct,
-      BigDecimal netDrawdownPct,
-      BigDecimal netSharpe) {}
+      @Schema(type = "string") BigDecimal grossCagrPct,
+      @Schema(type = "string") BigDecimal netCagrPct,
+      @Schema(type = "string") BigDecimal netDrawdownPct,
+      @Schema(type = "string") BigDecimal netSharpe) {}
 
   /**
    * The RS-rotation result (v7): the net-of-cost portfolio that evicts the weakest current holding for
    * a stronger newcomer (vs holding to the natural stop/trail exit), plus how many rotations fired.
    * Compare {@code net} against the same variant's {@code portfolioRsPriorityNet} (no-rotation baseline).
    */
-  public record RotationResult(int slots, BigDecimal marginPct, int rotations, PortfolioStat net) {}
+  public record RotationResult(int slots, @Schema(type = "string") BigDecimal marginPct, int rotations, PortfolioStat net) {}
 
   /**
    * The full multi-variant result: technical / rs-only / turnover-only / rs+turnover, side by side.

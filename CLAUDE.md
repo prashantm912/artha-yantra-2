@@ -45,6 +45,23 @@ one. Evidence (2026-07-25): the T21 cross-vendor review found a LIVE Critical no
 take), and a later review round caught a foreign hunk the Architect had already read past in audit.
 
 Rules proven over the first delegated runs (#675–#680), model-independent:
+- ⚠️ **EVERY brief opens with a STEP 0: "verify this brief's premise against the code before writing
+  anything; reporting the premise is wrong is a SUCCESSFUL outcome."** On 2026-08-02 five builders were
+  dispatched from one enumeration pass and **all five items were already shipped**; every one stopped itself
+  at STEP 0, so the cost was minutes rather than five junk PRs. Two further briefs that day had premises that
+  were simply wrong — a global `BigDecimal`→string converter (position-blind, would have retyped 28 REQUEST
+  surfaces where `number` is TRUE) and a set of divergences that did not exist. **The builder falsifying the
+  brief is the single highest-yield thing in this pipeline; write briefs so that is rewarded, not resisted.**
+- ⚠️ **A `recalled` fact about LIVE state has a shelf life of days — re-query before it is load-bearing.**
+  Same day, the Architect asserted `paper_positions id=28` was an open SELL three times from a stale memory
+  note; it had been CLOSED since 2026-07-17, and the error reached a cross-vendor reviewer's findings before
+  anyone caught it. Two audit docs also went stale DURING their own writing (a deploy and a data re-fetch
+  landed mid-audit). Corollary for closeouts: **re-measure at write time, not at investigation time.**
+- ⚠️ **A builder that reports "build still running, I'll report when it lands" is STOPPED, not waiting.** The
+  task notification fires only when no background child is live, so its watcher died with it. Treat the
+  message as a stall: send it back to re-read its own log, and treat a frozen log with no `BUILD` line as
+  truncated rather than passed. Tell builders to run long verifies in the FOREGROUND and read Maven's own
+  exit code — backgrounding buys nothing and adds a way to die silently.
 - The brief must be self-contained: goal, constraints, **relevant memory-trap content pasted in**
   (subagents get this file but never the memory files), and a required receipt shape — diff, test
   output, claims WITH evidence (file:line / SQL+result / log line) **each labeled
@@ -70,15 +87,63 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   (`-pl services/<svc> -am package -DskipTests`), never a bare `-pl` on a leaf lib —
   a `-pl` install skips parent POMs and nested lib submodules
   (`libs/common-web/servlet`, `libs/black76-math`), so the compose fat JAR silently
-  embeds a stale lib. In **PowerShell**, a `-D` property containing dots must be QUOTED
-  (`'-Dspotless.check.skip=true'`) — unquoted, PS hands Maven a split token and it dies with
-  `Unknown lifecycle phase ".check.skip=true"`.
+  embeds a stale lib. ⚠️ **SIBLING CASE, and it does NOT look like staleness (2026-08-03):
+  with a CONCURRENT SESSION building, a bare `-pl` resolves the lib from the SHARED `~/.m2`,
+  where the other session may have installed a DIFFERENT `common-web-core` — so your build
+  fails with a PHANTOM COMPILE ERROR naming a class you never touched** (measured:
+  `SchemaNameCollisionDetector not found`, on a red-proof run that had nothing to do with it).
+  The rule is unchanged — always `-am` — but the symptom is a compile error in *your* code
+  rather than a silently-wrong jar, so it reads as your bug and is easy to chase for an hour.
+  **Tell: the missing symbol is in a lib you did not edit.** Re-run with `-am` before debugging.
+  In **PowerShell**, a `-D` property containing dots must be QUOTED
+  (`'-Dcontracts.capture=true'`) — unquoted, PS hands Maven a split token and it dies with
+  `Unknown lifecycle phase ".capture=true"`. (An earlier example here used
+  `-Dspotless.check.skip=true`, which is INERT — no spotless plugin exists in this repo; it rode
+  along in ~8 builder briefs on 2026-07-31 before two builders independently caught it. Checkstyle
+  is the formatting gate.)
+- ⚠️ **Two ways a Maven run reports GREEN without having run** (both hit builders on 2026-08-01):
+  **(1) `mvnw … | Out-File` (or any pipe) reports the PIPELINE's exit code, not Maven's** — a run
+  truncated mid-`testCompile`, with no `BUILD` line at all, was reported as "completed, exit 0" and
+  reads exactly like a passing gate. Redirect instead and read Maven's own code:
+  `./mvnw.cmd … > run.log 2>&1; echo "MAVEN_EXIT=$?"`, then confirm the log actually contains a
+  `BUILD SUCCESS`/`BUILD FAILURE` line (a frozen mtime with no BUILD line = truncated, not passed).
+  **(2) `mvnw surefire:test` as a bare GOAL does NOT recompile** — it runs whatever is already in
+  `target/classes`, so a red-proof done that way exercises stale bytecode: you break the production
+  code on purpose, see BUILD SUCCESS, and wrongly conclude your test cannot detect the break. Always
+  red-proof through a lifecycle PHASE (`test` / `verify`). Both fail in the safe-looking direction,
+  which is what makes them worse than a crash.
+  **(3) A STALE `.class` NEWER than its `.java` makes Maven report a failure that contradicts the
+  source you just read** (2026-08-03). Measured: a ratchet test failed with an expected-set missing an
+  entry demonstrably present in the source; the `.class` mtime was newer than the `.java`; re-running
+  that test ALONE passed 20/20, and a fresh full `verify` was clean. **Tell: a failure whose message
+  disagrees with the file you are looking at.** Remedy: re-run the single test, then a clean full
+  `verify`; do not "fix" the source to match a phantom. It surfaced as a false RED, but the same race
+  produces a false GREEN — which is why it belongs next to the two above.
+- ⚠️ **A red-proof can be BROKEN by being TOO STRONG, not only by staying green** (2026-08-03, caught
+  by a builder on itself). Red-proofing a rule by reverting to a *stricter* wrong rule reddened only 1
+  of the 2 tests that the *actually shipped* wrong rule reddens — under-reporting the blast radius and
+  the tests' real coverage. **Red-proof by restoring the LITERAL pre-fix body**, not by writing a rule
+  you think is equivalent. The weaker-looking result is the informative one.
+- ⚠️ **A red-proof can also go RED for a MECHANICAL reason and prove nothing** (2026-08-03, two in one
+  PR, both caught by the builder re-checking its own proofs). Neither stayed green — both "failed
+  convincingly": one died on a **duplicate-class compile error** (the restore glob copied a `signals`
+  file into `paper/`), the other on `The column index is out of range: 5, number of columns: 4`
+  because reverting only the SQL predicate left 6 args bound to 4 placeholders. A red-proof proves
+  detection **only if the failure message names YOUR assertion**. Two checks: assert
+  `compile-errors: 0` on every proof, and read the actual failure text — a JDBC/compile/fixture error
+  is a broken proof wearing a passing gate's clothes. Completes the set: a proof can be broken by
+  staying green, by being too strong, or by reddening for the wrong reason.
 - **CI `build-test` is sharded per-service** (`.github/workflows/ci-java.yml`): a 3-leg
   matrix (`market-data` / `backtest` / `strategy-gateway` = strategy-signal + edge-gateway),
   each runs `mvnw -pl <svc> -am verify` on its own runner (Testcontainers ITs are the
   2-core bottleneck; serial reactor was ~23m, sharded ~5m). Safe because `jacoco-check`
   binds PER MODULE, not an aggregate root goal. **Adding a new service?** Add a matrix
-  shard or its tests NEVER run in CI. Libs ride upstream via `-am` (covered in ≥1 shard).
+  shard or its tests NEVER run in CI, **and add it to `KNOWN_SERVICES` +
+  the path mapping in `.github/scripts/classify_java_shards.sh`** (since #1252, 2026-08-03, each leg
+  gates on its OWN classifier boolean — a `services/<new>/` path no shard claims is reported as
+  `unowned_services` and HARD-FAILS the run, deliberately, because fanning out to three existing
+  shards only looks busy and builds nothing new). Libs ride upstream via `-am` (covered in ≥1 shard),
+  and a `libs/` edit sets all three booleans so shared-lib breaks still fan out.
 - IT harness: singleton Testcontainers (Timescale 2.18.2-pg17 + redis 7.4), real
   Flyway lineages, `@DynamicPropertySource` for `currentSchema`. Services connect to
   Postgres as `artha` (D10 single-writer by convention); per-schema roles like
@@ -103,7 +168,13 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   `avgEntryPrice` breakeven fallback on a close path.
 - **Contract spec drift (springdoc):** `ContractCaptureTest` snapshots `/v3/api-docs`;
   re-capture with `-Dcontracts.capture=true`, regen TS via `npx openapi-typescript@7` →
-  `contracts/gen/*.d.ts`. Generic `Map<String,Object>` returns are NOT enumerated, so adding
+  `contracts/gen/*.d.ts`. ⚠️ **CAPTURE WITH `-Dtest=ContractCaptureTest` ONLY — NEVER during a full
+  `verify`** (found 2026-08-01): `RecordRequiredModelConverter` is STATEFUL and springdoc caches the
+  document, so a capture that rides a whole-suite run emits a spec with `required` **stripped from
+  schemas the change never touched** (~10 of them, incl. `MinerviniRow`/`Report`, in the measured
+  case). Committing that ships a `required.decreased` BREAK the author never made. CI captures the
+  narrow way, so `main` is unaffected — the hazard is purely local, and it looks like a legitimate
+  diff. Generic `Map<String,Object>` returns are NOT enumerated, so adding
   response keys does NOT drift the spec; new query params + new `@*Mapping` paths DO.
   ci-contracts warns on gen drift and requires `tsc --strict`. Its breaking gate diffs the
   **MERGE BASE**'s committed spec vs THIS branch's code spec (task_b3b59719 — it used to diff the
@@ -125,6 +196,16 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   3.1 type array; the breaking gate's relabel step downgrades exactly that shape to 3.0's
   `nullable: true` for the diff (genuine unions still refuse), and openapi-typescript renders it
   `number | null`.
+  ⚠️ **`types` UNIONS with the inferred type, it does NOT replace it** (found 2026-08-01). The bare
+  form above is correct ONLY when the declared base already matches what springdoc inferred —
+  `{"number","null"}` on a `BigDecimal` field, `{"integer","null"}` on a `Long` — which is why it has
+  always looked right. **To CHANGE the base type you must declare both:**
+  `@Schema(type = "string", types = {"string", "null"})`. Bare `types = {"string","null"}` on a
+  `BigDecimal` captures as **`["number","string","null"]`**, still advertising the impossible type.
+  This bites hardest on decimals: `ArthaJacksonAutoConfiguration` registers `ToStringSerializer` for
+  `BigDecimal` platform-wide, so **every decimal is a JSON string on the wire while springdoc infers
+  `number`** — a repo-wide pre-existing lie that existing `{"number","null"}` annotations encode
+  rather than fix. Verify by reading the CAPTURED SPEC, never by trusting the annotation.
 - **EVERY new endpoint returns a typed record, never `Map<String,Object>`** — edge-gateway's
   `MapReturnRatchetTest` freezes the Map-returning handler COUNT per service (Maps are invisible
   to the contract gate); a new Map endpoint fails the strategy-gateway CI shard. Cost 2 CI cycles
@@ -163,6 +244,13 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   coverage over `marketdata.ingest_runs`, #686/#699), and the scheduled canaries (ingest-coverage
   08:45, notifier-health 08:30, paper reconcilers 21:15, PartialBucketCanary every 60s — all IST)
   — check these BEFORE hand-digging a "feed looks dead" / "batch missed" report.
+  **Measured evening order, 2026-08-04** (do NOT quote the YAML cron defaults — they differ from
+  what is deployed, and reading `${artha.minervini.cron:0 50 19 * * MON-FRI}` as "19:50" put a wrong
+  time into four separate reports the same night): **19:30** CA refresh rides the nightly BHAVCOPY
+  job · **19:31** `MINERVINI_SCREEN` + `MANAS_SCREEN` · **19:35** `MINERVINI_PLANE_DIVERGENCE`
+  (source `MINERVINI_SCHEDULER`) · **19:45** market-context · **19:50** data-quality · **19:55**
+  equity-breadth · **21:15** paper reconcilers. Read `marketdata.ingest_runs` +
+  `marketdata.canary_runs`/`strategy.canary_runs` for the real times, never the defaults.
 - **3m reads are a read-time 1m→3m rollup** (`CandleRepository.rangeRolledFromOneMinute`, #365): the
   live SignalEngine 3m-primary depends on this rollup. The unused `candles_3m` cagg + its refresh
   policy were DROPPED (V027, #427) — 3m has no materialized view; only the 1m base feeds it.
@@ -178,7 +266,15 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   IS the forward), and **Dow + IV factors degrade to NEUTRAL on history** → the composite rarely reaches
   strong confluence on backtests, so the OI edge reads MUTED on derived history (it's a data-fidelity
   artifact, not a strategy verdict — judge OI-led strategies on FORWARD paper with real captured OI,
-  not a weak historical backtest). **Timestamp-key trap (root cause of #214):** an `OffsetDateTime`
+  not a weak historical backtest). ⚠️ **COROLLARY, and it is sharper than the rule it follows: an A/B
+  between two strategies whose OI-GATING DIFFERS cannot be run on derived history AT ALL** (2026-08-03,
+  caught in scoping before it was proposed). The muting is not noise that averages out — it is a
+  one-sided handicap, so the OI-gated arm loses by construction and the backtest returns a decisive,
+  confident, WRONG winner. Concretely: `scalp-connect-the-dots-nifty` runs `oi_confluence_gate.enabled:
+  true` and `scalp-golden-crossover-nifty` runs it `false`, so any historical comparison of that twin
+  pair is contaminated by design. **The tell is that the arms differ in a factor history cannot
+  represent** — check that BEFORE reaching for a backtest as a discriminator, not after reading the
+  result. Forward paper is the only valid comparison for such a pair. **Timestamp-key trap (root cause of #214):** an `OffsetDateTime`
   map key SILENTLY misses across data sources with different UTC offsets — the futures-spine bars carry
   `+05:30` but JDBC `time_bucket` returns `+00`, so `map.get(bar.bucket)` missed EVERY lookup and 3
   Connecting-Dots factors (activeStrikeOi/IV/VIX) read NEUTRAL on every history session for months. Key
@@ -233,8 +329,9 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   -UseBasicParsing` (PS5.1's IE engine prompts otherwise); POST `/api/v1/auth/login`
   `{"password":...}` (it answers **204**, not 200 — check `-notin 200,204`), then a GET to seed the
   `XSRF-TOKEN` cookie, echoed as the `X-XSRF-TOKEN` header on mutating calls. **A bodyless
-  `-Method Post` defaults to `application/x-www-form-urlencoded` and the endpoint answers 500** (the
-  unmapped `HttpMediaTypeNotSupportedException` should be a 415 — chip task_9ffe390d): always pass
+  `-Method Post` defaults to `application/x-www-form-urlencoded` and the endpoint answers 415**
+  (`HttpMediaTypeNotSupportedException` mapped in #1021; edge-gateway-local endpoints unaffected —
+  gateway uses common-web-core, not the servlet handler): always pass
   `-ContentType 'application/json' -Body '{}'`. In-container SQL: DB is `artha`/`artha_mock`
   (not `arthayantra`).
 - **optimizer-service is Python (FastAPI), not Java** — `/api/v1/optimizations/*` lives there
@@ -242,9 +339,58 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   pytest tests/ -q)` + `python -m ruff check app tests` (Python 3.14 global, no venv). A sweep needs
   the strategy to carry a `backtest.optimize` block (`method`+`max_trials`+`objective`+`parameters`,
   all required) else 422 "no tunable parameters in the optimize block". **ci-optimizer / ci-margin are
-  SEPARATE path-filtered workflows** (`.github/workflows/ci-optimizer.yml`, trigger `paths:
-  services/optimizer-service/**`) — NOT in the default `gh pr checks` rollup; a Python PR's ruff+pytest
-  gate shows under `gh run list --workflow ci-optimizer.yml`, so don't read its absence as "skipped".
+  separate workflows, but their `optimizer-lint-test` / `margin-lint-test` jobs ARE required contexts
+  and DO appear in the default `gh pr checks` rollup** (corrected 2026-08-04 — this bullet asserted the
+  exact opposite, and the stale form sent three separate check-hunts off to `gh run list` for a gate
+  that was in the rollup all along). It was true until 2026-08-03: both workflows were then
+  `paths:`-filtered and genuinely absent. #1252 removed that filter precisely so the jobs could be
+  promoted, because a `paths:`-filtered workflow can NEVER be a required check — a path-skipped
+  workflow's checks stay PENDING forever, while a job or step skipped by an `if:` reports SUCCESS.
+  Both now ALWAYS trigger; a cheap `changes` classifier decides whether real work runs, and the
+  required job carries `if: always()` + a fail-closed first step (measured: `optimizer-lint-test` 33s
+  on #1291, which touched Python, vs 3s on #1290, which did not — both PASS, both in the rollup).
+  **Read the rollup, not `gh run list`.**
+  ⚠️ **The "Python 3.14 global, no venv" line above NO LONGER HOLDS for the CONTRACT tests** (#1209,
+  2026-08-02): `test_openapi_contract.py` in BOTH optimizer- and margin-service now asserts the running
+  interpreter matches `requirements-dev.lock`, so a plain `python -m pytest` on the ambient interpreter
+  **FAILS BY DESIGN** — measured: ambient fastapi 0.136.3 vs the lockfile's 0.115.6, 2 failed / 1 passed.
+  That is the guard working, not breakage: FastAPI's own generated `ValidationError` schema gains
+  `ctx`/`input` across versions, and the committed margin spec had in fact been captured under the
+  WRONG version before this landed. The failure prints the exact remedy — build a venv from the
+  lockfile (`uv venv --python 3.12 .venv-pinned`, `uv pip install --python .venv-pinned
+  --require-hashes -r requirements-dev.lock`) and run capture/tests through it, never the ambient
+  interpreter. Everything ELSE in those services (ruff, the non-contract tests) still runs fine on the
+  global interpreter, so only the contract tests need the venv.
+- **margin-service (Python SPAN appliance, `/api/v1/margin`) now carries the same two-artifact
+  contract gate as optimizer-service** — it was the one service with no committed OpenAPI spec at
+  all until closed. `services/margin-service/tests/test_openapi_contract.py` captures BOTH
+  `contracts/margin-service.api-surface.json` (asserted every run) and the FastAPI-native
+  `contracts/margin-service.openapi.json` (asserted by `.github/scripts/margin_spec_staleness.py`,
+  a required, unconditional ci-contracts step — same `app routes -> api-surface.json -> openapi.json`
+  chain as optimizer-service). **Re-capture:** `cd services/margin-service && CONTRACTS_CAPTURE=1
+  python -m pytest tests/test_openapi_contract.py` writes both files, then regenerate the TS client
+  with `npm run gen:api` (frontend-react) or directly `npx openapi-typescript@7
+  contracts/margin-service.openapi.json -o contracts/gen/margin-service.d.ts`. Classified NON_JAVA
+  in `.github/scripts/contract_service_inventory.sh` (no `pom.xml`) — that membership is what
+  CATEGORICALLY excludes it from the openapi-diff breaking gate (that loop iterates the JAVA list
+  only, regardless of spec content) and the Java-only warn-vs-code step. `openapi_relabel_30.py`
+  refusing its spec (exit 2, first at `paths./health.get.responses.200`) is a SEPARATE, additional
+  reason it could not ride the breaking gate even if it were added to that loop: 6 of its pydantic
+  `Optional` fields (`LegIn`/`PositionIn.expiry`+`strike`, `SizeResponse.limitingRail`,
+  `SizeRequest.stop`) carry a primitive `anyOf: [{type: X}, {type: "null"}, ...]` WITH a `title`
+  sibling, and its plain-dict `/health` response carries the SAME primitive nullable-`anyOf` shape
+  but BARE — no `title` on the `anyOf` node itself (the title sits on the parent object schema
+  wrapping it). Closing this gap for real needs BOTH a converter fix (today's converters handle
+  only a bare `$ref`+null `anyOf` or a `type` ARRAY nullable, never a primitive `anyOf`, titled or
+  not) AND including non-Java specs in the breaking loop — a separate, higher-risk redesign, not
+  attempted here. margin-service gets the semantic staleness gate instead — which, like
+  optimizer-service's, projects route surface only (method/path/params/requestBody/response-codes),
+  never component properties or types. **Coverage gap, permanent, not a first-PR artifact:** a
+  response-field rename (e.g. `SizeResponse.target` → `targetPrice`) changes neither the route
+  surface nor any component KEY, so it passes every margin-service gate silently — measured, not
+  assumed. ⚠️ Its 422 responses still use FastAPI's stock `HTTPValidationError` shape, not the
+  shared `{code,message,details}` envelope other services converged on (§8.3) — a pre-existing
+  runtime inconsistency, not a spec/CI defect, left unfixed by this gating change.
 - **Backtest/optimizer submission identity + precedence (2b):** `strategyId` is the registry **UUID**
   (NOT the slug); omit `strategyVersion` → the optimizer/runner pins the latest published, else latest
   draft. Terminal job status string is `completed`; results are keyed by `resultRef` (the run id), read
@@ -283,9 +429,16 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
 - **Empty `strategy.signal_rejections` does NOT mean the engine is dead** — `recordRejection`'s two call
   sites are BOTH downstream of the `chart != FIRED` early return (`SignalEngine:~1132`), so ONLY the
   `confluence-blocked` outcome writes a row. On a down tape every scalper exits at the chart/composite stage
-  and the table stays empty ALL session — normal, not starvation. Liveness = **Σ `ay_signal_eval_outcome_total`
-  ADVANCING** (persisted to `signal_eval_outcomes`, V045). NEVER restart on an empty rejections table alone
-  (cost a needless live restart 2026-07-20).
+  and the table stays empty ALL session — normal, not starvation. NEVER restart on an empty rejections table
+  alone (cost a needless live restart 2026-07-20). ⚠️ **CORRECTION 2026-08-01 — this bullet used to say
+  "Liveness = Σ `ay_signal_eval_outcome_total` ADVANCING", which is the OVERSTATED form and contradicts the
+  ledger (the authority, §0 group-G note): Σ(outcomes) is an ATTRIBUTION primitive — an evidence panel —
+  and NOTHING may be armed on it.** Its increment site sits inside the `else` of `if (activeEntry.isPresent())`
+  below two `continue`s, and btst never evaluates from `onClosedBar` at all, so Σ is **LEGITIMATELY FLAT while
+  bars flow** in four normal states: outside a session window, whole book in position, context-only symbols,
+  btst — measured live as structurally flat 15:00–15:30 EVERY non-expiry day. Correct reading: **advancing ⇒
+  alive (sound positive proof); flat ⇏ dead (unsound negative proof).** The signals safe to key liveness on are
+  `lastBarReceivedAtMs` / `lastBarEvaluatedAtMs`.
 - **A scalper YAML/config change is a SILENT NO-OP until RE-PUBLISHED.** `ScalperStrategySeeder` mints a
   fresh DRAFT on boot (`resyncConfig`→`update`), never publishes; the live engine runs the *published*
   version. After deploying a config change, `POST /api/v1/strategies/{id}/publish` each affected strategy
@@ -317,6 +470,39 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   first, then ALWAYS DB-probe the new object (`to_regclass`/information_schema). A healthy container
   + an "up to date" flyway log do NOT prove the migration applied (a stale checkout deployed
   "healthy" without its migration once, 2026-07-11; only the probe caught it).
+- ⚠️ **"13/13 healthy" says NOTHING about whether a service runs current code — and neither does an image
+  timestamp.** Found 2026-08-02: five services were silently stale while every container was healthy.
+  **The deploy-currency check, in order:** (1) per service, `git log origin/main -1 -- services/<svc>/src/main
+  libs/` — note `libs/` makes a shared-lib change stale EVERY Java service at once, which is how four went
+  stale on one PR; (2) compare against `docker image inspect <img> --format '{{.Created}}'` — **that field is
+  UTC**, so convert before comparing with IST commit times (misreading it cost a false "stale" alarm the same
+  night); (3) **PROBE what the service actually SERVES.** A timestamp says a service *might* be stale; a probe
+  says what it *is*. The decisive case: committed spec said `BacktestTradeItem.entryPrice: {"type":"string"}`
+  while the deployed service served `{"type":"number"}` — a lie the sweep had already removed from the repo,
+  still being published. Cheap live probes: `/v3/api-docs` for a known field, the frontend's served bundle
+  hash vs `dist/index.html` (an IDENTITY check, not an mtime), `pg_constraint` for a migration object.
+- ⚠️ **The main CHECKOUT's BRANCH is part of the deploy, and a migration check will NOT catch it**
+  (2026-08-05). Deploying #1303 from the REAL checkout (worktree rule satisfied) still shipped
+  **pre-#1303 code**, because the checkout was parked on a branch merged BEFORE it. `MAVEN_EXIT=0`,
+  image `Built`, `UP_EXIT=0`, healthy, gateway `UP`, 0 ERROR lines — **and the recompiled `.class`
+  files carried the current timestamp**, which is what sells it. A fresh timestamp proves a REBUILD,
+  never the SOURCE it was built from. The false comfort was checking `deploy/flyway/<lineage>/`
+  against `origin/main` and finding them identical: **migrations only move when someone adds one, so
+  a checkout can be arbitrarily far behind on SOURCE with a matching migration set** — and a PR that
+  adds no migration makes that check pass by construction. **Pre-flight, in order:** (1)
+  `git rev-parse --abbrev-ref HEAD` — on `main`? (2) confirm the PR's commit is in HEAD's history
+  (`git log HEAD --oneline | grep <sha>`) — `--is-ancestor` alone is NOT enough, a merged older
+  branch is also an ancestor; (3) **grep the working tree for a symbol only the new code has** before
+  building; (4) fingerprint the JAR for it before `docker compose build`, not after deploying.
+- ⚠️ **Fingerprinting a NESTED lib class returns 0 from the outer fat jar — that is a FALSE NEGATIVE, not
+  absence.** `unzip -l /app/*.jar | grep <LibClass>` = 0 for anything in `libs/`; and `unzip -p … | unzip -l
+  /dev/stdin` does not work either (unzip cannot read stdin). Extract first:
+  `cd /tmp && unzip -o -q /app/*.jar "BOOT-INF/lib/common-web-core-*.jar" && unzip -l BOOT-INF/lib/common-web-core-*.jar | grep <Class>`.
+  Also expect MORE hits than classes — a nested record (`Foo$Decimal`) counts separately.
+- ⚠️ **`engine_reloads.installed=f` on the row right after a deploy is NORMAL, not a failed install.** Rows
+  alternate `t` then `f` ~38 s apart on every deploy (measured across all three on 2026-08-02: 97→98, 99→100,
+  101→102, each 38 loaded / 0 unresolved / 0 errors). The first reload installs; the second is the periodic
+  reconcile finding no drift. Judge health on `loaded`/`unresolved`/`load_errors`, never on `installed` alone.
 - **Deploy migrations IN VERSION ORDER.** Deploying V044 before V043 makes flyway-init fail *validation*
   (`Detected resolved migration not applied: 043`), which blocks EVERY future migration, not just the skipped
   one. Fix = renumber the stranded (never-applied) migration HIGHER, never `outOfOrder=true` (2026-07-20).
@@ -368,13 +554,28 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   `npm run test:ci` + `npm run build`. After a rebuild HARD-reload (Ctrl+Shift+R) — a stale cached
   chunk renders the old UI. **Deploy gotcha:** the Dockerfile COPYs the HOST-built `dist/`, so
   `npm run build` on the main checkout FIRST, then `docker compose build frontend-react`.
-- **Full-suite vitest timeouts in UNTOUCHED specs are usually suite-growth, not your bug** (#1061,
-  2026-07-28): the heaviest render specs sit at 96–99% of the default 5s budget and tip over when
-  ANY new spec file shifts worker scheduling — green in isolation, red in the full run, and a fresh
-  worktree's cold caches make it worse (a worktree full-suite red proves nothing by itself). Debug
-  ladder: name the failures → run them in ISOLATION → full suite on MAIN's warm checkout (baseline)
-  → full suite at the branch on that same checkout (the only decisive gate). A borderline spec gets
-  an explicit `}, 15_000);` budget + dated comment, not a global testTimeout bump. Also: fake-timer
+- **Full-suite vitest timeouts in UNTOUCHED specs CAN BE load contention rather than your bug — run the
+  ladder below before blaming the branch** (⚠️ they can also be real: an untouched spec regresses through
+  CHANGED SHARED CODE, and the A/B ladder is what distinguishes the two — do not read "untouched spec" as
+  "not my change") (#1061,
+  2026-07-28; ⚠️ **re-measured and CORRECTED 2026-08-03, #1269 — the old "heaviest render specs sit at
+  96–99% of the default 5s budget" was ONE moderate-load sample and materially understated this**):
+  heavy page-render specs cost **1.2–2.2s in isolation vs 3.0–9.1s under full-suite worker contention —
+  a 2.2–6.2× multiplier that tracks MACHINE LOAD, not code**, spanning 60–182% of the 5s default. The
+  default sits INSIDE that spread, so *which* specs fail is decided by what else the box is doing: CI
+  stays green on its 2-core runner while a 16-CPU box sharing Docker + other agents went red on **6 of
+  6** unmodified runs, a different failing set each time, every one green in isolation. Cleanest tell —
+  the control group: `OrdersPage` / `OiExpiryStrategyPage` measure 4075–9140ms in EVERY run and pass
+  ONLY because they already carry `}, 15_000);`. Debug ladder: name the failures → run them in
+  ISOLATION → full suite on MAIN's warm checkout (baseline) → full suite at the branch on that same
+  checkout (the only decisive gate); a fresh worktree's cold caches make it worse, so warm a worktree
+  with one DISCARDED run before trusting any number from it. A borderline spec gets an explicit
+  `}, 15_000);` budget + dated comment, never a global testTimeout bump. ⚠️ **A SECOND, DISTINCT
+  failure mode that NO budget can fix:** a name-matcher `findBy*` exhausting Testing Library's default
+  **1000ms `asyncUtilTimeout`** (it recomputes accessible names over the whole DOM on every 50ms poll)
+  fails as `Unable to find role="…"`, **NOT** as a test timeout — widen the wait at the CALL SITE
+  (`{ timeout: 3000 }`). Measured on `InsightsPage` at 1869ms + 1578ms; **the repo was NOT swept for
+  other name-matcher `findBy*` sites, so that class is only PARTLY closed.** Also: fake-timer
   specs — `findBy*`/`vi.waitFor` poll with the FAKED setTimeout and stall; flush with
   `act(async () => { …; await vi.advanceTimersByTimeAsync(0); })` then plain `getBy*`; and a
   force-close that UNMOUNTS a Radix dialog never fires `onCloseAutoFocus` (focus repair needs a
@@ -402,6 +603,31 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   trust green healthchecks. A DB-level GUC flip
   (`ALTER DATABASE artha SET timescaledb.enable_decompression_sorted_merge = off`) is the
   emergency mitigation; the query rewrites are the real fix so the optimisation stays on.
+
+- ⚠️ **BOTH equity source tables are RETRO-MUTABLE — a persisted decision row CANNOT be reproduced
+  from current data** (found 2026-08-03, and it silently invalidates A-vs-B measurements). `candles`
+  is retroactively rewritten (one symbol's ENTIRE July series was rewritten on 2026-07-31), and
+  `nse_eod_bhavcopy` was **still gaining rows for April–June trade dates months later**. So comparing
+  "what the screen decided then" against "what the data says now" compares two different worlds and
+  reports the difference as a divergence. **Any cross-table or historical A-vs-B comparison must gate
+  on `fetched_at`** — and note `fetched_at` is an UPSERT timestamp, not first-seen, so it bounds
+  rather than pins. Concretely: this is why a "CA-plane split" investigation found **46 of 47**
+  exposures had no corporate action anywhere near them and all 38 clean cases had **byte-identical
+  closes** — the disagreement was entirely in a 50-bar mean computed over retro-mutated history.
+- ⚠️ **`nse_eod_bhavcopy` is MULTI-SERIES — filtering `series='EQ'` silently drops real screen
+  symbols** (measured 2026-08-04, and it manufactured a false "the guard FAILED" reading). The screen
+  universe spans **`EQ` AND `BE`** (13 series exist overall: EQ, BE, BZ, E1, GB, GS, IV, MF, N1, RR,
+  SM, ST, SZ). A staleness probe written as `series='EQ'` reported **53 screen symbols with no bar at
+  all and 76 more stale** — BODALCHEM, AUTOIND, BGRENERGY and 50 others trade `BE`, so their bars
+  were simply outside the filter. Series-agnostic (`series IN ('EQ','BE')`) the same probe returns
+  **0 / 0 / 1772 fresh**. **Tell: a "missing data" result that includes liquid, obviously-trading
+  names.** That is a join or filter artifact, not an outage — check one symbol across ALL series
+  before believing it. Same family as the equity `exchange=` filter rule.
+- ⚠️ **A YAML default is NOT a deployed value.** `application.yml`'s `${ENV:default}` says what happens
+  when the env var is absent — it says nothing about production. Reading the default as the live
+  setting put a wrong "still on `native`, needs flipping" claim into **four** documents for ~28 days
+  while the flag had in fact been flipped the whole time (2026-08-03). **Read `.env` or, better,
+  `docker inspect <container>`'s env — then PROBE what the service actually serves.**
 
 ## Docker / compose
 - **Never invoke `docker compose` directly without `--env-file .env`** — compose
@@ -456,9 +682,22 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   and the local leftovers are what actually bite (see the next bullet). After any merge run
   **`bash tools/git-prune-merged.sh`** (add `--dry` to preview): it removes worktrees + local
   branches whose upstream is GONE and whose tree is CLEAN, and refuses to touch `main`, a
-  never-pushed local WIP branch, a dirty worktree, or a branch still holding commits main lacks —
-  so the parked `worktree-agent-abb02bf43adbb895d` swing catch-up (1 genuinely unmerged commit)
-  survives it.
+  never-pushed local WIP branch, a dirty worktree, or a branch **whose own changes are not yet in
+  main** — so the parked `worktree-agent-abb02bf43adbb895d` swing catch-up (1 genuinely unmerged
+  commit) survives it. ⚠️ **That last clause used to read "still holding commits main lacks", and as
+  written the script was INERT — it never deleted anything** (fixed 2026-07-30). Under SQUASH-merge
+  the squash is a brand-new commit, so a merged branch's own commits are never ancestors of main and
+  `git rev-list --count origin/main..<branch>` is ALWAYS > 0; since squash is this repo's only merge
+  mode, the check vetoed 100% of candidates. It now compares **only the paths the branch touched**:
+  a squash puts identical content on main, so that diff is empty however many commits it collapsed
+  and however far main has moved on other files, while genuinely-unmerged work still differs on its
+  own paths. Two plausible-looking alternatives are wrong and were measured: a two-dot
+  `git diff origin/main..<branch>` conflates "behind main" with "has unmerged content", and
+  `git cherry`/patch-id can't match because the squash collapsed N commits into one. If a LATER
+  commit on main touched one of those paths the test is inconclusive, and it asks `gh` (authoritative)
+  before keeping — the failure direction is deliberately a false KEEP, never a false delete.
+  `tools/git-prune-merged-test.sh` pins all of it, including that the old check fails ONLY the
+  squash case.
 - **`gh pr merge --delete-branch` can fail its LOCAL step while the merge SUCCEEDS** — with a
   concurrent session holding `main` in a worktree it aborts with `fatal: 'main' is already used by
   worktree at …` and no other output. **Same failure when a worktree holds the BRANCH BEING MERGED**
@@ -489,9 +728,11 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   upstream readiness).
 - **`--admin` is NO LONGER the normal way to merge (2026-07-26).** `main` carried
   `lock_branch: {"enabled": true}` — the branch was READ-ONLY — so with `enforce_admins: false`
-  EVERY merge had to use `gh pr merge --admin`, which bypasses ALL six required status checks
-  including a genuinely red one. It hid behind two unrelated, real bugs in the same row
-  (task_db8bdf1e): a dead `frontend` required context, and path-filtered workflows never reporting.
+  EVERY merge had to use `gh pr merge --admin`, which bypasses ALL required status checks (six at
+  the time; nine since 2026-08-04) including a genuinely red one. It hid behind two unrelated, real
+  bugs in the same row (task_db8bdf1e): a dead `frontend` required context, and path-filtered
+  workflows never reporting — the same never-reports trap that later drove the `paths:` filter out
+  of ci-java, ci-optimizer and ci-margin.
   Both were fixed first, and a plain `--squash` STILL returned `the base branch policy prohibits the
   merge` with every required context SUCCESS and `mergeable: MERGEABLE` — that mismatch (MERGEABLE
   but BLOCKED, no failing check) is the fingerprint of a branch-level lock, not a check problem.
@@ -504,7 +745,15 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   `GET /repos/{o}/{r}/rulesets` — rulesets are a SECOND, independent mechanism that can block a
   merge with classic protection looking clean (ours is `[]`).
 - **Every non-`hotfix/*` PR body needs the anchored `Cross-vendor review:` verdict line** — the
-  required `verdict` check (`ci-review-verdict.yml`, reads the body LIVE so an edit + rerun fixes it)
+  `verdict` check (`ci-review-verdict.yml`, reads the body LIVE so an edit + rerun fixes it).
+  ⚠️ **`verdict` is NOT in branch protection's required contexts** (re-verified against the protection
+  API 2026-08-04: the **NINE** required are `contracts`, `e2e`, `gitleaks`, the three `build-test`
+  shards, `optimizer-lint-test` + `margin-lint-test` (added 2026-08-03 with #1252), and
+  **`runbook-hygiene`** (added 2026-08-04 with #1298 — owner call, applied by the Architect). It was
+  six when last checked 2026-08-01 and eight earlier on 2026-08-04; the count keeps moving, so
+  **re-read the API rather than quoting any number here**. `verdict` is in none of those lists, and
+  it failed red on #1156 and blocked nothing). The discipline is convention enforced by
+  the Architect, not by GitHub; promoting it to required is a one-call owner decision. The check
   accepts `APPROVED`/`REQUEST_CHANGES (resolved)`/`NEEDS_REWORK (resolved)` each with
   `— <routed model> (<Vendor>)` model↔vendor PAIRED, or `SKIPPED (<reason>)`. Open builder PRs with
   `PENDING (...)` — red verdict until the review resolves is the DESIGN, not a failure. And with
@@ -522,9 +771,14 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
 - **`build-images` is skipped on `pull_request` (#903)** — on a PR it only VALIDATED that the Dockerfiles
   build (the push is main-only), yet `needs: build-test` made it wait out the ~8 m market-data shard first;
   ~2.5 m of serial tail off every PR. The Dockerfile build still runs on the main-push (pre-deploy); it is
-  NOT a required check. **The ~8 m `build-test (market-data)` shard is now the PR floor** — a source-level
-  module split (breaks the per-module JaCoCo BUNDLE gate as one shard) or a larger runner is the only way
-  under it, both owner decisions.
+  NOT a required check. ⚠️ **"the ~8 m `build-test (market-data)` shard is the PR floor" held only until
+  2026-08-03** (corrected 2026-08-04): #1252 gave the classifier one boolean PER SHARD, so a leg with no
+  work runs zero steps and reports SUCCESS in seconds rather than running the suite. The floor is now
+  whichever shard the PR actually touches — measured: #1290 (strategy-signal) paid `strategy-gateway`
+  5m51s while `market-data` reported in 2s, and docs-only #1293 cleared all three in 2–6s. A `libs/` edit
+  still sets ALL three booleans (the fail-safe direction is RUN), so a shared-lib PR does still pay the
+  ~8 m market-data shard — and for that case a source-level module split (breaks the per-module JaCoCo
+  BUNDLE gate as one shard) or a larger runner remain the only ways under it, both owner decisions.
 
 ## Where things live
 - `services/` services · `libs/` shared libs · `deploy/` compose + flyway · `e2e/`

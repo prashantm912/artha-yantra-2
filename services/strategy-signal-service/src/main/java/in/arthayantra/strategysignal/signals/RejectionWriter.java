@@ -1,6 +1,11 @@
 package in.arthayantra.strategysignal.signals;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.common.web.time.Ist;
+import in.arthayantra.strategysignal.scalper.RailMarginSign;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PreDestroy;
 import java.math.BigDecimal;
@@ -43,15 +48,19 @@ public class RejectionWriter {
 
   private final SignalRejectionRepository repository;
   private final ShadowBookService shadowBook;
+  private final ObjectMapper objectMapper;
   private final BoundedAsyncWriter queue;
+  private final Counter signContradictions;
 
   /** Wires the JDBC repository + shadow book + the dropped-record counters (saturation + shutdown). */
   public RejectionWriter(
       SignalRejectionRepository repository,
       ShadowBookService shadowBook,
+      ObjectMapper objectMapper,
       MeterRegistry meterRegistry) {
     this.repository = repository;
     this.shadowBook = shadowBook;
+    this.objectMapper = objectMapper;
     this.queue =
         new BoundedAsyncWriter(
             "signal-rejection",
@@ -59,6 +68,8 @@ public class RejectionWriter {
             log,
             meterRegistry.counter("ay_signal_rejection_dropped_total"),
             meterRegistry.counter("ay_signal_rejection_shutdown_dropped_total"));
+    this.signContradictions =
+        meterRegistry.counter("ay_signal_rejection_sign_contradiction_total");
   }
 
   /**
@@ -85,14 +96,40 @@ public class RejectionWriter {
       String diagnosticJson,
       OffsetDateTime barTime,
       ScalperConfluenceGate.RejectionDiagnostic diagnostic) {
+    // G17/T14 sign invariant. The LOOKUP + COUNTER run here on the caller: both are O(1) in-memory,
+    // and the count must survive even when a saturated queue drops the record. The WARN does NOT —
+    // review round 1 (Major): this is the sole `signal-eval` thread and logging is I/O, which is
+    // exactly what this writer exists to keep off it (see the class doc). So the warning rides the
+    // bounded async path alongside the insert.
+    boolean selfContradicting = selfContradicting(diagnostic, blockingMargin);
+    if (selfContradicting) {
+      signContradictions.increment();
+    }
     queue.submit(
         () -> {
           try {
+            if (selfContradicting) {
+              warnSelfContradiction(
+                  strategySlug, exchange, tradingsymbol, blockingRail, blockingOperand,
+                  blockingThreshold, blockingMargin, barTime, diagnostic.marginSign());
+            }
+            // F5 U3 data-health: a PURE in-memory read of the same context the diagnostic was built
+            // from, so the flags cannot disagree with the row they annotate. Computed HERE on the
+            // writer thread rather than on the caller — unlike the sign counter above it is only
+            // ever consumed by this INSERT, so a dropped record needs no verdict and the sole
+            // `signal-eval` thread does none of the work. The session date is the BAR's own IST
+            // date, never now(): a bar recorded either side of IST midnight must be judged against
+            // the calendar day it belongs to.
+            DataHealthFlags health =
+                DataHealthFlags.of(
+                    diagnostic == null ? null : diagnostic.context(),
+                    barTime == null ? null : barTime.atZoneSameInstant(Ist.ZONE).toLocalDate());
             long rejectionId =
                 repository.insert(
                     strategyVersionId, strategySlug, exchange, tradingsymbol, interval, side,
                     blockingRail, blockingOperand, blockingThreshold, blockingMargin, blockingReason,
-                    compositeScore, compositeThreshold, diagnosticJson, barTime);
+                    compositeScore, compositeThreshold, diagnosticJson, barTime,
+                    objectMapper.writeValueAsString(health), health.degraded());
             // Shadow book (default-OFF): an eligible rejection opens as a virtual 1-lot position so
             // the exit sweep labels it with a real PnL. maybeOpen never throws (diagnostics never
             // break live) — the guard here is belt-and-braces for the shared writer thread.
@@ -100,13 +137,55 @@ public class RejectionWriter {
                 rejectionId, strategyVersionId, strategySlug, exchange, tradingsymbol, barTime,
                 diagnostic);
             return true;
-          } catch (RuntimeException e) {
+          } catch (RuntimeException | JsonProcessingException e) {
+            // JsonProcessingException joins the fail-soft catch for the data-health serialization:
+            // a diagnostic about a diagnostic must never break the live signal path, and this
+            // already runs off the eval thread.
             log.warn(
                 "failed to persist scalper rejection {} {}:{}: {}",
                 strategySlug, exchange, tradingsymbol, e.toString());
             return false;
           }
         });
+  }
+
+  /**
+   * G17 / T14 sign-aware margin invariant: a first-block whose {@code blockingMargin} sits STRICTLY
+   * on the passing side of its own rail's operator (a floor rail with a positive margin, a ceiling
+   * rail with a negative one) is a row that contradicts itself — it records a block the operand did
+   * not justify (2026-07-20 §6.3 logged 7 such rows; 2026-07-23 §2.3 proved the sign that means
+   * "blocked" is per-rail, killing the naive {@code margin < 0} guard).
+   *
+   * <p>The expected sign is DERIVED: the gate function that did the comparing stamps it on its
+   * {@link in.arthayantra.strategysignal.scalper.GateOutcome}, and it rides the diagnostic to here,
+   * so nothing can drift out of step with the wiring (review round 1 rejected a static name→sign
+   * table for exactly that reason — it could not see a config-armed two-bound rail). A null
+   * diagnostic asserts nothing.
+   *
+   * <p>Runs on the CALLER — O(1) and allocation-free, so the count is recorded even when a
+   * saturated queue drops the record. Never throws, and never suppresses the write: the
+   * contradicting row IS the evidence.
+   */
+  private boolean selfContradicting(
+      ScalperConfluenceGate.RejectionDiagnostic diagnostic, BigDecimal margin) {
+    try {
+      return diagnostic != null && RailMarginSign.contradicts(diagnostic.marginSign(), margin);
+    } catch (RuntimeException e) {
+      return false; // a diagnostic about a diagnostic must never touch the eval path
+    }
+  }
+
+  /** The WARN half of the invariant — emitted on the writer thread, never on {@code signal-eval}. */
+  private void warnSelfContradiction(
+      String strategySlug, String exchange, String tradingsymbol, String blockingRail,
+      BigDecimal operand, BigDecimal threshold, BigDecimal margin, OffsetDateTime barTime,
+      RailMarginSign expected) {
+    log.warn(
+        "self-contradicting rejection row: {} {}:{} bar {} blocked by rail '{}' with margin {}"
+            + " on the PASSING side of its operator (operand {} vs threshold {}, expected {})"
+            + " — persisted anyway; the row is the evidence (G17/T14)",
+        strategySlug, exchange, tradingsymbol, barTime, blockingRail, margin, operand, threshold,
+        expected);
   }
 
   @PreDestroy

@@ -18,6 +18,17 @@ import org.junit.jupiter.api.Test;
  * DOWN (convert to a record — then lower the frozen number here), never UP. New endpoints must
  * return typed records so the breaking-diff gate actually sees them.
  *
+ * <p><b>⚠️ THIS TEST IS HALF THE INSTRUMENT — see {@link SpecOpenObjectRatchetTest}.</b> It asks how
+ * the SOURCE is typed; the sibling asks what the CAPTURED SPEC publishes, and the two are blind to
+ * different things. This one is defeated by formatting (a tab, a return type wrapped across lines,
+ * a doubled {@code Mono<ResponseEntity<Map<…>>>} wrapper — all measured, all invisible here) and by
+ * opacity that is not spelled {@code Map} at all: a {@code JsonNode} or {@code Object} return, or a
+ * {@code Map} FIELD inside a record this test counts as converted. edge-gateway sits at 0 below and
+ * still publishes two unconstrained open objects for exactly those reasons. The sibling is blind to
+ * anything the capture did not produce — a handler on the wrong profile, or a branch that has not
+ * re-captured yet — which this test still sees. Neither is complete; do not describe either as if
+ * it were, and lower BOTH when a handler is converted.
+ *
  * <p>Same pure-file pattern as {@link GatewayRouteAllowlistTest}: walks the sibling services'
  * sources from the repo root, rides the ci-java strategy-gateway shard, no containers.
  */
@@ -27,21 +38,261 @@ class MapReturnRatchetTest {
    * Frozen at the 2026-07-02 audit-fix baseline, ratcheted DOWN as handlers are converted. DOWN is
    * progress; UP fails the build.
    *
+   * <p>backtest-service 10 → 2 (2026-07-30): {@code ResultsController.results} now returns the
+   * typed {@code RunResult}, and {@code StressWindowController.stressWindow} the typed
+   * {@code StressWindow} — both pure retypings of a LinkedHashMap, same keys in the same order, so
+   * the wire is byte-identical and only the spec gained the shape. {@code IndicatorsController.list}
+   * followed ({@code IndicatorRegistry}) — its ITEM type was already typed, so the envelope was the
+   * only opaque part.
+   *
+   * <p>The D3 backtest slice converted the five unconditional handlers: {@code
+   * ResultsController.trades}/{@code summary}, {@code JobsController.jobs}/{@code job}, and
+   * {@code IndicatorsController.series}. The two multi-key {@code Map.of} envelopes are
+   * normalized into deterministic record order; the job detail record mirrors its old
+   * {@code LinkedHashMap} order. {@code OiAttributionController.attribution} remains a deliberate
+   * conditional Map because its empty path emits fewer keys than its populated path.
+   *
+   * <p>DELIBERATELY still a Map, assessed 2026-07-29 and not a miss: {@code
+   * HeroZeroPremiumController.heroZeroPremium}. Its response is POLYMORPHIC — the empty path emits 5
+   * keys, the populated path 16 — so one record would add 11 null keys to the empty response. That is
+   * a wire change, not a retyping; typing it needs a deliberate shape decision, not a refactor.
+   *
+   * <p>strategy-signal-service 14 → 4 (2026-07-29, same day): the whole REGISTRY CRUD surface —
+   * all <b>12</b> {@code RegistryController} handlers, typed at the SERVICE (see {@code
+   * RegistryViews}) so the records are the single source of truth rather than a controller-side
+   * re-mapping. Most sources were a {@code LinkedHashMap} whose insertion order the record
+   * components now mirror, so key ORDER is unchanged. Two exceptions: {@code archive} and the
+   * {@code list} envelope came from MULTI-key {@code Map.of}, whose iteration order is JVM-salted —
+   * those are NORMALISED, not preserved, and must not be described as byte-identical. The {@code
+   * versions} envelope was a SINGLE-key {@code Map.of}, which is trivially stable, so it belongs in
+   * neither camp. No conditional keys existed on any of the 12 (every null was {@code put}
+   * explicitly), so no response gained or lost a key.
+   *
+   * <p>⚠️ The threshold counts only {@code *Controller.java}. A shell grep over all of {@code
+   * src/main} still returns 2 at a floor of ZERO — it also catches two {@code describe()} methods on
+   * pyramid POLICY classes, which are not handlers. The assertion is {@code
+   * isLessThanOrEqualTo}, so an over-stated threshold passes while silently leaving room for new
+   * opaque handlers; an earlier version of this row said 6 and would have let two through
+   * (cross-vendor review, 2026-07-29). Count with the test's own regex, not a broader one.
+   *
+   * <p>strategy-signal-service 4 → 0 (D3 strategy-signal slice, 2026-08-01): the last four —
+   * {@code RiskController.settings}/{@code update}, {@code UniverseController.universe} and
+   * {@code NotifierController.test}. All four were UNCONDITIONAL: every key was {@code put} on
+   * every path and the {@code LinkedHashMap}s already emitted explicit nulls, so no response gained
+   * or lost a key (verified by serializing the pre-conversion handlers and diffing the key sets).
+   * The risk surface was typed at the SERVICE — {@code RiskSettingsRepository.auditTail} was the
+   * real opaque source ({@code jdbc.queryForList}), so it now returns {@code AuditEntry} and
+   * {@code RiskService.settingsView} assembles the envelope.
+   *
+   * <p>⚠️ TWO things on that risk conversion that a pure retyping would have got wrong. (1) The
+   * audit row's wire key is {@code created_at}, SNAKE_CASE — {@code queryForList} keys are SQL
+   * COLUMN LABELS, not Jackson property names, so it never went through camelCase conversion the
+   * way its sibling {@code updatedAt} did; {@code AuditEntry} pins it with {@code @JsonProperty}.
+   * (2) That column's VALUE FORMAT does change, the one thing here that is not byte-identical: it
+   * was a raw {@code java.sql.Timestamp} rendering as {@code "…T10:00:00.000+00:00"} and is now an
+   * {@code OffsetDateTime} rendering as {@code "…T10:00:00Z"} (both ISO-8601, same instant). It is
+   * the format its sibling {@code updatedAt} on the same response already used. Nothing reads the
+   * field ({@code frontend-react} consumes only {@code items}), so this was taken deliberately
+   * rather than keeping {@code java.sql.Timestamp} as a record component.
+   *
+   * <p>{@code NotifierController.TestSendResult} is the one record NOT declared at its service:
+   * {@code NotifierService.sendTest} returns {@code void}, so there was no service-layer map to
+   * relocate — the handler synthesizes the constant itself.
+   *
+   * <p>strategy-signal-service 18 → 14 (2026-07-29, same day): the paper read surface + the
+   * journal list. {@code PaperController}'s {@code positions} / {@code trades} / {@code pnl} and
+   * {@code JournalController.list} were all envelopes whose ITEM types were ALREADY records
+   * ({@code PositionDto}, {@code TradeDto}, {@code Entry}), so typing the envelope pulls the fully
+   * enumerated item schema into the spec instead of leaving an {@code array of object}. {@code
+   * PaperService.pnl} was retyped at the SERVICE too — its {@code summary} mirrored a {@code
+   * LinkedHashMap} (component order load-bearing), its {@code points} a {@code Map.of} (order
+   * unspecified, so the record only makes it deterministic).
+   *
+   * <p>strategy-signal-service 25 → 18 (2026-07-29): the whole SIGNALS surface. {@code
+   * SignalsController}'s five handlers ({@code list} / {@code active} / {@code detail} / {@code
+   * taken} / {@code dismiss}) all rendered through ONE private {@code dto} assembler, so retyping
+   * that one method to {@code SignalViews.SignalDto} typed all five at once. {@code
+   * SignalRejectionsController}'s {@code list} + {@code railCounts} lost their assemblers entirely —
+   * {@code RejectionRow} and {@code RailCount} already matched the emitted keys name-for-name IN
+   * ORDER, so the envelopes were the only opaque part. Its class javadoc claimed the Map return
+   * meant "response keys never drift the OpenAPI spec"; that is exactly backwards, and describing
+   * the blindness as a feature is the clearest argument for this ratchet existing.
+   *
    * <p>edge-gateway 2 → 0 (ledger D3 slice 1, 2026-07-28): {@code AuthController.session} and
    * {@code SystemStatusController.status} now return records. Both were pure retypings — every key
    * name, nesting level and value type unchanged — so the wire is identical and only the SPEC
    * gained the shape. The two comments the old assembler carried ("Map return ⇒ this key never
    * drifts the contract") described exactly the blindness this ratchet exists to remove.
+   *
+   * <p>market-data-service 26 → 16 (2026-07-30): every SINGLE-handler controller — {@code
+   * WorldIndices} / {@code UpstoxEntitlement} / {@code FuturesPreOpen} / {@code
+   * ContinuousFuturesAdmin} / {@code OiBuzz} / {@code Announcement} / {@code IvAnalytics} /
+   * {@code Subscriptions} / {@code Screener} / {@code OptionsChain.history}. All ten were
+   * UNCONDITIONAL (every key {@code put} on every path), so no response gained or lost a key.
+   * TWO needed no new record at all — {@code UpstoxAnalyticsClient.Entitlement} and {@code
+   * FuturesPreOpen} already carried exactly the same components, by name and type, in the same
+   * sequence the old {@code Map.of} listed them, so that call was a field-for-field re-emission of
+   * a record that already existed.
+   *
+   * <p>⚠️ SECOND-ORDER EFFECT, missed on the first cut and caught by cross-vendor review: typing an
+   * ENVELOPE pulls its ITEM schema into the spec for the first time. Those item records had never
+   * been enumerated, so none of them declared nullability, and five ({@code PreOpenRow},
+   * {@code WorldIndex}, {@code ScreenerService.Row}, {@code Announcement},
+   * {@code OptionsSnapshotRepository.SnapshotRow}) would have published nullable fields as
+   * NON-NULLABLE — a lie in the generated TS, not merely a missing annotation. Precisely: a record
+   * component is always PRESENT, so {@code required} is correct and must stay; what was wrong was
+   * the TYPE, which claimed a value can never be null. The fix is the 3.1 type union, never
+   * dropping {@code required}. They now carry
+   * {@code @Schema(types = {"X", "null"})} on every genuinely nullable component, scoped from the
+   * construction sites and, for {@code SnapshotRow}, from the V006 DDL's NOT NULL set. When
+   * converting an envelope, check the ITEM type's nullability too, not just the envelope's.
+   *
+   * <p>Order: SEVEN came from MULTI-key {@code Map.of}, whose iteration order is JVM-salted — those
+   * are NORMALISED, not preserved, and must not be called byte-identical. The record components
+   * mirror the {@code Map.of} ARGUMENT SEQUENCE, which is not the same thing as an emitted order:
+   * there was no stable emitted order to preserve. {@code WorldIndices},
+   * {@code OiBuzz} and {@code IvAnalytics} were single-key (trivially stable). {@code
+   * Announcement} is the one to watch on any future edit: its wire form deliberately DIFFERS from
+   * {@code AnnouncementService.Feed} — {@code from}/{@code to} are the {@code LocalDate.toString()}
+   * STRING and a null {@code symbol} is emitted as {@code ""} — so the record pins those, rather
+   * than returning {@code Feed} and quietly changing two values.
+   *
+   * <p>market-data-service 16 → 12 (2026-07-30): {@code PreOpenController} status/preOpen and
+   * {@code MarketSurfaceController} status/holidays. {@code preOpen} has TWO return paths but both
+   * emit the SAME three keys, so it is not conditional; it now returns the client's own
+   * {@code UpstoxMarketStatusClient.PreOpen}, which already carried exactly those components, with
+   * the not-configured branch as that same shape empty. {@code MarketSurfaceStatus} keeps its three
+   * {@code ""}-for-null date ternaries verbatim — the pre-D3 {@code Map.of} would have THROWN on a
+   * null, which is why they exist, so those components are correctly non-nullable.
+   *
+   * <p>{@code holidays} is the one worth noting: its ITEM was itself an anonymous
+   * {@code Map<String,Object>}, so a holiday row published as a bare object and NOTHING about it was
+   * enumerated. Now {@code HolidayEntry}. Per the item-schema lesson above, the two newly exposed
+   * item records were audited first: {@code MarketStatus.asOf} is null on the {@code unknown()}
+   * degrade path, and {@code PreOpenIndex}'s four numerics are null when the live tick does not
+   * resolve — both annotated BEFORE their envelopes were typed.
+   *
+   * <p>market-data-service 12 → 6 (D3 futures analytics slice, 2026-07-30): all six
+   * {@code FuturesAnalyticsController} handlers were unconditional and now return service-owned
+   * records. {@code oiChart} and {@code moversScreen} return the existing {@code FutOiChart} and
+   * {@code Screen} records directly; the other four use envelopes owned by their existing services.
+   * The newly exposed item records were audited for genuinely nullable components before capture.
+   * The remaining 6 are the {@code OptionsAnalytics} handlers. ASSESSED
+   * 2026-07-30 — all six FuturesAnalytics handlers and four OptionsAnalytics handlers are
+   * unconditional and convertible (every early exit THROWS rather than returning a partial). TWO are
+   * DELIBERATE STOPS of the {@code HeroZeroPremium} kind, both in {@code OptionsAnalytics}:
+   * {@code oiExpiry} emits 3 keys on the empty path and 4 when populated ({@code asOf}), and
+   * {@code openHighStrategy} emits 3 vs 5 ({@code spot}, {@code asOf}). A record would ADD those
+   * keys as nulls to the empty response — a wire change on a live OI page needing a deliberate
+   * shape decision, not a refactor. {@code openHighStrategy} says so itself: "nullable off-hours
+   * (LinkedHashMap permits null; Map.of would not)". So the floor can reach 2, not 0.
+   *
+   * <p>⚠️ <b>REGEX WIDENED 2026-08-01 (D3 backtest slice) — the ratchet was BLIND to {@code
+   * ResponseEntity<Map<String, Object>>}.</b> The old pattern anchored on {@code public} immediately
+   * followed by {@code Mono<}-or-nothing, so a handler that wrapped its opaque map in a {@code
+   * ResponseEntity} (to set a 202/201 status) was never counted — while publishing exactly the same
+   * {@code additionalProperties:{}} blob this ratchet exists to prevent. Three existed platform-wide,
+   * uncounted: {@code JobsController.run} and {@code JobsController.cancel} in backtest (converted in
+   * this slice) and {@code WatchlistController.create} in market-data (NOT converted — another
+   * service's slice). {@code JobsController.run}'s own javadoc had written the gap down as though it
+   * were a property of the design: "{@code ResponseEntity<Map>} is NOT a ratchet-counted Map return".
+   * It was a hole in the counter, not a safe shape.
+   *
+   * <p><b>market-data-service 6 → 7 is a MEASUREMENT CORRECTION, not a regression</b> — no handler
+   * was added; {@code WatchlistController.create} has been opaque all along and is only now visible.
+   * Raising the number is strictly TIGHTER than leaving it: before, any service could add unlimited
+   * {@code ResponseEntity}-wrapped maps and stay green; now market-data is capped at the one that
+   * exists, and converting it lowers the number to 6. backtest stays at 2 because its two
+   * newly-countable handlers were converted in the same change — a widened regex that simultaneously
+   * ratchets a count down is the only combination that proves the widening actually bites.
+   *
+   * <p><b>The qualifier hole, closed 2026-08-01 (D3 strategy-signal slice).</b> #1188 widened for
+   * {@code ResponseEntity} but not for a FULLY-QUALIFIED {@code java.util.Map}, so the same class of
+   * blind spot survived one door down. It was found the hard way: the strategy-signal slice's first
+   * attempt to red-proof its new 0 floor reverted a handler as {@code public java.util.Map<String,
+   * Object>}, and the ratchet passed GREEN — a falsely-green proof, and proof that an opaque handler
+   * could coexist with a floor of 0. Both halves were then measured explicitly: with that handler in
+   * the tree the pre-fix pattern reports BUILD SUCCESS, the post-fix pattern reports {@code now has 1
+   * ... (frozen at 0)}. Unlike the {@code ResponseEntity} widening this moved NO count — all four
+   * services were re-derived with the real {@code java.util.regex} engine and none contained a
+   * fully-qualified handler (edge-gateway 0, market-data 7, strategy-signal 0, backtest 2, unchanged
+   * old-vs-new). It closes a door rather than correcting a number.
+   *
+   * <p>Whenever this pattern is widened again, re-derive ALL FOUR counts before trusting any floor:
+   * a floor is only as strong as the counter's ability to see every shape, and 0 is the strongest
+   * floor there is.
+   *
+   * <p>market-data-service 7 → 2 (D3 options-analytics slice, 2026-08-01, immediately after the
+   * widening above): the four convertible {@code OptionsAnalyticsController} handlers — {@code
+   * oiAnalysis}, {@code strikeSeries}, {@code multipleOi}, {@code optionsChart} — PLUS the {@code
+   * WatchlistController.create} the paragraph above had to leave for "another service's slice".
+   * This is that slice, so the 7 the widening raised is now paid off in full. <b>THE FLOOR IS NOW AT
+   * ITS DOCUMENTED MINIMUM</b>: the
+   * remaining 2 are exactly the {@code oiExpiry} / {@code openHighStrategy} pair the row above
+   * assessed as deliberate stops, re-verified against the code in this slice (empty path 3 keys vs
+   * populated 4 and 5). Lowering this further REQUIRES a shape decision about those two responses,
+   * not a refactor.
+   *
+   * <p>{@code optionsChart} is the one worth studying: the handler was re-emitting a service record
+   * field-by-field through a {@code LinkedHashMap} that listed {@code ce}/{@code pe} FIRST, while the
+   * record declared them LAST. Returning the record as-was would have silently reshuffled a live OI
+   * page's payload, so {@code OptOiChart}'s components were reordered to the emitted order instead —
+   * the wire stays byte-identical and the service stays the single source of truth. {@code
+   * multipleOi} likewise mirrors its {@code LinkedHashMap} order; {@code strikeSeries} came from a
+   * 6-key {@code Map.of}, so its order is NORMALISED, not preserved.
+   *
+   * <p>Per the item-schema lesson above, the newly exposed item records were audited BEFORE capture.
+   * {@code OptionsSnapshotReader.StrikePoint} is the big one — SIX of its nine components are
+   * nullable ({@code ltp}/{@code oi}/{@code oiChange}/{@code iv}/{@code spot}/{@code volume}), only
+   * the three PK columns being NOT NULL in V006; unannotated it would have published all nine as
+   * non-nullable. {@code OptCandle}'s left-joined {@code oi}/{@code iv} and {@code OptOiChart}'s
+   * off-hours {@code underlyingLtp}/{@code underlyingDayOpen} are the same class of miss. All were
+   * cross-checked three ways: the V006/V007_1 DDL, the in-repo null tests that already existed
+   * ({@code oiFreshness} tests {@code iv == null}, {@code multipleOi} tests {@code spot != null}),
+   * and the hand-written FE types, which independently declare the identical nullable set.
+   *
+   * <p><b>The 2 is regex-independent, which is the property worth keeping.</b> Re-derived against
+   * all THREE patterns this evening produced, in the order they landed: 6 − 4 = 2 under the
+   * ORIGINAL, 7 − 5 = 2 under #1188's {@code ResponseEntity} widening, and 2 under #1191's
+   * {@code java.util.} qualifier widening — market-data contains no fully-qualified handler either,
+   * so that door closed without moving this row. Each was measured, not carried forward; a count
+   * that survives three regex changes in one evening is exactly the kind that goes stale silently.
+   *
+   * <p>⚠️ <b>THE SCALAR-TYPE TRAP, and the sharpest lesson of this slice</b> (cross-vendor review):
+   * making an opaque Map visible has to make the spec's claim TRUE, not merely PRESENT. The first
+   * cut published every exposed {@code BigDecimal} as {@code number}, because that is what bare
+   * springdoc infers from the Java type — but {@code ArthaJacksonAutoConfiguration} registers
+   * {@code ToStringSerializer} for {@code BigDecimal} platform-wide, so every decimal is a JSON
+   * STRING on our wire. The conversion therefore replaced a schema that claimed NOTHING with one
+   * that claimed something FALSE, and the generated TS client inherited the lie — strictly worse
+   * than the Map. They are now {@code @Schema(type = "string")} /
+   * {@code types = {"string", "null"}}. <b>Check this on every future Map→record conversion:</b>
+   * a key-set test cannot catch it, because {@code asText()} returns the same value for a textual
+   * node and a numeric one — assert {@code isTextual()} (see
+   * {@code OptionsAnalyticsWireShapeIntegrationTest}). {@code Long}/{@code long} columns are
+   * genuinely JSON numbers and correctly stay {@code integer}.
    */
   private static final Map<String, Integer> FROZEN =
       Map.of(
           "edge-gateway", 0,
-          "market-data-service", 30,
-          "strategy-signal-service", 28,
-          "backtest-service", 10);
+          "market-data-service", 2,
+          "strategy-signal-service", 0,
+          "backtest-service", 2);
 
+  /**
+   * ⚠️ The optional {@code java\.util\.} is load-bearing, not tidiness. Without it a handler declared
+   * {@code public java.util.Map<String, Object> foo()} — legal, compiles, needs no import — is
+   * INVISIBLE to this counter, so an opaque handler can coexist with a floor of 0 while the gate
+   * stays green. That is not hypothetical: the D3 strategy-signal slice's first attempt to red-proof
+   * its new 0 floor reverted a handler using the fully-qualified form, and the ratchet passed. The
+   * proof was falsely green and the bypass was real. Widened here (2026-08-01) after #1188's
+   * {@code ResponseEntity} widening left the qualifier out.
+   *
+   * <p>No service contained a fully-qualified handler when this widened, so no floor moved — the
+   * fix closes a door rather than correcting a count.
+   */
   private static final Pattern MAP_RETURN =
-      Pattern.compile("public (Mono<)?Map<String, Object>");
+      Pattern.compile("public (?:Mono<|ResponseEntity<)?(?:java\\.util\\.)?Map<String, Object>");
 
   @Test
   void mapReturningControllerMethodsNeverIncrease() throws IOException {

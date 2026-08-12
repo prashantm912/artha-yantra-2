@@ -21,7 +21,7 @@ public class ScreenerController {
 
   /** Runs a preset OR explicit filters over the aggregates; 422 on unanswerable combos. */
   @GetMapping
-  public Map<String, Object> screen(
+  public ScreenerResponse screen(
       @RequestParam(required = false) String preset,
       @RequestParam(required = false) String window,
       @RequestParam(required = false) Integer lookback,
@@ -44,6 +44,13 @@ public class ScreenerController {
             new ScreenerService.Filters(minReturnPct, minAvgVolume, minPrice, maxPrice, exchange),
             effectiveLimit,
             effectiveOffset);
-    return Map.of("items", items, "limit", effectiveLimit, "offset", effectiveOffset);
+    return new ScreenerResponse(items, effectiveLimit, effectiveOffset);
   }
+
+  /**
+   * Paged screener results. {@code limit}/{@code offset} echo the EFFECTIVE values after clamping
+   * (limit to [0,500], offset to >= 0), not the raw request. Multi-key {@code Map.of} before D3 —
+   * order NORMALISED, not preserved.
+   */
+  public record ScreenerResponse(List<ScreenerService.Row> items, int limit, int offset) {}
 }

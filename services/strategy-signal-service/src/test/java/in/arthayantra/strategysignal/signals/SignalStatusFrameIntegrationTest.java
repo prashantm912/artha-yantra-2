@@ -96,7 +96,7 @@ class SignalStatusFrameIntegrationTest extends StrategySignalIntegrationTestBase
             .replace("NAME", "Status IT " + suffix)
             .replace("SYM", "STAT" + suffix);
     UUID strategyId =
-        (UUID) registry.create("Status IT " + suffix, null, List.of("scalper"), yaml).get("id");
+        registry.create("Status IT " + suffix, null, List.of("scalper"), yaml).id();
     UUID versionId =
         jdbc.queryForObject(
             "SELECT id FROM strategy_versions WHERE strategy_id=? ORDER BY created_at DESC LIMIT 1",
@@ -150,7 +150,7 @@ class SignalStatusFrameIntegrationTest extends StrategySignalIntegrationTestBase
             .replace("NAME", "Expire IT " + suffix)
             .replace("SYM", "EXP" + suffix);
     UUID strategyId =
-        (UUID) registry.create("Expire IT " + suffix, null, List.of("scalper"), yaml).get("id");
+        registry.create("Expire IT " + suffix, null, List.of("scalper"), yaml).id();
     UUID versionId =
         jdbc.queryForObject(
             "SELECT id FROM strategy_versions WHERE strategy_id=? ORDER BY created_at DESC LIMIT 1",

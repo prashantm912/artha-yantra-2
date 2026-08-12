@@ -91,6 +91,18 @@ artha:
       enabled: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_ENABLED:true}
       bar-gap-ms: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_BAR_GAP_MS:180000}
       feed-fresh-ms: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_FEED_FRESH_MS:90000}
+    # DRILL-ONLY fault injection for the watchdog above (SignalFaultInjector). Its receive-stall
+    # branch is the one live path no external action can reach: the 2026-08-03 drill proved a
+    # transport drop self-heals in ~22ms via Lettuce's ConnectionWatchdog, ~4 orders of magnitude
+    # under bar-gap-ms, so only an in-process listener-container stop produces a DETECTOR-EQUIVALENT
+    # receive stall. It validates the DETECTOR, not the 2026-07-07 DIAGNOSIS — the real incident's
+    # mechanism (socket up, listeners gone) is still unreproduced and remains a hypothesis.
+    # Enabling it lets an operator BREAK this service on purpose.
+    # ⚠️ Deliberately has NO compose passthrough (unlike every knob above) — turning it on requires
+    # editing the compose env explicitly, which is the intended friction. This is the ONE place the
+    # #653 name-mismatch rule is inverted on purpose: there is no .env name to match.
+    fault-injection:
+      enabled: false
     # T9 load-coverage watchdog. DISABLED ships the bean with no detector work; OBSERVE_ONLY
     # logs would-page episodes; ARMED publishes named per-slug ntfy alerts through notifier.
     # Names MUST match the compose passthroughs exactly (#653).
@@ -142,6 +154,12 @@ artha:
       spurt-oi-pct: ${ARTHA_SCALPER_OI_SPURT_OI_PCT:15}
       spurt-price-pct: ${ARTHA_SCALPER_OI_SPURT_PRICE_PCT:3}
       vwap-min-distance-bps: ${ARTHA_SCALPER_OI_VWAP_MIN_DISTANCE_BPS:15}
+      # F5 U4b §5.3 dot-plane data-coverage floor. INERT unless a strategy carries the DEFAULT-OFF
+      # `dot-coverage-floor` (or `dot-null-withheld`, which implies it) tag — this is the VALUE, not
+      # the arming. 0.90 is an empirical natural break: zero of 11,068 measured rows fall in
+      # [0.828, 0.947], so it separates "one dot happened to be missing" from "a whole data plane is
+      # gone" without splitting any observed population.
+      dot-coverage-floor: ${ARTHA_SCALPER_OI_DOT_COVERAGE_FLOOR:0.90}
       # #2 (section 3.2) Open=High faithful grading (Table-1 / Table-2 / LOW rules). min-strikes is the
       # per-side OH-strike count for a HIGH footprint; fall-volume-floor downgrades a fall-on-volume OH
       # to LOW; max-prev-close-fall-pct is the >50% fall = bigger-player LOW rule; window is the ATM+-N
@@ -170,6 +188,15 @@ artha:
     # (minervini / manas-arora) are always exempt (EOD signals taken next session); 0/negative disables.
     # Separate from the tick-freshness guard above. Env-tunable (.env override) via the compose passthrough.
     signal-take-max-age-minutes: ${ARTHA_PAPER_SIGNAL_TAKE_MAX_AGE_MINUTES:60}
+    # V058 / option D (HOLD, owner-approved 2026-08-03): books whose OPEN-position key is
+    # STRATEGY-SCOPED — two strategies entering the same (exchange, tradingsymbol, side) hold
+    # SEPARATE rows with their own brackets and their own exits, instead of the second averaging into
+    # the first and both exiting on whichever doctrine fires first. Capital is NOT forked: one book,
+    # one paper_account row, one kill switch, one heat cap, and a co-firing sibling INHERITS the key's
+    # existing sub-account. EMPTY = DISARMED and byte-identical to pre-V058; arming a book (e.g.
+    # `scalper`) CHANGES REALISED P&L on every co-fired trade, so it is an owner decision, not a
+    # deploy default. Env name MUST match the compose passthrough exactly (#653 placeholder trap).
+    strategy-scoped-books: ${ARTHA_PAPER_STRATEGY_SCOPED_BOOKS:}
     # A12 per-class capital-usage margin approximations (no Kite margin API).
     # Equities use full notional; long options the premium; futures & short
     # options a margin-pct-of-notional approximation (real SPAN+exposure varies).
@@ -264,14 +291,15 @@ artha:
       act-rate-target: 0.60             # A-band act-rate target (report escalates to WARN below it)
       dismiss-rate-threshold: 0.40      # per-type NOT_USEFUL share above which a type is a retirement candidate
       top-suppressed-keys: 5            # suppression-audit: top-N most-suppressed dedupe keys
-    # I3 — actions + strategy evidence (INT §5). Still YAML-only knobs (shadow mode); every value is
-    # hashed into config_hash. Delivery.ws is the Stage-1 WS-channel flag — DEFAULT FALSE, so NOTHING
-    # pushes; arming is I4 and the compose passthrough (ARTHA_INSIGHTS_DELIVERY_WS) lands THEN with its
-    # #653 exact-name check (I1/I2 precedent: no passthrough until the delivery flag actually arms).
+    # I3/I4 — actions + strategy evidence + delivery. Priority weights remain deliberately YAML-only;
+    # the delivery flags are env-tunable and default OFF. The floor defaults to the owner-decided NOTICE.
     sell-decision:
       escalate-sessions: 1              # sessions a SELL stays un-acked before NOTICE escalates to WARN
     delivery:
-      ws: false                         # Stage-1 insights WS channel — OFF in shadow mode
+      ws: ${ARTHA_INSIGHTS_DELIVERY_WS:false}
+      ntfy-enabled: ${ARTHA_INSIGHTS_DELIVERY_NTFY_ENABLED:false}
+      telegram-enabled: ${ARTHA_INSIGHTS_DELIVERY_TELEGRAM_ENABLED:false}
+      severity-floor: ${ARTHA_INSIGHTS_DELIVERY_SEVERITY_FLOOR:NOTICE}
     # I2 sweep crons (IST). Market-hours context sweep + the calendar-driven EOD/T-1/weekly jobs.
     context-cron: ${ARTHA_INSIGHTS_CONTEXT_CRON:0 */15 9-15 * * MON-FRI}
     eod-cron: ${ARTHA_INSIGHTS_EOD_CRON:0 5 16 * * MON-FRI}

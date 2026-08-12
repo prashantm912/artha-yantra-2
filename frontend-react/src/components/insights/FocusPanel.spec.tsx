@@ -21,7 +21,7 @@ const SIGNAL: Insight = {
   title: 'NIFTY 25200 CE scalp',
   explanation: 'Composite 0.81 vs threshold 0.72.',
   evidence: [{ label: 'PCR shift', value: '0.87→1.14 since open' }],
-  priority: 82.75,
+  priority: '82.75',
   priorityDetail: { score: 82.75, band: 'A', trustCap: 1, components: [] },
   dataTrust: 'OK',
   suppressed: false,
@@ -72,12 +72,13 @@ function renderPanel() {
 }
 
 describe('FocusPanel', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3697ms in a full-suite run.
   it('renders the signal + attention queues and a feed link', async () => {
     renderPanel();
     expect(await screen.findByRole('button', { name: 'NIFTY 25200 CE scalp' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Participant-OI missing for 2026-07-09' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Open feed/ })).toHaveAttribute('href', '/insights');
-  });
+  }, 15_000);
 
   it('opens the explain drawer from Review', async () => {
     renderPanel();

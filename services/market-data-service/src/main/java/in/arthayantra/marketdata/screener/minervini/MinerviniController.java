@@ -42,18 +42,18 @@ public class MinerviniController {
   public record Row(
       String symbol,
       String exchange,
-      BigDecimal close,
-      @Schema(types = {"number", "null"}) BigDecimal sma50,
-      @Schema(types = {"number", "null"}) BigDecimal sma150,
-      @Schema(types = {"number", "null"}) BigDecimal sma200,
-      @Schema(types = {"number", "null"}) BigDecimal high52w,
-      @Schema(types = {"number", "null"}) BigDecimal low52w,
-      @Schema(types = {"number", "null"}) BigDecimal pctFromHigh,
-      @Schema(types = {"number", "null"}) BigDecimal pctAboveLow,
-      @Schema(types = {"number", "null"}) BigDecimal rsRank,
-      @Schema(types = {"number", "null"}) BigDecimal avgTurnover50,
-      @Schema(types = {"number", "null"}) BigDecimal freeFloatMcapCr,
-      @Schema(types = {"number", "null"}) BigDecimal freeFloatPct,
+      @Schema(type = "string") BigDecimal close,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal sma50,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal sma150,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal sma200,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal high52w,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal low52w,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pctFromHigh,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pctAboveLow,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal rsRank,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal avgTurnover50,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal freeFloatMcapCr,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal freeFloatPct,
       boolean[] gates,
       int gatesPassed,
       boolean passesAll,
@@ -76,16 +76,16 @@ public class MinerviniController {
   public record Geometry(
       boolean isVcp,
       @Schema(types = {"string", "null"}) String footprint,
-      @Schema(types = {"number", "null"}) BigDecimal pivot,
-      @Schema(types = {"number", "null"}) BigDecimal deepestPct,
-      @Schema(types = {"number", "null"}) BigDecimal tightestPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pivot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal deepestPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal tightestPct,
       @Schema(types = {"integer", "null"}) Integer contractionCount,
       @Schema(types = {"integer", "null"}) Integer baseWeeks,
       @Schema(types = {"integer", "null"}) Integer baseDurationDays,
       boolean volumeDryUp,
       boolean shakeout,
       @Schema(types = {"integer", "null"}) Integer baseCount,
-      @Schema(types = {"number", "null"}) BigDecimal cheatPivot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal cheatPivot,
       boolean thrust,
       @Schema(types = {"string", "null"}) String rejectReason) {}
 
@@ -104,18 +104,18 @@ public class MinerviniController {
       String exchange,
       @Schema(types = {"string", "null"}) LocalDate screenDate,
       boolean scanned,
-      @Schema(types = {"number", "null"}) BigDecimal close,
-      @Schema(types = {"number", "null"}) BigDecimal sma50,
-      @Schema(types = {"number", "null"}) BigDecimal sma150,
-      @Schema(types = {"number", "null"}) BigDecimal sma200,
-      @Schema(types = {"number", "null"}) BigDecimal high52w,
-      @Schema(types = {"number", "null"}) BigDecimal low52w,
-      @Schema(types = {"number", "null"}) BigDecimal pctFromHigh,
-      @Schema(types = {"number", "null"}) BigDecimal pctAboveLow,
-      @Schema(types = {"number", "null"}) BigDecimal rsRank,
-      @Schema(types = {"number", "null"}) BigDecimal avgTurnover50,
-      @Schema(types = {"number", "null"}) BigDecimal freeFloatMcapCr,
-      @Schema(types = {"number", "null"}) BigDecimal freeFloatPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal close,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal sma50,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal sma150,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal sma200,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal high52w,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal low52w,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pctFromHigh,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pctAboveLow,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal rsRank,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal avgTurnover50,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal freeFloatMcapCr,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal freeFloatPct,
       boolean[] gates,
       int gatesPassed,
       boolean passesAll,
@@ -130,6 +130,8 @@ public class MinerviniController {
   private final MinerviniHitRateService hitRateService;
   private final MinerviniBacktestService backtestService;
   private final ScreenerHistoryRepository history;
+  private final PlaneDivergenceProbe planeDivergence;
+  private final MinerviniScheduler scheduler;
 
   /** Wires the screener + screen/geometry repositories + the funnel + hit-rate + backtest services. */
   public MinerviniController(
@@ -140,7 +142,9 @@ public class MinerviniController {
       MinerviniFunnelService funnelService,
       MinerviniHitRateService hitRateService,
       MinerviniBacktestService backtestService,
-      ScreenerHistoryRepository history) {
+      ScreenerHistoryRepository history,
+      PlaneDivergenceProbe planeDivergence,
+      MinerviniScheduler scheduler) {
     this.screener = screener;
     this.repo = repo;
     this.geometryService = geometryService;
@@ -149,6 +153,8 @@ public class MinerviniController {
     this.hitRateService = hitRateService;
     this.backtestService = backtestService;
     this.history = history;
+    this.planeDivergence = planeDivergence;
+    this.scheduler = scheduler;
   }
 
   /**
@@ -182,7 +188,14 @@ public class MinerviniController {
         date, repo.coverage(date), cappedLimit, offset);
   }
 
-  /** Recomputes the screen now, persists it, and returns the fresh result. */
+  /**
+   * Recomputes the screen now, persists it, and returns the fresh result.
+   *
+   * <p>Delegates to {@link MinerviniScheduler#runOnce} rather than repeating the
+   * screen/upsert/geometry sequence inline. It used to repeat it, which meant this — the path a
+   * human triggers by hand — silently skipped whatever the scheduler had gained since, most
+   * recently the plane-divergence observation. One orchestration, four doors.
+   */
   @PostMapping("/run")
   public ScreenResponse run(
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf,
@@ -190,17 +203,9 @@ public class MinerviniController {
       @RequestParam(required = false) BigDecimal minRsRank,
       @RequestParam(defaultValue = "50") int limit) {
     int cappedLimit = Math.min(Math.max(1, limit), 500);
-    TrendTemplateService.ScreenResult res = screener.screen(asOf);
+    TrendTemplateService.ScreenResult res = scheduler.runOnce(asOf);
     if (res.screenDate() == null) {
       return new ScreenResponse(List.of(), null, 0, cappedLimit, 0);
-    }
-    repo.upsertAll(res.screenDate(), res.candidates());
-    // Persist geometry for the passers too, so POST /run leaves minervini_setups consistent with the
-    // screen (matches the scheduled/boot paths). Best-effort — a geometry hiccup must not 5xx the run.
-    try {
-      geometryService.persistForPassers(res.screenDate(), res.candidates());
-    } catch (RuntimeException ignored) {
-      // geometry is a diagnostic side-channel; the screen result is still authoritative
     }
     List<Row> items =
         res.candidates().stream()
@@ -318,6 +323,21 @@ public class MinerviniController {
     return new ScreenerHistory.FunnelAttrition(
         date, counts.scanned(), counts.gates(), counts.passesAll(),
         funnel.immediatelyBuyable().size(), funnel.onDeck().size(), funnel.watch().size());
+  }
+
+  /**
+   * Which of the day's passers are being read off TWO price planes — {@code candles}@1d (which is
+   * dividend-back-adjusted, via Kite re-fetch) versus {@code nse_eod_bhavcopy} (which deliberately
+   * is not). {@code divergentCandidates > 0} means a name the funnel actually SERVES is priced
+   * differently by the two readers. <b>Report-only</b> — the probe never pages (a page keyed on the
+   * divergent symbol fires on 20 of 22 evenings and is blind to the one measured casualty, which was
+   * displaced rather than divergent); the evening batch logs the same reading. Read-only, changes
+   * neither plane. See {@link PlaneDivergenceProbe}.
+   */
+  @GetMapping("/plane-divergence")
+  public PlaneDivergenceProbe.Report planeDivergence(
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
+    return planeDivergence.probe(asOf != null ? asOf : defaultReadDate());
   }
 
   /**

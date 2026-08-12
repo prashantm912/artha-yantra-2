@@ -40,7 +40,9 @@ public record ScalperOiProps(
     BigDecimal relativeVolumeMultiplier,
     BigDecimal relativeVolumeWindow,
     BigDecimal relativeVolumeMinBars,
-    BigDecimal vwapMinDistanceBps) {
+    BigDecimal timeOfDayProfileSessions,
+    BigDecimal vwapMinDistanceBps,
+    BigDecimal dotCoverageFloor) {
 
   // T2.1: the #5 call-put delta-imbalance HARD pre-gate floor (>= 50% of the larger leg).
   private static final BigDecimal DEFAULT_CROSS_FILTER_PCT = new BigDecimal("50");
@@ -102,6 +104,13 @@ public record ScalperOiProps(
   private static final BigDecimal DEFAULT_RELATIVE_VOLUME_MULTIPLIER = new BigDecimal("1.5");
   private static final BigDecimal DEFAULT_RELATIVE_VOLUME_WINDOW = new BigDecimal("20");
   private static final BigDecimal DEFAULT_RELATIVE_VOLUME_MIN_BARS = new BigDecimal("10");
+  // G10 (tag time-of-day-volume-floor, default-OFF): how many PRIOR sessions the time-of-day volume
+  // profile samples at the current bar's offset. Deliberately shallow — the live 3m series warms 4
+  // CALENDAR days (LiveSeriesStore.warmupDays has no 3m case → default 4), so 2-3 sessions is all
+  // that exists, and the bake-off found shallow is BETTER: open-vs-rest pass ratio 0.94 at 2
+  // sessions, 0.85 at 3, 0.79 at 5 (1.00 = perfectly unbiased) — a shallow profile tracks the
+  // current regime more closely. 3 is the middle: near-uniform, and still satisfiable on a Monday.
+  private static final BigDecimal DEFAULT_TIME_OF_DAY_PROFILE_SESSIONS = new BigDecimal("3");
   // T6 (owner-approved 2026-07-25): the vwap DOT's minimum |close−vwap|/close distance in bps. The
   // entry gate already enforces the VWAP SIDE, so a side-only dot supported 100% of 5,225 rows over
   // six sessions — a free 2.5-weight dot is an unlabelled −12.8% threshold cut. 15 bps ≈ the
@@ -109,6 +118,14 @@ public record ScalperOiProps(
   // hard gate (Confluence.vwapAligned) is untouched — this floors the DOT only. Ops-tunable via
   // ARTHA_SCALPER_OI_VWAP_MIN_DISTANCE_BPS.
   private static final BigDecimal DEFAULT_VWAP_MIN_DISTANCE_BPS = new BigDecimal("15");
+  // F5 U4b §5.3: the dot-plane data-coverage floor, read ONLY when the DEFAULT-OFF
+  // `dot-coverage-floor` / `dot-null-withheld` tag arms it. 0.90 is an EMPIRICAL natural break, not
+  // a fitted knob: over 11,068 post-P3 scored evaluations the measured coverage distribution is
+  // 9,207 rows at 1.000, 45 at 0.947-0.961 (one dot missing), ZERO rows in [0.828, 0.947], then the
+  // 748 Timescale-outage rows and the 1,068 monthly-expiry rows below. Any floor in [0.85, 0.94]
+  // separates "one dot happened to be missing" from "a whole data plane is gone" with no row in the
+  // gap; 0.90 sits dead centre. Ops-tunable via ARTHA_SCALPER_OI_DOT_COVERAGE_FLOOR.
+  private static final BigDecimal DEFAULT_DOT_COVERAGE_FLOOR = new BigDecimal("0.90");
 
   /** Fills any unset field with its documented default (so a partial yaml override is honoured). */
   public ScalperOiProps {
@@ -143,14 +160,19 @@ public record ScalperOiProps(
         relativeVolumeWindow == null ? DEFAULT_RELATIVE_VOLUME_WINDOW : relativeVolumeWindow;
     relativeVolumeMinBars =
         relativeVolumeMinBars == null ? DEFAULT_RELATIVE_VOLUME_MIN_BARS : relativeVolumeMinBars;
+    timeOfDayProfileSessions =
+        timeOfDayProfileSessions == null
+            ? DEFAULT_TIME_OF_DAY_PROFILE_SESSIONS
+            : timeOfDayProfileSessions;
     vwapMinDistanceBps =
         vwapMinDistanceBps == null ? DEFAULT_VWAP_MIN_DISTANCE_BPS : vwapMinDistanceBps;
+    dotCoverageFloor = dotCoverageFloor == null ? DEFAULT_DOT_COVERAGE_FLOOR : dotCoverageFloor;
   }
 
   /** The all-defaults instance (used where config is absent — tests, the pure-scorer fallback). */
   public static ScalperOiProps defaults() {
     return new ScalperOiProps(
         null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-        null, null, null, null, null, null, null, null, null);
+        null, null, null, null, null, null, null, null, null, null, null);
   }
 }

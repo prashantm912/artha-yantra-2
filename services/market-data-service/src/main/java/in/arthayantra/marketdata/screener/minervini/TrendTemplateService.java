@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.screener.minervini;
 
-import in.arthayantra.marketdata.screener.AdjustedEquityDailySql;
+import in.arthayantra.marketdata.equitydaily.AdjustedEquityDailySql;
+import in.arthayantra.marketdata.screener.ScreenCoverageFloor;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -42,6 +43,7 @@ public class TrendTemplateService {
   private final boolean lowCapGateEnabled; // ADR-0005 low-cap universe gate (off until fundamentals loaded)
   private final BigDecimal maxFreeFloatMcapCr; // < 5000 cr
   private final BigDecimal maxFreeFloatPct; // < 35 %
+  private final int minCurrentCoveragePct; // coverage floor — see ScreenCoverageFloor
 
   /** Wires the marketdata datasource + the config-tunable Minervini thresholds. */
   public TrendTemplateService(
@@ -57,7 +59,8 @@ public class TrendTemplateService {
       @Value("${artha.minervini.liquidity-multiple:25}") BigDecimal liquidityMultiple,
       @Value("${artha.minervini.lowcap-gate.enabled:false}") boolean lowCapGateEnabled,
       @Value("${artha.minervini.max-free-float-mcap-cr:5000}") BigDecimal maxFreeFloatMcapCr,
-      @Value("${artha.minervini.max-free-float-pct:35}") BigDecimal maxFreeFloatPct) {
+      @Value("${artha.minervini.max-free-float-pct:35}") BigDecimal maxFreeFloatPct,
+      @Value("${artha.minervini.min-current-coverage-pct:80}") int minCurrentCoveragePct) {
     this.jdbc = jdbc;
     this.minSessions = minSessions;
     this.minPrice = minPrice;
@@ -69,6 +72,7 @@ public class TrendTemplateService {
     this.lowCapGateEnabled = lowCapGateEnabled;
     this.maxFreeFloatMcapCr = maxFreeFloatMcapCr;
     this.maxFreeFloatPct = maxFreeFloatPct;
+    this.minCurrentCoveragePct = minCurrentCoveragePct;
   }
 
   /** The latest daily bhavcopy trade date (IST calendar date). */
@@ -94,7 +98,8 @@ public class TrendTemplateService {
       BigDecimal c189,
       BigDecimal c252,
       BigDecimal ffMcap,
-      BigDecimal ffPct) {}
+      BigDecimal ffPct,
+      boolean current) {}
 
   // The BROAD equity universe = the daily bhavcopy (nse_eod_bhavcopy, ~2.2k EQ/BE names with a full
   // year), NOT native candles@1d (whose dense recent-year history only covers the ~100
@@ -104,11 +109,10 @@ public class TrendTemplateService {
   // are split/bonus back-adjusted so a corporate action inside the window no longer opens a false
   // cliff under the MA/52w/RS gates; raw_close carries the unadjusted close for the rupee-turnover
   // liquidity gate (avg_turnover_50), which must stay split-invariant.
-  private static final String SQL =
-      "WITH base AS (\n"
-          + AdjustedEquityDailySql.SCREENER_BASE_CTE
-          + "\n),\n"
-          + """
+  // ⚠️ SQL_TAIL is declared BEFORE the two constants built from it: static initialisers run in
+  // declaration order, so building SQL above this point would splice in a null tail.
+  private static final String SQL_TAIL =
+      """
       calc AS (
         SELECT symbol, bucket, close, volume,
           avg(close) OVER w50  AS sma50,
@@ -139,7 +143,23 @@ public class TrendTemplateService {
       SELECT calc2.symbol, calc2.close, calc2.sma50, calc2.sma150, calc2.sma200, calc2.sma200_ago,
              calc2.high_52w, calc2.low_52w, calc2.avg_turnover_50,
              calc2.c63, calc2.c126, calc2.c189, calc2.c252,
-             ef.free_float_mcap_cr AS ff_mcap, ef.free_float_pct AS ff_pct
+             ef.free_float_mcap_cr AS ff_mcap, ef.free_float_pct AS ff_pct,
+             -- Trailing-bar flag: the rn=1 row is the symbol's OWN latest bar, whatever date that
+             -- is, but the result is labelled with latestScreenDate() = the UNIVERSE's max
+             -- trade_date. A symbol that stopped printing (delisted/renamed/suspended) therefore
+             -- emitted a full candidate row computed on a weeks-old close under today's badge, with
+             -- the staleness neither carried on the row nor visible in the response. Same guard
+             -- EquityReturnsService already applies to this table (its rn=1 HAVING).
+             -- Comparing against base's OWN max — not a restated max(trade_date) subquery — keeps
+             -- the series filter structurally identical to the population (base is series
+             -- IN ('EQ','BE'), matching latestScreenDate(); EquityReturnsService says 'EQ' only
+             -- because ITS population is 'EQ' only) and keeps the historical screen(asOf) replay
+             -- correct: base is already bounded by asOf, so this reads "the universe's latest bar
+             -- AS OF THE SCREEN DATE", not "as of today", which would drop every symbol on a replay.
+             -- Carried as a FLAG rather than applied as a WHERE filter so one query yields both the
+             -- surviving count and the eligible denominator the coverage floor needs, from a single
+             -- snapshot (a second counting query would both double the cost and race this one).
+             (calc2.bucket = (SELECT max(bucket) FROM base)) AS is_current
       FROM calc2
       LEFT JOIN equity_fundamentals ef ON ef.symbol = calc2.symbol
       WHERE calc2.rn = 1
@@ -148,16 +168,82 @@ public class TrendTemplateService {
         AND calc2.avg_turnover_50 >= ?
       """;
 
-  /** Runs the screen as of {@code asOf} (default = latest). Computes gates + RS-rank + Stage. */
+  private static String sqlFor(boolean lineageExpanded) {
+    return "WITH base AS (\n"
+        + AdjustedEquityDailySql.screenerBaseCte(lineageExpanded)
+        + "\n),\n"
+        + SQL_TAIL;
+  }
+
+  /** The screen query as it has always been — no lineage, byte-identical to the pre-N2 constant. */
+  private static final String SQL = sqlFor(false);
+
+  /**
+   * The lineage-expanded twin (N2 / #1285). Same tail, same binds, same gates — the ONLY difference
+   * is which base CTE feeds it, so the two cannot drift. Reached only by an explicit {@code
+   * screen(asOf, true)}.
+   */
+  private static final String SQL_LINEAGE = sqlFor(true);
+
+  /**
+   * The latest bhavcopy trade date ON OR BEFORE {@code asOf} — the EFFECTIVE screen date. The
+   * requested {@code asOf} must never become the label: the row selection compares each symbol
+   * against {@code max(bucket) FROM base}, which is bounded by {@code asOf}, so an {@code asOf}
+   * ahead of the data (e.g. POST /run?asOf=today before the evening bhavcopy lands) leaves every
+   * symbol sitting on the last real bar, reports 100% coverage, sails through the coverage floor
+   * and persists YESTERDAY's rows under TODAY's date — exactly the stale-close-under-a-current-badge
+   * mislabelling this guard exists to prevent, arriving through the one door the floor cannot see.
+   * Resolving the label to the real watermark keeps date and data in agreement by construction.
+   */
+  private LocalDate effectiveScreenDate(LocalDate asOf) {
+    return asOf == null
+        ? latestScreenDate()
+        : jdbc.queryForObject(
+            "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series IN ('EQ','BE')"
+                + " AND trade_date <= ?::date",
+            LocalDate.class,
+            java.sql.Date.valueOf(asOf));
+  }
+
+  /**
+   * Runs the screen as of {@code asOf} (default = latest). Computes gates + RS-rank + Stage.
+   *
+   * <p>Every persisting caller — both schedulers, {@code POST /run}, {@code runOnce} — lands here,
+   * and here lineage is OFF. The published daily screen is unchanged by N2.
+   */
   public ScreenResult screen(LocalDate asOf) {
-    LocalDate date = asOf != null ? asOf : latestScreenDate();
+    return screen(asOf, false);
+  }
+
+  /**
+   * The same screen, optionally reading the LINEAGE-EXPANDED price plane (N2 / #1285): a renamed
+   * symbol's pre-rename bars accrue to the ticker that carries the series today, so a successor can
+   * clear the 252-session gate on history that already exists under a retired key.
+   *
+   * <p>{@code lineageExpanded = false} runs the identical statement this method has always run.
+   * Opting in is an explicit argument at the call site — there is no ambient default that could
+   * move the screen's numbers behind a reader's back.
+   */
+  public ScreenResult screen(LocalDate asOf, boolean lineageExpanded) {
+    LocalDate date = effectiveScreenDate(asOf);
     if (date == null) {
       return new ScreenResult(null, 0, List.of());
     }
     java.sql.Date d = java.sql.Date.valueOf(date);
+    // ⚠️ The lineage plane binds a THIRD asOf (its walk excludes links that had not switched yet),
+    // and it is bound FIRST because the `asof` CTE is textually first. Arity comes from
+    // AdjustedEquityDailySql rather than being restated here: one param short does not fail, it
+    // shifts minSessions/minPrice/liquidity by one position and screens on the wrong thresholds.
+    Object[] args =
+        new Object[AdjustedEquityDailySql.screenerBaseCteDateBinds(lineageExpanded) + 4];
+    java.util.Arrays.fill(args, 0, args.length - 4, d);
+    args[args.length - 4] = sma200RisingSessions;
+    args[args.length - 3] = minSessions;
+    args[args.length - 2] = minPrice;
+    args[args.length - 1] = liquidityThreshold;
     List<Raw> raws =
         jdbc.query(
-            SQL,
+            lineageExpanded ? SQL_LINEAGE : SQL,
             (rs, n) ->
                 new Raw(
                     rs.getString("symbol"),
@@ -174,8 +260,16 @@ public class TrendTemplateService {
                     rs.getBigDecimal("c189"),
                     rs.getBigDecimal("c252"),
                     rs.getBigDecimal("ff_mcap"),
-                    rs.getBigDecimal("ff_pct")),
-            d, d, sma200RisingSessions, minSessions, minPrice, liquidityThreshold);
+                    rs.getBigDecimal("ff_pct"),
+                    rs.getBoolean("is_current")),
+            args);
+
+    // Trailing-bar guard + coverage floor. Applied FIRST — before the low-cap gate and the RS-rank —
+    // so the percentile is computed over the surviving universe, exactly as when this was a WHERE
+    // filter. ScreenCoverageFloor throws rather than publishing a gutted screen.
+    int eligible = raws.size();
+    raws = raws.stream().filter(Raw::current).toList();
+    ScreenCoverageFloor.check("minervini", date, raws.size(), eligible, minCurrentCoveragePct);
 
     if (lowCapGateEnabled) {
       // Low-cap universe gate (ADR-0005): drop names with a KNOWN large free-float cap or a high

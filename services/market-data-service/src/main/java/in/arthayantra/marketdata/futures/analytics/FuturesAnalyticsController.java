@@ -82,7 +82,7 @@ public class FuturesAnalyticsController {
   }
 
   @GetMapping("/oi-analysis")
-  public Map<String, Object> oiAnalysis(
+  public FuturesSnapshotReader.FutAnalysisResponse oiAnalysis(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
@@ -91,7 +91,7 @@ public class FuturesAnalyticsController {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
     // live (date null) = newest bucket per contract; history (date set) = newest bucket that day.
     List<FuturesSnapshotReader.FutPoint> pts = reader.latest(q.name(), q.interval(), q.date());
-    return Map.of("items", pts);
+    return new FuturesSnapshotReader.FutAnalysisResponse(pts);
   }
 
   /**
@@ -104,7 +104,7 @@ public class FuturesAnalyticsController {
    * when the underlying has NO snapshot at all; an {@code expiry} matching no contract -> 200 + empty.
    */
   @GetMapping("/oi-analysis-series")
-  public Map<String, Object> oiAnalysisSeries(
+  public FuturesSnapshotReader.FutAnalysisSeriesResponse oiAnalysisSeries(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
@@ -121,11 +121,8 @@ public class FuturesAnalyticsController {
     OffsetDateTime to = newest.plus(q.interval().bucket());
     List<FuturesSnapshotReader.FutPoint> series = reader.series(q.name(), q.interval(), from, to);
     List<FuturesSnapshotReader.FutPoint> picked = pickContract(series, q.expiry());
-    return Map.of(
-        "items", picked,
-        "underlying", q.name(),
-        "interval", q.interval().token(),
-        "asOf", newest);
+    return new FuturesSnapshotReader.FutAnalysisSeriesResponse(
+        picked, q.name(), q.interval().token(), newest);
   }
 
   /**
@@ -161,10 +158,11 @@ public class FuturesAnalyticsController {
    * (real per-interval 1m-aggregated OHLC) + the OI LINE, for the dual-axis combo. {@code interval} is
    * RAW MINUTES (1/3/5/10/15/30/60 — wider than the OI pages' {@code OiInterval}, since the candles
    * aggregate from 1m base). Live mode → today IST; history → {@code date}. 422 when the underlying has
-   * no listed FUT contract. Map envelope (no typed schema), matching the sibling chart/series endpoints.
+   * no listed FUT contract. The service-owned {@link FuturesOiChartService.FutOiChart} record is
+   * returned directly.
    */
   @GetMapping("/oi-chart")
-  public Map<String, Object> oiChart(
+  public FuturesOiChartService.FutOiChart oiChart(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
@@ -173,13 +171,7 @@ public class FuturesAnalyticsController {
     OiQuery q = OiQuery.of(mode, name, date, null, expiry);
     FuturesOiChartService.FutOiChart chart =
         oiChartService.chart(q.name(), q.expiry(), interval, q.date());
-    return Map.of(
-        "items", chart.items(),
-        "underlying", chart.underlying(),
-        "tradingsymbol", chart.tradingsymbol(),
-        "expiry", chart.expiry(),
-        "interval", chart.interval(),
-        "asOf", chart.asOf());
+    return chart;
   }
 
   /** /spurt: futures interval buildup (per contract, 4-state + spurt %). */
@@ -260,13 +252,14 @@ public class FuturesAnalyticsController {
    * /movers-screen: §3.3 Market-Movers stock-future screener — the high-probability LONG / SHORT
    * stock-future picks (8/9-day breakout + Open=Low/High + OI quadrant + daily-RSI, ranked by move ×
    * liquidity). Sector-wide (no {@code name}); the engine entry_rules do the WHEN on each picked future.
-   * Map envelope {@code {longCandidates, shortCandidates, asOf}} — no typed schema. {@code source}
+   * The service-owned {@link MarketMoversScreenService.Screen} record carries the
+   * {@code {longCandidates, shortCandidates, asOf}} response. {@code source}
    * selects the data path: default = the captured NIFTY-Bank snapshot radar (v1, 422 until ≥1 radar
    * bucket, supports history {@code date}); {@code source=upstox} (E1 v2) = the full NIFTY-50 radar from
    * ON-DEMAND Upstox daily candles (live only — no history/interval).
    */
   @GetMapping("/movers-screen")
-  public Map<String, Object> moversScreen(
+  public MarketMoversScreenService.Screen moversScreen(
       @RequestParam(required = false) String mode,
       @RequestParam(required = false) String date,
       @RequestParam(required = false) String interval,
@@ -290,10 +283,7 @@ public class FuturesAnalyticsController {
         throw new ApiException(422, ErrorCodes.DATA_GAP, "no bank-stock futures snapshots");
       }
     }
-    return Map.of(
-        "longCandidates", s.longCandidates(),
-        "shortCandidates", s.shortCandidates(),
-        "asOf", s.asOf());
+    return s;
   }
 
   /**
@@ -301,10 +291,10 @@ public class FuturesAnalyticsController {
    * of cumulative-from-day-open (LTP% / OI%) + a per-interval 4-state OI badge. Sector-wide: NO name, NO
    * expiry (the 6 banks are config-fixed in oipulse column order). Anchors on the newest captured bucket's
    * IST day, then reads the whole day via {@code seriesAll}. 422 until ≥1 bucket has accrued (forward-only,
-   * matches /banks-grid). Map envelope (no typed schema). {@code interval} 3/5/10/15/30/60 (no 1m).
+   * matches /banks-grid). {@code interval} 3/5/10/15/30/60 (no 1m).
    */
   @GetMapping("/banks-analysis")
-  public Map<String, Object> banksAnalysis(
+  public FuturesBankAnalysisService.BankAnalysisResponse banksAnalysis(
       @RequestParam(required = false) String mode,
       @RequestParam(required = false) String date,
       @RequestParam(required = false) String interval) {
@@ -331,11 +321,7 @@ public class FuturesAnalyticsController {
         reader.seriesAll(bankAnalysisStocks, iv, from, to);
     FuturesBankAnalysisService.BankAnalysisMatrix matrix =
         bankAnalysisService.matrix(series, bankAnalysisStocks);
-    return Map.of(
-        "banks", matrix.banks(),
-        "rows", matrix.rows(),
-        "interval", iv.token(),
-        "asOf", matrix.asOf());
+    return bankAnalysisService.response(matrix, iv.token());
   }
 
   /** /buzz: a time x contract heatmap of the 4-state OI interpretation over the last N buckets. */
@@ -360,13 +346,13 @@ public class FuturesAnalyticsController {
 
   /** /eod: per-contract daily OHLC + OI rollup over [from, to] (defaults to=from). */
   @GetMapping("/eod")
-  public Map<String, Object> eod(
+  public FuturesSnapshotReader.EodResponse eod(
       @RequestParam String name,
       @RequestParam String from,
       @RequestParam(required = false) String to) {
     LocalDate fromDate = parseDate(from);
     LocalDate toDate = to == null || to.isBlank() ? fromDate : parseDate(to);
-    return Map.of("items", reader.eod(name, fromDate, toDate));
+    return new FuturesSnapshotReader.EodResponse(reader.eod(name, fromDate, toDate));
   }
 
   private static LocalDate parseDate(String raw) {

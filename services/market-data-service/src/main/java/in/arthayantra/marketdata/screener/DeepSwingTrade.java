@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.screener;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
@@ -10,16 +11,18 @@ import java.time.LocalDate;
  * The deep-sim exposes a % model (no share count / rupee P&amp;L per lot) — the worker maps {@code
  * pnlPct} + entry/exit prices onto the trade row on a 1-share basis. {@code exitReason} is the
  * deep-sim's REAL exit attribution (STOP_LOSS / TRAILING_STOP / …), which the candle path lacks (B11).
- * Decimals cross the wire as JSON strings (the global Jackson config).
+ * Decimals cross the wire as JSON strings (the global Jackson config). {@code rsRankAtEntry} is null
+ * whenever the raw RS-rank was NaN at entry (both {@code toDeepSwingTrade} mappers: "a NaN RS-rank
+ * rides as null").
  */
 public record DeepSwingTrade(
     String symbol,
     String setup,
     LocalDate entryDate,
-    BigDecimal entryPrice,
+    @Schema(type = "string") BigDecimal entryPrice,
     LocalDate exitDate,
-    BigDecimal exitPrice,
-    BigDecimal pnlPct,
+    @Schema(type = "string") BigDecimal exitPrice,
+    @Schema(type = "string") BigDecimal pnlPct,
     int barsHeld,
     String exitReason,
-    BigDecimal rsRankAtEntry) {}
+    @Schema(type = "string", types = {"string", "null"}) BigDecimal rsRankAtEntry) {}

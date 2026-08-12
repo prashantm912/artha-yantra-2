@@ -25,12 +25,12 @@ public class FuturesSpurtService {
 
   public record FutSpurt(
       String tradingsymbol,
-      @Schema(types = {"number", "null"}) BigDecimal ltp,
-      @Schema(types = {"number", "null"}) BigDecimal prevClose,
-      @Schema(types = {"number", "null"}) BigDecimal pricePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal prevClose,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pricePct,
       long oi,
       long oiChange,
-      @Schema(types = {"number", "null"}) BigDecimal spurtPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spurtPct,
       OiInterpretation interpretation) {}
 
   public record FutSpurtChain(

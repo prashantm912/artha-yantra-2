@@ -85,6 +85,19 @@ public class SwingBatchEngine {
    * held anchors whose stop/trail could NOT be evaluated this run (no daily series even after a retry)
    * — this batch is the position's ONLY exit evaluator, so a non-zero value is an ops signal. {@code
    * admission} is the ledger-F3 slot-cap probe (measurement-only; see {@link AdmissionProbe}).
+   *
+   * <p>{@code candidates} is the SIZE OF THE FUNNEL this run was handed — not how many survived any
+   * gate. It stays honest when the book's risk governor blocks the entry pass outright: a book at its
+   * slot cap reports its full funnel with {@code entries} 0, and the probe's {@code capExceedance}
+   * carries what the governor shed. Reading 0 WITH {@code strategies} &gt; 0 and entries enabled means
+   * the screen genuinely returned nothing — but 0 is also correct and NOT a screen verdict on the
+   * paths that never reach the funnel: an expired deadline, {@code executionArmed} false, the
+   * catch-up path's {@code entriesEnabled} false (a screenDate that is not the session), which passes
+   * an empty list while a candidate snapshot is present, and a FUNNEL FETCH FAILURE — an empty
+   * {@code snapshot()} means the fetch failed, not that the screen was empty, and it lands here as 0
+   * via {@code orElse(List.of())}. That third state has a third remedy (market-data unreachable, not
+   * an empty screen); the marker write is suppressed because {@code snapshotAvailable} is false, so
+   * it reaches the alert text but never a {@code swing_batch_runs} row.
    */
   public record SwingRun(
       int strategies, int candidates, int entries, int exits, int exitSkipped,
@@ -413,10 +426,22 @@ public class SwingBatchEngine {
       SwingDoctrine doctrine, List<SwingStrategy> swings, AnchorResolution resolution,
       Map<String, List<EngineCandle>> seriesCache, List<SwingCandidate> candidates,
       LocalDate requiredBarDate, RunDeadline deadline) {
-    // Per-book risk governor early-out: a book already kill-switched / daily-loss-tripped at the START
-    // of the run takes no entries at all (cheap — skips the whole candidate scan).
+    // Per-book risk governor early-out: a book already kill-switched / daily-loss-tripped / at its slot
+    // cap at the START of the run takes no entries at all (cheap — skips the whole candidate scan). The
+    // candidate COUNT is still reported, and the skip is logged: this branch used to return 0 and say
+    // nothing, so a capped book published "0 candidates" to swing_batch_runs, the summary alert and every
+    // session report built off them — the screen reading as empty while the F3 probe on the SAME row
+    // counted 17-18 would-be entrants (measured: minervini 2026-08-04..08-07, collapsed from 139 the day
+    // the book stuck at its cap). The zero was refactor residue, not a distinct quantity: this method
+    // fetched the funnel ITSELF, BELOW this branch, until #751 hoisted it to a parameter — so nothing was
+    // scanned OR fetched then, and 0 was literally true. Every other return below already reports
+    // candidates.size(), including the SAME gate tripping MID-run.
     if (entryBlocked(doctrine)) {
-      return new EntryResult(0, 0, List.of(), false);
+      log.info(
+          "{} swing: entry pass skipped — the {} book gate blocks entry at run start; {} funnel"
+              + " candidate(s) not scanned",
+          doctrine.batchName(), doctrine.book(), candidates.size());
+      return new EntryResult(candidates.size(), 0, List.of(), false);
     }
     if (candidates.isEmpty()) {
       return new EntryResult(0, 0, List.of(), false);
@@ -492,16 +517,46 @@ public class SwingBatchEngine {
                 doctrine.batchName(), doctrine.book(), fired);
             return new EntryResult(candidates.size(), fired, refusalReasons, false);
           }
-          // §3.4.3: an ADD only goes on if the book's aggregate open risk stays within the portfolio
-          // cap. A fresh (first) entry is unbounded here — the ordinary book governor already bounds it.
-          if (isAdd
-              && pyramid.wouldBreachRiskCap(
-                  strat.definition(), EX, c.symbol(), bank, series.size() - 1, bar.close(),
-                  emissionGuard.orElse(null))) {
+          // §3.4.3 / M40 (owner-directed 2026-08-02, HOLD-tier — see
+          // docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md for the gap this closes):
+          // the book's aggregate open risk must stay within the portfolio cap for BOTH a pyramid ADD
+          // and a FRESH (first) entry — the deployment/daily-loss governor rails bound CAPITAL (or day
+          // P&L), never aggregate open RISK, so concurrent fresh entries could otherwise exceed
+          // doctrine's 5-6% cap even with pyramiding OFF (multiple names each risking 1% of equity is
+          // reachable at current config, since max_open_paper_positions=7 is shared by both Manas
+          // strategies through the one Books.MANAS_ARORA key). wouldBreachRiskCap is an EMISSION-TIME
+          // PREVIEW off the candle close, not the authority (round 4, cross-vendor review,
+          // 2026-08-02) — for a fresh entry with no existing lot on THIS symbol its own risk
+          // contribution is newQty × stopDistance, but the preview cannot see a dead-anchor paper row
+          // (this pass classifies "held" purely from active signal anchors — openLotsBySymbol above —
+          // so a symbol with an open position but no live anchor reads as fresh here), a delayed
+          // swing-effect retry, or the real slippage-adjusted fill.
+          // RiskService#manasAggregateRiskCheck is the AUTHORITATIVE write-time check that can
+          // still refuse what this preview passed.
+          if (pyramid.wouldBreachRiskCap(
+              strat.definition(), EX, c.symbol(), bank, series.size() - 1, bar.close(),
+              emissionGuard.orElse(null))) {
+            String kind = isAdd ? "pyramid add" : "fresh entry";
             log.info(
-                "{} swing: pyramid add for {} would breach the open-risk cap — skipped",
-                doctrine.batchName(), c.symbol());
-            break; // no setup may add more risk for this symbol this run
+                "{} swing: {} for {} would breach the open-risk cap — skipped",
+                doctrine.batchName(), kind, c.symbol());
+            // Audit + alert on refusal (E4 §2f pattern; M40 extends the SAME call site to the
+            // fresh-entry path rather than duplicating it): three of RiskService's four audited rails
+            // (daily-loss/profit-target/heat-cap) write a risk_audit row + push an ntfy alert on trip;
+            // deployment audits only. Both kinds share one EmissionGuard port call + one RiskService
+            // audit key (PYRAMID_RISK_CAP, per-IST-day-per-book deduped) — the free-text detail records
+            // which kind fired; a same-day add-breach and fresh-entry-breach on the same book dedupe
+            // against each other (only the first of the day is audited/alerted), see the receipt's
+            // open-doubts.
+            emissionGuard.ifPresent(
+                g ->
+                    g.recordPyramidRiskCapBreach(
+                        doctrine.book(),
+                        c.symbol(),
+                        kind + " for " + c.symbol() + " blocked by the "
+                            + pyramid.describe().getOrDefault("maxPortfolioRiskPct", "?")
+                            + "% portfolio open-risk cap"));
+            break; // no setup may open/add more risk for this symbol this run
           }
           if (deadline.expired()) {
             return new EntryResult(candidates.size(), fired, refusalReasons, true);
@@ -800,12 +855,10 @@ public class SwingBatchEngine {
         skipped++;
         continue;
       }
+      ExitEvaluator.Position position =
+          new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex);
       Optional<ExitEvaluator.ExitDecision> exit =
-          ExitEvaluator.evaluate(
-              strat.definition(), bank,
-              new ExitEvaluator.Position(
-                  ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex),
-              series.size() - 1);
+          ExitEvaluator.evaluate(strat.definition(), bank, position, series.size() - 1);
       if (exit.isPresent()) {
         if (deadline.expired()) {
           return new ExitResult(closed, skipped, refusalReasons, true);
@@ -820,9 +873,60 @@ public class SwingBatchEngine {
             effectSession(requiredBarDate))) {
           closed++;
         }
+      } else {
+        cacheGoverningStop(
+            doctrine, primary, strat.definition(), bank, position, series.size() - 1, entryIndex);
       }
     }
     return new ExitResult(closed, skipped, refusalReasons, false);
+  }
+
+  /**
+   * M40 cross-vendor review Critical 3 fix, round 3 (owner ruling, 2026-08-02 — supersedes round 1's
+   * {@code stop_loss} write and round 2's dedicated column, both reverted): on a bar where the
+   * position did NOT exit, CACHES a tighter (never looser — enforced in the cache itself, see {@code
+   * EmissionGuard#cacheManasGoverningStop}) governing stop for aggregate-risk accounting, IN MEMORY
+   * ONLY — never a database write, never {@code paper_positions.stop_loss}, never any new column.
+   * {@code stop_loss} is ALSO the intraday disaster-stop the paper module's 15-second bracket poller
+   * reads with no book filter; both earlier drafts of this fix risked or would have coupled the risk
+   * figure to that intraday-exit surface, so M40 ships EXIT-NEUTRAL — this call cannot change what
+   * {@code PaperBracketEvaluator} (or anything else reading {@code stop_loss}) ever sees. {@link
+   * SwingDoctrine#governingStop}'s default is {@code null} (a safe no-op) for every family except
+   * Manas, whose trail rule IS its exit_rules trailing_stop (see that method's javadoc). Fail-soft,
+   * mirroring the Major-4 fix for the risk-cap audit: this batch is the position's ONLY exit
+   * evaluator, so an accounting failure here must never propagate and skip a later position's stop
+   * evaluation this run.
+   *
+   * <p>Passes {@code primary.id()} — the anchor THIS trail was computed from — as the expected
+   * opening-signal identity (round 5, cross-vendor review Critical 1, 2026-08-02): the paper
+   * adapter validates it against the currently-open row's own {@code opening_signal_id} before
+   * caching, so a stale-anchor-treated-as-fresh position, or a close+reopen racing this write, can
+   * never have this anchor's trail attached to it under the shared symbol/side key.
+   */
+  private void cacheGoverningStop(
+      SwingDoctrine doctrine,
+      SignalRepository.SignalRow primary,
+      StrategyDefinition definition,
+      IndicatorBank bank,
+      ExitEvaluator.Position position,
+      int lastIndex,
+      int entryIndex) {
+    if (emissionGuard.isEmpty()) {
+      return;
+    }
+    try {
+      BigDecimal governingStop = doctrine.governingStop(definition, bank, position, lastIndex, entryIndex);
+      if (governingStop != null) {
+        emissionGuard
+            .get()
+            .cacheManasGoverningStop(
+                doctrine.book(), EX, primary.tradingsymbol(), "BUY", primary.id(), governingStop);
+      }
+    } catch (RuntimeException e) {
+      log.warn(
+          "{} swing: governing-stop cache failed for {} (accounting only, exit unaffected): {}",
+          doctrine.batchName(), primary.tradingsymbol(), e.getMessage());
+    }
   }
 
   private void recordMixedLotRefusal(

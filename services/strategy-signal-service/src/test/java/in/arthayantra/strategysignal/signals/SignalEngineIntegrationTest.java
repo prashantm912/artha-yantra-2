@@ -2,11 +2,13 @@ package in.arthayantra.strategysignal.signals;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.series.EngineCandle;
@@ -16,6 +18,7 @@ import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
@@ -29,6 +32,7 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -333,13 +337,44 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     listener.start();
     try {
       strategyId =
-          (UUID)
-              registryService.create("Engine IT Momentum", null, null, STRATEGY_YAML).get("id");
-      registryService.publish(strategyId, null, null);
+                        registryService.create("Engine IT Momentum", null, null, STRATEGY_YAML).id();
+      UUID publishedVersionId = registryService.publish(strategyId, null, null).versionId();
 
       await()
           .atMost(Duration.ofSeconds(20))
           .until(() -> engine.loadedSlugs().contains("engine-it-momentum"));
+
+      // ORDER/STATE INDEPENDENCE. Every meter this method asserts on lives on the CONTEXT-WIDE
+      // MeterRegistry, so each is measured as a DELTA from here rather than as an absolute:
+      //
+      //   * an absolute `>= 1` / `== 1` answers for emits made by anything else sharing this
+      //     registry, not only for this method's own bar. That is what makes the assertions
+      //     order-sensitive, and the delta is the whole fix for it.
+      //   * the fired counter is REACHED only on the `activeEntry.isEmpty()` branch
+      //     (SignalEngine:1469-1476), so the precondition below is asserted rather than assumed.
+      //
+      // The precondition assertion is a defensive sanity check, nothing more: a version created in
+      // this very method cannot already own an anchor, so it should always hold. It is here so that
+      // if it ever stops holding, the method says so instead of quietly measuring something other
+      // than what the assertions below claim to measure. It is deliberately NOT offered as an
+      // explanation of any observed failure — exit EMISSION on that branch is conditional
+      // (SignalEngine:1427-1468), and an EXIT that does emit expires its anchor in the same
+      // transaction (:2431-2442), which would empty `active()` and strand the await below rather
+      // than produce a green timer next to a zero counter.
+      assertThat(signals.activeEntry(publishedVersionId, "NSE", "SIGTEST"))
+          .as("no ENTRY may already anchor this (version, instrument) — see above")
+          .isEmpty();
+      Counter fired =
+          meterRegistry.find("ay_signal_eval_outcome_total").tag("outcome", "fired").counter();
+      assertThat(fired).as("the fired outcome tag is pre-registered at boot").isNotNull();
+      double firedBefore = fired.count();
+      Timer barToEmit = meterRegistry.find("ay_signal_bar_to_emit_seconds").timer();
+      assertThat(barToEmit).as("the bar-to-emit timer is pre-registered at boot").isNotNull();
+      long emitsBefore = barToEmit.count();
+      // read only by the failure message below; resolved HERE so a null lookup can never surface as
+      // an NPE from inside an untilAsserted block (Awaitility retries AssertionError, not NPE).
+      Counter evalFailures = meterRegistry.find("ay_signal_eval_failures_total").counter();
+      assertThat(evalFailures).as("the eval-failure counter is pre-registered at boot").isNotNull();
 
       // rising live bars after the declining warm-up: RSI climbs, the gate is trivially true
       OffsetDateTime liveBase = WARM_BASE.plusMinutes(30);
@@ -349,17 +384,25 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         publishBar("SIGTEST", liveBase.plusMinutes(i), price);
       }
 
-      // scope to THIS test's instrument — the IT DB is shared with no per-method cleanup, so other
-      // methods/classes may leave their own active signals newer than ours (CLAUDE.md IT contract).
+      // scope to THIS test's published VERSION, not merely its instrument — the IT DB is shared with
+      // no per-method cleanup (CLAUDE.md IT contract) and `signals.active()` is unscoped across every
+      // strategy in it (SignalRepository:165-170), while SIGTEST is the instrument of a dozen further
+      // fixtures in this class. An instrument-only filter can therefore hand this method a FOREIGN
+      // row — one this method's own evaluation never produced — and every assertion below would
+      // then be describing someone else's signal.
       await()
           .atMost(Duration.ofSeconds(20))
-          .until(() -> signals.active().stream().anyMatch(s -> "SIGTEST".equals(s.tradingsymbol())));
+          .until(
+              () ->
+                  signals.active().stream()
+                      .anyMatch(s -> publishedVersionId.equals(s.strategyVersionId())));
 
       SignalRepository.SignalRow row =
           signals.active().stream()
-              .filter(s -> "SIGTEST".equals(s.tradingsymbol()))
+              .filter(s -> publishedVersionId.equals(s.strategyVersionId()))
               .findFirst()
               .orElseThrow();
+      assertThat(row.tradingsymbol()).isEqualTo("SIGTEST");
       firstSignalId = row.id();
       assertThat(row.signalType()).isEqualTo("ENTRY");
       assertThat(row.side()).isEqualTo("BUY");
@@ -373,20 +416,32 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       assertThat(row.stopLoss()).isNull();
       assertThat(row.target()).isNull();
 
-      Map<String, Object> latencyStamp =
-          jdbc.queryForMap(
-              "SELECT generated_at, emitted_at, emit_latency_ms FROM signals WHERE id = ?",
-              row.id());
-      assertThat(((java.sql.Timestamp) latencyStamp.get("generated_at")).toInstant())
-          .as("latency instrumentation never rewrites the deterministic bar-bucket instant")
-          .isEqualTo(row.generatedAt().toInstant());
-      assertThat(((java.sql.Timestamp) latencyStamp.get("emitted_at")).toInstant())
-          .isEqualTo(LIVE_NOW.toInstant());
-      assertThat(latencyStamp.get("emit_latency_ms")).isEqualTo(0L);
-      assertThat(meterRegistry.find("ay_signal_bar_to_emit_seconds").timer())
-          .isNotNull()
-          .extracting(timer -> timer.count())
-          .isEqualTo(1L);
+      // AWAITED for the same reason as the outcome counter below — everything read here is written
+      // AFTER the INSERT this test gated on. `stampEmissionLatency` runs its UPDATE and only then
+      // records the bar-to-emit timer, so a bare read can see a null `emitted_at` (an NPE on
+      // .toInstant(), which would surface looking like an unrelated bug rather than a race) or a
+      // timer still at 0. Both re-read inside the same block so each poll re-samples together.
+      await()
+          .atMost(Duration.ofSeconds(10))
+          .untilAsserted(
+              () -> {
+                Map<String, Object> latencyStamp =
+                    jdbc.queryForMap(
+                        "SELECT generated_at, emitted_at, emit_latency_ms FROM signals WHERE id = ?",
+                        row.id());
+                assertThat(latencyStamp.get("emitted_at"))
+                    .as("the emission stamp is written post-commit — await it, never read it bare")
+                    .isNotNull();
+                assertThat(((java.sql.Timestamp) latencyStamp.get("generated_at")).toInstant())
+                    .as("latency instrumentation never rewrites the deterministic bar-bucket instant")
+                    .isEqualTo(row.generatedAt().toInstant());
+                assertThat(((java.sql.Timestamp) latencyStamp.get("emitted_at")).toInstant())
+                    .isEqualTo(LIVE_NOW.toInstant());
+                assertThat(latencyStamp.get("emit_latency_ms")).isEqualTo(0L);
+                assertThat(barToEmit.count())
+                    .as("this method's ENTRY recorded exactly one bar-to-emit sample")
+                    .isEqualTo(emitsBefore + 1);
+              });
 
       // chip task_37ee83e0: the per-outcome counters are wired on the LIVE eval path (not just the
       // classifier), and EVERY tag is pre-registered at boot — a not-yet-happened outcome must
@@ -395,12 +450,49 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       assertThat(meterRegistry.find("ay_signal_eval_outcome_total").counters())
           .as("every outcome tag exists from boot, even at zero")
           .hasSize(SignalEngine.Outcome.values().length);
-      Counter fired =
-          meterRegistry.find("ay_signal_eval_outcome_total").tag("outcome", "fired").counter();
-      assertThat(fired).isNotNull();
-      assertThat(fired.count())
-          .as("the bar that emitted the signal above counted as an outcome")
-          .isGreaterThanOrEqualTo(1.0);
+      // AWAITED, not asserted outright: the emit (which persists the row this test already awaited
+      // above) happens INSIDE decideEntry, while the outcome counter increments at its CALL SITE —
+      // SignalEngine "THE ONLY increment site", strictly after decideEntry returns. The await on the
+      // persisted row therefore unblocks in the MIDDLE of that window, and everything still pending
+      // on the single signal-eval thread sits inside it: the emitted_at UPDATE + timer record, a
+      // conditional fired-diagnostic UPDATE, a real Redis publish, and a SYNCHRONOUS SignalEmitted
+      // fan-out to four listeners (one of which issues further DB queries). A bare assertion here
+      // races all of that and reads fired==0.
+      //
+      // Observed ~1-in-1230 on a full-suite run and never in isolation: 54 IT classes sharing the
+      // base and many Spring contexts change surefire scheduling and machine load, whereas one class
+      // in a near-idle JVM closes the window before the assertion. (NOT a JaCoCo-instrumentation
+      // difference — `prepare-agent` has no <phase>, so it binds to `initialize` and instruments
+      // `test` identically; only the report/check goals are verify-bound, and they run after tests.)
+      // Awaiting closes the window without weakening the assertion — a counter that never increments
+      // still fails, and an undercount can never be silent: the increment is unconditional after
+      // decideEntry, and a throw in between is caught at SignalEngine:1394-1401, which bumps
+      // ay_signal_eval_failures_total AND logs ERROR. 10s matches this class's untilAsserted
+      // convention (:1373); its GATING awaits use 20s, the consistent bump if CI ever flakes here.
+      //
+      // The await stays, and it is asserted as a DELTA off `firedBefore` rather than as an absolute
+      // `>= 1`: the two are orthogonal fixes for two different ways this line reads a number it did
+      // not cause. The await covers the RACE (the increment has not landed YET); the delta covers
+      // the shared-registry read (some other emit in this context already put it above 1, so an
+      // absolute floor would pass without this method's bar ever being counted). Neither weakens
+      // the other — a counter that never increments still fails, now after 10s instead of at once.
+      // The failure message carries the whole outcome map plus ay_signal_eval_failures_total so the
+      // three states behind a flat `fired` are distinguishable from the surefire report alone: a
+      // DIFFERENT outcome tag moved (the bar evaluated and did not fire), evalFailures moved (the
+      // evaluation threw — SignalEngine:1394-1401), or nothing moved anywhere (the counter was never
+      // reached). The bare number said none of that.
+      await()
+          .atMost(Duration.ofSeconds(10))
+          .untilAsserted(
+              () ->
+                  assertThat(fired.count())
+                      .as(
+                          "the bar that emitted the signal above counted as an outcome"
+                              + " (before=%s, outcomes=%s, evalFailures=%s)",
+                          firedBefore,
+                          engine.outcomeSnapshot().counts(),
+                          evalFailures.count())
+                      .isGreaterThanOrEqualTo(firedBefore + 1.0));
 
       // renderer invariant on the persisted breakdown
       BigDecimal contributions = BigDecimal.ZERO;
@@ -415,9 +507,16 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
               .subtract(reconstructed).abs())
           .isLessThan(new BigDecimal("0.0000001"));
 
-      // the channel payload carries the SAME breakdown (divergence = FAIL criterion)
-      await().atMost(Duration.ofSeconds(10)).until(() -> !channelPayloads.isEmpty());
-      var payload = objectMapper.readTree(channelPayloads.get(0));
+      // the channel payload carries the SAME breakdown (divergence = FAIL criterion). Selected BY
+      // SIGNAL ID, never by index 0: SignalPublisher.CHANNEL is one fixed channel name
+      // (SignalPublisher:24) on the SINGLETON Redis shared by every IT Spring context in the fork
+      // (StrategySignalIntegrationTestBase:31), and cached contexts keep publishing after their own
+      // class finishes — so the first frame this listener sees need not be ours. Same order
+      // dependency the counter assertions above were just hardened against.
+      await()
+          .atMost(Duration.ofSeconds(10))
+          .until(() -> publishedFrame(channelPayloads, row.id()).isPresent());
+      JsonNode payload = publishedFrame(channelPayloads, row.id()).orElseThrow();
       assertThat(payload.path("scoreBreakdown")).isEqualTo(row.scoreBreakdown());
       assertThat(payload.path("strategyId").asText()).isEqualTo("engine-it-momentum");
       assertThat(payload.path("version").asText()).isEqualTo("1.0.0");
@@ -506,7 +605,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     // set but NOT the loaded set. The 20s reconcile must compare the published set against the
     // last-reload SNAPSHOT (which includes it), NOT the loaded subset — otherwise loaded < published
     // reads as perpetual "drift" and the engine reloads all strategies every 20s forever.
-    UUID swingId = (UUID) registryService.create("Engine IT Swing", null, null, SWING_YAML).get("id");
+    UUID swingId = (UUID) registryService.create("Engine IT Swing", null, null, SWING_YAML).id();
     registryService.publish(swingId, null, null);
     engine.reload();
 
@@ -521,14 +620,13 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     // reconcile filters on (enabled && publishedVersionId). Trace: publish → loaded → DISABLE →
     // audit row + unloaded + reconcile CONVERGES (must not regress the #579 loop) → ENABLE → reloaded.
     UUID id =
-        (UUID)
-            registryService
+                    registryService
                 .create(
                     "Engine IT Toggle", null, null,
                     STRATEGY_YAML
                         .replace("id: engine-it-momentum", "id: engine-it-toggle")
                         .replace("name: \"Engine IT Momentum\"", "name: \"Engine IT Toggle\""))
-                .get("id");
+                .id();
     registryService.publish(id, null, null);
     engine.reload();
     assertThat(engine.loadedSlugs()).contains("engine-it-toggle"); // enabled + published → loaded
@@ -559,10 +657,9 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
   void kiteConnectedRetriesUntilAColdStartUniverseBecomesAvailable() {
     FUTURES_UNIVERSE_AVAILABLE.set(false);
     UUID id =
-        (UUID)
-            registryService
+                    registryService
                 .create("Engine IT Coldstart Retry", null, null, COLD_START_RETRY_YAML)
-                .get("id");
+                .id();
     registryService.publish(id, null, null);
     StrategyRepository.StrategyRow strategy = repository.findById(id).orElseThrow();
     StrategyRepository.VersionRow version =
@@ -599,6 +696,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
             mock(RejectionWriter.class),
             mock(RiskSuppressionWriter.class),
             mock(CompositeRejectionWriter.class),
+            mock(ExitOracleShadowWriter.class),
             java.util.Optional.empty(),
             mock(org.springframework.transaction.PlatformTransactionManager.class),
             60,
@@ -635,8 +733,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
   void kiteConnectedReloadsStrategiesSkippedDuringColdStartButTokenExpiredDoesNot() {
     FUTURES_UNIVERSE_AVAILABLE.set(false);
     UUID id =
-        (UUID)
-            registryService.create("Engine IT Coldstart", null, null, COLD_START_YAML).get("id");
+                    registryService.create("Engine IT Coldstart", null, null, COLD_START_YAML).id();
     registryService.publish(id, null, null);
     engine.reload();
 
@@ -1264,8 +1361,150 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     }
   }
 
+  /**
+   * Chip task_f10a03, residual half — THE WIN. A FLAPPING universe (one strategy resolving
+   * differently on the next attempt) carries a DIFFERENT identity, so the {@code @Order(19)}
+   * equality early-return does not fire and the install path runs. Under the old unconditional
+   * {@code bankCache.clear()} that ONE strategy's flip cold-started EVERY other strategy's warm
+   * ta4j banks — the residual thrash #892 could not reach, since {@code retainLastGood} only makes
+   * a STABLE outage identity-equal.
+   *
+   * <p>Asserts both directions inside ONE reload, which is what makes it discriminating: the
+   * untouched strategy's bank is RETAINED (red against {@code clear()} — the key is gone) and the
+   * flipper's own now-unmintable bank is EVICTED (red against a retain-everything predicate).
+   */
+  @Test
+  @Order(23)
+  @SuppressWarnings("unchecked")
+  void aFlappingUniverseNoLongerColdStartsEveryOtherStrategysBanks() {
+    StrategyRepository.StrategyRow stable =
+        uniquePublishedRow(KEEP_BEST_A_YAML, "engine-it-flap-stable", "Flap Stable");
+    StrategyRepository.StrategyRow flapping =
+        uniquePublishedRow(KEEP_BEST_B_YAML, "engine-it-flap-flip", "Flap Flip");
+    StrategyRepository isolatedRegistry = mock(StrategyRepository.class);
+    when(isolatedRegistry.listAll()).thenReturn(List.of(stable, flapping));
+    when(isolatedRegistry.findVersionById(stable.publishedVersionId()))
+        .thenReturn(repository.findVersionById(stable.publishedVersionId()));
+    when(isolatedRegistry.findVersionById(flapping.publishedVersionId()))
+        .thenReturn(repository.findVersionById(flapping.publishedVersionId()));
+
+    AtomicBoolean flipped = new AtomicBoolean(false);
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              boolean isFlapper = KEEP_BEST_B_UNDERLYING.equals(invocation.<String>getArgument(1));
+              String symbol = isFlapper && flipped.get() ? "SIGFLAP" : "SIGTEST";
+              return Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", symbol)));
+            });
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry, isolatedResolver);
+    try {
+      isolatedEngine.start();
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(stable.slug(), flapping.slug());
+
+      Map<String, Object> banks =
+          (Map<String, Object>) ReflectionTestUtils.getField(isolatedEngine, "bankCache");
+      // Keys built through the PRODUCTION helper, so this can never assert against a shape the
+      // engine does not actually mint (SignalEngine.evaluateAtBarClose uses the same method).
+      String stableKey = SignalEngine.bankKey(stable.publishedVersionId(), "NSE", "SIGTEST");
+      String flapperKeyBeforeFlip =
+          SignalEngine.bankKey(flapping.publishedVersionId(), "NSE", "SIGTEST");
+      banks.put(stableKey, mock(in.arthayantra.strategyengine.eval.IndicatorBank.class));
+      banks.put(flapperKeyBeforeFlip, mock(in.arthayantra.strategyengine.eval.IndicatorBank.class));
+
+      flipped.set(true);
+      isolatedEngine.reload();
+
+      // Both still loaded — this is a UNIVERSE flip, not a drop; the reload installed.
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(stable.slug(), flapping.slug());
+      // THE WIN: the strategy that did not change keeps its warm bank.
+      assertThat(banks).containsKey(stableKey);
+      // ...and the one that DID change still has its stale bank evicted.
+      assertThat(banks).doesNotContainKey(flapperKeyBeforeFlip);
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * Chip task_f10a03, residual half — THE HAZARD SIDE, and the one worth more effort. UNDER-eviction
+   * serves a stale warm indicator bank to live signal evaluation: wrong values, silently, with every
+   * test green and the engine reporting healthy. So eviction is pinned for BOTH shapes that must
+   * still invalidate — a universe member LEAVING, and a real published-VERSION bump — each paired in
+   * the same reload with a key that MUST survive, so neither half can pass under a
+   * clear-everything or a retain-everything predicate.
+   */
+  @Test
+  @Order(24)
+  @SuppressWarnings("unchecked")
+  void aVersionBumpAndADepartedUniverseMemberStillEvictTheirBanks() {
+    StrategyRepository.StrategyRow booted =
+        uniquePublishedRow(COLD_START_YAML, "engine-it-evict", "Evict");
+    AtomicReference<StrategyRepository.StrategyRow> currentRow = new AtomicReference<>(booted);
+    StrategyRepository isolatedRegistry = mock(StrategyRepository.class);
+    when(isolatedRegistry.listAll()).thenAnswer(invocation -> List.of(currentRow.get()));
+    when(isolatedRegistry.findVersionById(any(UUID.class)))
+        .thenAnswer(invocation -> repository.findVersionById(invocation.getArgument(0)));
+
+    AtomicBoolean memberLeft = new AtomicBoolean(false);
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation ->
+                memberLeft.get()
+                    ? Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")))
+                    : Optional.of(
+                        List.of(
+                            new StrategyDefinition.InstrumentRef("NSE", "SIGTEST"),
+                            new StrategyDefinition.InstrumentRef("NSE", "SIGLEAVE"))));
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry, isolatedResolver);
+    try {
+      isolatedEngine.start();
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(booted.slug());
+
+      Map<String, Object> banks =
+          (Map<String, Object>) ReflectionTestUtils.getField(isolatedEngine, "bankCache");
+      String v1Stay = SignalEngine.bankKey(booted.publishedVersionId(), "NSE", "SIGTEST");
+      String v1Leave = SignalEngine.bankKey(booted.publishedVersionId(), "NSE", "SIGLEAVE");
+      banks.put(v1Stay, mock(in.arthayantra.strategyengine.eval.IndicatorBank.class));
+      banks.put(v1Leave, mock(in.arthayantra.strategyengine.eval.IndicatorBank.class));
+
+      // (a) A universe member leaves — same version, one instrument fewer.
+      memberLeft.set(true);
+      isolatedEngine.reload();
+      assertThat(banks).doesNotContainKey(v1Leave);
+      assertThat(banks).containsKey(v1Stay);
+
+      // (b) A REAL published-version bump: new draft + publish moves published_version_id, so the
+      // v1-keyed bank can never be minted again. max_positions is deliberately inert w.r.t. the
+      // universe and the indicators — only the versionId is meant to move.
+      String bumpedYaml =
+          repository
+              .findVersionById(booted.publishedVersionId())
+              .orElseThrow()
+              .configYaml()
+              .replace("max_positions: 1", "max_positions: 2");
+      registryService.update(booted.id(), bumpedYaml, "patch", null);
+      registryService.publish(booted.id(), null, null);
+      StrategyRepository.StrategyRow bumped = repository.findById(booted.id()).orElseThrow();
+      assertThat(bumped.publishedVersionId()).isNotEqualTo(booted.publishedVersionId());
+      currentRow.set(bumped);
+
+      String v2Stay = SignalEngine.bankKey(bumped.publishedVersionId(), "NSE", "SIGTEST");
+      banks.put(v2Stay, mock(in.arthayantra.strategyengine.eval.IndicatorBank.class));
+      isolatedEngine.reload();
+
+      assertThat(banks).doesNotContainKey(v1Stay);
+      assertThat(banks).containsKey(v2Stay);
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
   private StrategyRepository.StrategyRow publishedRow(String yaml, String name) {
-    UUID id = (UUID) registryService.create("Engine IT Coldstart " + name, null, null, yaml).get("id");
+    UUID id = (UUID) registryService.create("Engine IT Coldstart " + name, null, null, yaml).id();
     registryService.publish(id, null, null);
     return repository.findById(id).orElseThrow();
   }
@@ -1293,9 +1532,9 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     // and EVERY bar keeps taking the entry branch — that is what makes evaluations == bars×2.
     String yamlA = SUM_YAML.formatted(slugA, "Engine IT Sum A " + suffix, symbol, "close > 1");
     String yamlB = SUM_YAML.formatted(slugB, "Engine IT Sum B " + suffix, symbol, "close > 100000");
-    UUID idA = (UUID) registryService.create("Engine IT Sum A " + suffix, null, null, yamlA).get("id");
+    UUID idA = (UUID) registryService.create("Engine IT Sum A " + suffix, null, null, yamlA).id();
     registryService.publish(idA, null, null);
-    UUID idB = (UUID) registryService.create("Engine IT Sum B " + suffix, null, null, yamlB).get("id");
+    UUID idB = (UUID) registryService.create("Engine IT Sum B " + suffix, null, null, yamlB).id();
     registryService.publish(idB, null, null);
 
     await()
@@ -1400,7 +1639,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         STRATEGY_YAML
             .replace("id: engine-it-momentum", "id: " + slug)
             .replace("name: \"Engine IT Momentum\"", "name: \"" + name + "\"");
-    UUID id = (UUID) registryService.create(name, null, null, yaml).get("id");
+    UUID id = (UUID) registryService.create(name, null, null, yaml).id();
     registryService.publish(id, null, null);
     UUID versionId = repository.findById(id).orElseThrow().publishedVersionId();
     engine.reload();
@@ -1447,6 +1686,26 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     } finally {
       risk.update(Books.OTHER, "kill_switch", "{\"enabled\":false}");
     }
+  }
+
+  /**
+   * The {@code signals}-channel frame for ONE signal id. The channel is fork-wide (one fixed name on
+   * the singleton Redis), so a collected frame may belong to another context entirely — match on the
+   * {@code id} SignalPublisher stamps (SignalPublisher:69) instead of taking whichever arrived first.
+   */
+  private Optional<JsonNode> publishedFrame(List<String> frames, long signalId) {
+    for (String frame : frames) {
+      JsonNode node;
+      try {
+        node = objectMapper.readTree(frame);
+      } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+        throw new IllegalStateException("unparseable signals frame: " + frame, e);
+      }
+      if (node.path("id").asLong() == signalId) {
+        return Optional.of(node);
+      }
+    }
+    return Optional.empty();
   }
 
   private double outcomeSum() {
@@ -1498,6 +1757,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         mock(RejectionWriter.class),
         mock(RiskSuppressionWriter.class),
         mock(CompositeRejectionWriter.class),
+        mock(ExitOracleShadowWriter.class),
         java.util.Optional.empty(),
         mock(org.springframework.transaction.PlatformTransactionManager.class),
         60,

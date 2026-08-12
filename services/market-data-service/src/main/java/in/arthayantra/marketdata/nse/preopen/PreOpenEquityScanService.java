@@ -39,10 +39,10 @@ public class PreOpenEquityScanService {
   /** One preserved scan row: the pre-open price vs prev close + the prev-day H/L break badge. */
   public record ScanRow(
       String symbol,
-      @Schema(types = {"number", "null"}) BigDecimal preOpenPrice,
-      @Schema(types = {"number", "null"}) BigDecimal prevClose,
-      @Schema(types = {"number", "null"}) BigDecimal change,
-      @Schema(types = {"number", "null"}) BigDecimal changePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal preOpenPrice,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal prevClose,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal change,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal changePct,
       @Schema(types = {"string", "null"}) String prevDayBreak) {}
 
   /** The typed GET envelope: a day's rows + the captured-session list (history picker). */

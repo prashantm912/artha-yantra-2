@@ -44,6 +44,112 @@ class SwingBatchRecorderTest {
     return d;
   }
 
+  /**
+   * {@code MarkerPolicy.NEVER} against the REAL recorder: no {@code swing_batch_runs} write at all,
+   * and {@code markerRecorded=false}.
+   *
+   * <p>⚠️ The catch-up suite only proves NEVER was PASSED — it mocks this class, so it cannot prove
+   * the suppression happens. Cross-vendor review flagged exactly that gap (2026-08-11), and it
+   * matters more than a usual coverage note: NEVER exists so a recovery pass on an UNKNOWN arming
+   * cannot write the marker that the next sweep would read as proof of settle-time arming. If the
+   * suppression silently stopped working, the catch-up would resume manufacturing its own
+   * authorisation and every test above would still pass.
+   */
+  @Test
+  void markerPolicyNeverWritesNoRunMarkerAtAll() {
+    SwingBatchEngine engine = mock(SwingBatchEngine.class);
+    SwingBatchRunRepository runs = mock(SwingBatchRunRepository.class);
+    SwingSellDecisionService sellDecisions = mock(SwingSellDecisionService.class);
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    SwingDoctrine doctrine = manasDoctrine();
+    when(engine.runDaily(eq(doctrine), any(), anyBoolean(), any(), anyBoolean()))
+        .thenReturn(
+            new SwingBatchEngine.SwingRun(
+                1, 0, 0, 2, 0, SwingBatchEngine.AdmissionProbe.empty()));
+
+    SwingBatchRecorder.RunOutcome outcome =
+        new SwingBatchRecorder(
+                engine, runs, sellDecisions, mock(FlagSnapshotService.class), new SwingRunMutex(),
+                events, Clock.systemUTC())
+            .runAndRecord(
+                doctrine,
+                LocalDate.of(2026, 7, 17),
+                false,
+                SwingBatchRecorder.MarkerPolicy.NEVER,
+                Optional.of(
+                    new SwingDoctrine.CandidateSnapshot(LocalDate.of(2026, 7, 17), List.of())));
+
+    assertThat(outcome.markerRecorded())
+        .as("NEVER must report the marker as NOT recorded, whatever the run did")
+        .isFalse();
+    verify(runs, never())
+        .record(
+            any(), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
+            anyInt(), anyInt(), anyBoolean(), any(), anyBoolean());
+  }
+
+  /**
+   * ⚠️ An entries-disabled run finished its EXITS, not the batch — and saying otherwise contradicts
+   * the coordinator.
+   *
+   * <p>Cross-vendor review Major. Every successful entries-disabled run published "<family> batch
+   * done"; moments later {@code SwingBatchCatchUp} publishes EXITS ONLY and leaves the session
+   * retryable, precisely because it is NOT done. Two alerts, opposite claims, same run — and the
+   * operator believes the first one they read.
+   *
+   * <p>It was invisible to the coordinator's own tests because those MOCK this recorder, so the
+   * contradiction only existed in production. That is the gap this test closes, and it is why the
+   * assertion lives here rather than there.
+   */
+  @Test
+  void anEntriesDisabledRunAnnouncesAnExitsPassNotACompletedBatch() {
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    runOnce(events, false);
+
+    ArgumentCaptor<SwingBatchAlert> captor = ArgumentCaptor.forClass(SwingBatchAlert.class);
+    verify(events).publishEvent(captor.capture());
+    assertThat(captor.getValue().title())
+        .as("the 16:00 settle and a screen-mismatched catch-up both run exits only")
+        .contains("exits pass complete")
+        .doesNotContain("batch done");
+  }
+
+  /** The other half: a real both-passes run must still say what it always said. */
+  @Test
+  void anEntriesEnabledRunStillAnnouncesTheBatchDone() {
+    // ⚠️ Without this the fix could have relabelled EVERY run and the test above would still pass.
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    runOnce(events, true);
+
+    ArgumentCaptor<SwingBatchAlert> captor = ArgumentCaptor.forClass(SwingBatchAlert.class);
+    verify(events).publishEvent(captor.capture());
+    assertThat(captor.getValue().title()).contains("batch done");
+  }
+
+  /** A clean run — no refusals, no skipped exits — with entries on or off. */
+  private static void runOnce(ApplicationEventPublisher events, boolean entriesEnabled) {
+    SwingBatchEngine engine = mock(SwingBatchEngine.class);
+    SwingDoctrine doctrine = manasDoctrine();
+    when(engine.runDaily(eq(doctrine), any(), anyBoolean(), any(), anyBoolean()))
+        .thenReturn(
+            new SwingBatchEngine.SwingRun(
+                1, 0, entriesEnabled ? 1 : 0, 2, 0, SwingBatchEngine.AdmissionProbe.empty()));
+    new SwingBatchRecorder(
+            engine,
+            mock(SwingBatchRunRepository.class),
+            mock(SwingSellDecisionService.class),
+            mock(FlagSnapshotService.class),
+            new SwingRunMutex(),
+            events,
+            Clock.systemUTC())
+        .runAndRecord(
+            doctrine,
+            LocalDate.of(2026, 7, 17),
+            entriesEnabled,
+            SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
+            Optional.of(new SwingDoctrine.CandidateSnapshot(LocalDate.of(2026, 7, 17), List.of())));
+  }
+
   @Test
   void runScheduledPublishesAFailedAlertWhenTheBatchThrows() {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);
@@ -145,7 +251,8 @@ class SwingBatchRecorderTest {
 
     verify(runs)
         .record(
-            "manas-arora", LocalDate.of(2026, 7, 12), 3, 12, 6, 1, 0, 5, 8, 6, 2, true, dropped);
+            "manas-arora", LocalDate.of(2026, 7, 12), 3, 12, 6, 1, 0, 5, 8, 6, 2, true, dropped,
+            true);
     // The batch also persists the sell-decision snapshot for the family it ran.
     verify(sellDecisions).persist(doctrine);
   }
@@ -173,7 +280,7 @@ class SwingBatchRecorderTest {
     verify(runs)
         .record(
             eq("manas-arora"), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
-            anyInt(), anyInt(), anyInt(), anyBoolean(), any());
+            anyInt(), anyInt(), anyInt(), anyBoolean(), any(), anyBoolean());
   }
 
   @Test
@@ -191,7 +298,7 @@ class SwingBatchRecorderTest {
         .thenReturn(result);
     when(runs.record(
             any(), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
-            anyInt(), anyInt(), anyBoolean(), any()))
+            anyInt(), anyInt(), anyBoolean(), any(), anyBoolean()))
         .thenReturn(true);
 
     SwingBatchRecorder recorder =
@@ -211,7 +318,40 @@ class SwingBatchRecorderTest {
     assertThat(emptyScreen.markerRecorded()).isTrue();
     verify(runs).record(
         any(), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
-        anyInt(), anyBoolean(), any());
+        anyInt(), anyBoolean(), any(), anyBoolean());
+  }
+
+  @Test
+  void aCapBoundRunSpellsOutTheAdmissionProbeInTheSummaryAlert() {
+    // "139 candidates, 0 entries" alone reads like a dead batch; the probe numbers are what say the
+    // funnel was full and the slot cap took none of it. An unbound run's text stays as it was.
+    SwingBatchEngine engine = mock(SwingBatchEngine.class);
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    SwingDoctrine doctrine = manasDoctrine();
+    when(engine.runDaily(doctrine, null, true))
+        .thenReturn(
+            new SwingBatchEngine.SwingRun(
+                4, 139, 0, 0, 0,
+                new SwingBatchEngine.AdmissionProbe(15, 17, 0, 17, true, List.of())))
+        .thenReturn(
+            new SwingBatchEngine.SwingRun(4, 139, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty()));
+
+    SwingBatchRecorder recorder =
+        new SwingBatchRecorder(
+            engine, mock(SwingBatchRunRepository.class), mock(SwingSellDecisionService.class),
+            mock(FlagSnapshotService.class), new SwingRunMutex(), events, Clock.systemUTC());
+    recorder.runAndRecord(doctrine);
+    recorder.runAndRecord(doctrine);
+
+    ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+    verify(events, org.mockito.Mockito.times(2)).publishEvent(captor.capture());
+    assertThat(((SwingBatchAlert) captor.getAllValues().get(0)).message())
+        .isEqualTo(
+            "139 candidates, 0 entries, 0 exits, 0 exit-skipped (4 strategies)"
+                + " — entry governor bound: 17 would-enter, 0 admitted, 17 dropped");
+    assertThat(((SwingBatchAlert) captor.getAllValues().get(1)).message())
+        .as("an unbound run's summary is unchanged")
+        .isEqualTo("139 candidates, 0 entries, 0 exits, 0 exit-skipped (4 strategies)");
   }
 
   @Test

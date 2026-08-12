@@ -8,6 +8,7 @@ import in.arthayantra.black76.Black76.OptionType;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient;
+import in.arthayantra.strategysignal.paper.ManasGoverningStopCache;
 import in.arthayantra.strategysignal.paper.PaperAccountService;
 import in.arthayantra.strategysignal.paper.PaperEmissionGuard;
 import in.arthayantra.strategysignal.paper.PaperOrderRejectionRecorder;
@@ -107,6 +108,7 @@ class SignalEngineTradeableLegTest {
         instruments,
         mock(ScalperAccountModel.class),
         mock(PaperPositionRepository.class),
-        mock(PaperOrderRejectionRecorder.class));
+        mock(PaperOrderRejectionRecorder.class),
+        new ManasGoverningStopCache());
   }
 }

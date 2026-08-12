@@ -55,6 +55,10 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
   private static final String FAMILY_UNIVERSE_MODE = "minervini_funnel";
 
   @Autowired private PaperReconciliationService reconciliation;
+  // The raw tallies, so the V059 exit test can assert the COUNT (1 for A, 0 for B) and not only the
+  // classification — a service-level assertion alone cannot tell "B's zero is now visible" from
+  // "the classifier changed".
+  @Autowired private PaperReconciliationRepository reconciliationRepo;
   @Autowired private PaperReconciliationScheduler scheduler; // present ⇒ bean loaded in engine-disabled ctx
   @Autowired private JdbcTemplate jdbc;
   @Autowired private MeterRegistry meters;
@@ -294,11 +298,19 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
   }
 
   /**
-   * Pins the ENTRY-TYPE condition — <b>live {@code paper_positions} id=28's exact shape</b> (an OPEN SELL
-   * in {@code manas-arora} linked to signals id=46, an <b>ACTIVE EXIT</b>, whose symbol's only ENTRY is
-   * EXPIRED). The anchor's status IS 'ACTIVE', so a status-only predicate reads it healthy and is blind to
-   * the ONE real live instance of this bug; {@code activeEntry} filters {@code signal_type='ENTRY'}, so an
-   * ACTIVE EXIT can never be returned as an anchor. The ACTIVE-ENTRY control keeps the assertion honest.
+   * Pins the ENTRY-TYPE condition. The shape is an OPEN SELL in {@code manas-arora} linked to an
+   * <b>ACTIVE EXIT</b> signal whose symbol's only ENTRY is EXPIRED: the anchor's status IS 'ACTIVE', so a
+   * status-only predicate reads it healthy, while {@code activeEntry} filters {@code signal_type='ENTRY'}
+   * and can never return an ACTIVE EXIT as an anchor. The ACTIVE-ENTRY control keeps the assertion honest.
+   *
+   * <p><b>HISTORICAL PROVENANCE — verify before citing as current.</b> This reproduced a real live row,
+   * {@code paper_positions} id=28 with signal id=46, and was written when that row was open. <b>Both facts
+   * have since changed and the instance is gone (re-verified 2026-08-02):</b> id=28 is CLOSED
+   * ({@code close_reason=MANUAL}, closed 2026-07-17 13:04 IST), signal 46 is now <b>EXPIRED</b> rather than
+   * ACTIVE, and <b>zero</b> currently-open positions match this shape. The scenario is still worth pinning —
+   * nothing prevents it recurring, and the detector exists precisely because a status-only test is blind to
+   * it — but it is no longer "the ONE real live instance", which is what the earlier wording claimed.
+   * The fixture below constructs the shape itself and does not depend on any live row.
    */
   @Test
   void activeExitAnchorIsFlaggedBecauseActiveEntryOnlyAnchorsEntries() {
@@ -540,6 +552,140 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
     assertThat(r.v5MissingExitOrder()).doesNotContain(posId);
   }
 
+  /**
+   * V059 — the exit-reconciliation FALSE NEGATIVE, and the reason this migration exists.
+   *
+   * <p>Two positions share one §F.6 open key {@code (book, exchange, tradingsymbol, side)} with
+   * OVERLAPPING lifetimes. Twin A settles; twin B is closed with NO settle leg of its own — a
+   * genuinely unsettled money position, exactly what the missing-exit class exists to report.
+   *
+   * <p>Before V059 the exit lateral matched purely on that key over the lifetime, so A's single
+   * settle order satisfied BOTH rows and {@code exitCount() == 0} — the ONLY missing-exit test —
+   * never fired for B. ⚠️ The inflation is not inert: it does not add a false alarm, it <b>DELETES a
+   * real one</b>, which is why an over-counting bug is worse here than an under-counting one.
+   *
+   * <p>{@code doSettle} now stamps {@code settles_position_id}, so A's order is claimed by A alone
+   * and B's zero becomes visible. The assertion on A is the discriminating half: the fix must
+   * separate the twins, not simply flag more rows — a change that reported BOTH as missing-exit
+   * would pass a B-only assertion while being just as wrong in the other direction.
+   *
+   * <p>The shape is seedable because {@code uq_paper_positions_open} (V021:15-16) is PARTIAL on
+   * {@code status='OPEN'}, so two CLOSED rows may share the key. Live, it is reached by #1275's
+   * strategy-scoped open key — MERGED, so this is a live shape, not a future one — and separately by
+   * a manual BUY/SELL coexistence, which needs no flag at all (see
+   * {@link #aShortsEntryLegDoesNotMaskALongsMissingExitOnTheSameInstrument}). An earlier version of
+   * this javadoc called #1275 "blocked on this change" and said F9 "would arm" the BUY/SELL route
+   * with "neither live today"; BOTH halves are false, and the sentence survived a sweep that
+   * corrected the same claim in the migration header and the repository javadoc — which is precisely
+   * the error this change spends twenty lines recording as a general lesson.
+   */
+  @Test
+  void aTwinsSettleOrderNoLongerMasksItsSiblingsMissingExit() {
+    OffsetDateTime opened = OffsetDateTime.now().minusHours(3);
+    OffsetDateTime closed = OffsetDateTime.now().minusHours(2);
+    String sym = sym("EXITTWIN");
+    // Overlapping lifetimes on ONE key: B opens before A closes, which is the whole premise.
+    long twinA = seedPosition(sym, "BUY", 10, "CLOSED", opened, closed, null, "book1");
+    long twinB =
+        seedPosition(sym, "BUY", 10, "CLOSED", opened.plusMinutes(10), closed, null, "book1");
+    seedOrder("book1", null, sym, "BUY", 10, opened);
+    seedOrder("book1", null, sym, "BUY", 10, opened.plusMinutes(10));
+    // ONE settle leg, linked to A. B is closed without ever settling.
+    seedOrder("book1", null, sym, "SELL", 10, closed, "EXIT", twinA);
+
+    ReconciliationResult result = run();
+    var recon =
+        reconciliationRepo
+            .closedPositionReconciliation(
+                OffsetDateTime.now().minusDays(1), OffsetDateTime.now().plusMinutes(1))
+            .stream()
+            .filter(r -> r.positionId() == twinA || r.positionId() == twinB)
+            .toList();
+
+    assertThat(recon).hasSize(2);
+    assertThat(exitCountOf(recon, twinA))
+        .as("A's own settle leg is still attributed to A")
+        .isEqualTo(1);
+    assertThat(exitCountOf(recon, twinB))
+        .as("B never settled and no longer borrows A's leg")
+        .isZero();
+    assertThat(result.v5MissingExitOrder()).contains(twinB).doesNotContain(twinA);
+    // The ENTRY lateral is still key-scoped and therefore still inflates across these twins (both
+    // report 20 against a 10-unit row). Out of scope here and deliberately not asserted — PR #1275
+    // scopes the entry side via signal → strategy.
+  }
+
+  /**
+   * V059 — the SELL-ENTRY masking route, which is reachable in production TODAY and has nothing to do
+   * with twins or with #1275.
+   *
+   * <p>{@code uq_paper_positions_open} keys on side, so a manual BUY and a manual SELL may hold ONE
+   * instrument concurrently on one book. The SELL position's ENTRY leg is a SELL order — and a SELL
+   * order satisfies the BUY position's {@code o.side <> p.side} exit predicate. So the short's entry
+   * fill masked the long's genuinely missing exit: the same false negative, through a door that no
+   * feature flag guards.
+   *
+   * <p>⚠️ Not hypothetical, and this test exists because the first version of this change claimed it
+   * was gated on F9 short-premium. It is not: {@code PaperController.OrderBody.side} is a free string
+   * with no BUY-only whitelist, the cockpit exposes a BUY/SELL hand ticket, and
+   * {@code PaperLedgerIntegrationTest} already opens AND closes manual SELL positions over HTTP. The
+   * containment claim was written from the engine path alone, where every ENTRY is indeed BUY.
+   *
+   * <p>Fixed by {@code leg_kind}: the legacy fallback fires only for a TRUE pre-V059 row, so a
+   * stamped ENTRY can never be counted as somebody else's exit. Note the obvious alternative —
+   * "exclude orders that have a {@code paper_position_lots} row" — could not work, because that lot
+   * write is deliberately fail-soft and a missing lot is an expected state, not evidence.
+   */
+  @Test
+  void aShortsEntryLegDoesNotMaskALongsMissingExitOnTheSameInstrument() {
+    OffsetDateTime opened = OffsetDateTime.now().minusHours(3);
+    OffsetDateTime closed = OffsetDateTime.now().minusHours(2);
+    String sym = sym("SELLENTRY");
+    // The LONG, closed with no settle leg of its own — a genuine missing exit.
+    long longPos = seedPosition(sym, "BUY", 10, "CLOSED", opened, closed, null, "book1");
+    seedOrder("book1", null, sym, "BUY", 10, opened, "ENTRY", null);
+    // A concurrent SHORT on the same instrument. Its ENTRY leg is a SELL order inside the long's
+    // lifetime — the masking row. Stamped ENTRY exactly as openManualOrder stamps it.
+    seedPosition(sym, "SELL", 10, "CLOSED", opened.plusMinutes(5), closed, null, "book1");
+    seedOrder("book1", null, sym, "SELL", 10, opened.plusMinutes(5), "ENTRY", null);
+
+    ReconciliationResult r = run();
+
+    assertThat(r.v5MissingExitOrder())
+        .as("the short's ENTRY leg is not the long's exit")
+        .contains(longPos);
+  }
+
+  /**
+   * V059's legacy half, and the control for the test above: the SAME fixture with the settle order's
+   * link left NULL — i.e. a row written before the column existed, which is what every historical
+   * order is. Both twins must still report an exit, exactly as they did pre-V059.
+   *
+   * <p>This is what makes the fix safe to deploy against the existing closed live positions with no
+   * backfill: an unlinked order still falls back to the key+lifetime rule, so nothing in history is
+   * newly flagged. Together the two tests are one A/B — identical rows, one column different,
+   * opposite outcomes — so a change that simply tightened the lateral for everyone would redden this
+   * one. (The stronger guarantee is structural rather than count-based and needs no live figure: a
+   * position already CLOSED at migration time has a window ending at its {@code closed_at}, and every
+   * linked order is written after that, so no linked order can ever fall inside a historical window.)
+   */
+  @Test
+  void anUnlinkedLegacyExitOrderStillMatchesTheOldKeyAndLifetimeRule() {
+    OffsetDateTime opened = OffsetDateTime.now().minusHours(3);
+    OffsetDateTime closed = OffsetDateTime.now().minusHours(2);
+    String sym = sym("EXITLEGACY");
+    long twinA = seedPosition(sym, "BUY", 10, "CLOSED", opened, closed, null, "book1");
+    long twinB =
+        seedPosition(sym, "BUY", 10, "CLOSED", opened.plusMinutes(10), closed, null, "book1");
+    seedOrder("book1", null, sym, "BUY", 10, opened);
+    seedOrder("book1", null, sym, "BUY", 10, opened.plusMinutes(10));
+    seedOrder("book1", null, sym, "SELL", 10, closed); // NO link — a pre-V059 row.
+
+    ReconciliationResult r = run();
+
+    assertThat(r.v5MissingExitOrder()).doesNotContain(twinA, twinB);
+  }
+
   @Test
   void straddleTwoLegSignalIsNotFlagged() {
     // Benign non-1:1: one signal opens TWO positions (CE + PE, distinct symbols) — each leg reconciles
@@ -638,6 +784,21 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
   }
 
   // ── seed helpers ────────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * The exit tally of ONE position, by id. Extracting each row explicitly rather than asserting
+   * {@code anySatisfy} over the pair matters: an {@code anySatisfy} that carried the id check inside
+   * the lambda would still pass if the expected row were missing entirely, since a sibling row could
+   * satisfy it.
+   */
+  private static long exitCountOf(
+      List<PaperReconciliationRepository.ClosedPositionRecon> rows, long positionId) {
+    return rows.stream()
+        .filter(r -> r.positionId() == positionId)
+        .findFirst()
+        .orElseThrow(() -> new AssertionError("no reconciliation row for position " + positionId))
+        .exitCount();
+  }
 
   private String sym(String tag) {
     return PREFIX + tag + "-" + UUID.randomUUID().toString().substring(0, 6);
@@ -775,13 +936,35 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
     return id == null ? 0 : id;
   }
 
+  /** A genuine PRE-V059 row: no leg discriminator, no link — the shape every historical order has. */
   private void seedOrder(
       String book, Long signalId, String sym, String side, long qty, OffsetDateTime filledAt) {
+    seedOrder(book, signalId, sym, side, qty, filledAt, null, null);
+  }
+
+  /**
+   * As above, plus V059's leg discriminator and exact exit linkage.
+   *
+   * <p>{@code legKind} is what separates a LEGACY row from a post-V059 ENTRY fill — both carry a null
+   * link, and only the discriminator tells them apart, which is exactly why the reconciler needs it
+   * stored rather than inferred. {@code "ENTRY"} is what the manual/engine open path stamps;
+   * {@code "EXIT"} plus a position id is what {@code doSettle} stamps.
+   */
+  private void seedOrder(
+      String book,
+      Long signalId,
+      String sym,
+      String side,
+      long qty,
+      OffsetDateTime filledAt,
+      String legKind,
+      Long settlesPositionId) {
     jdbc.update(
         """
         INSERT INTO paper_orders
-          (book, signal_id, exchange, tradingsymbol, side, qty, status, placed_at, filled_at, fill_price)
-        VALUES (?, ?, 'NFO', ?, ?, ?, 'FILLED', ?, ?, 100.0000)
+          (book, signal_id, exchange, tradingsymbol, side, qty, status, placed_at, filled_at,
+           fill_price, leg_kind, settles_position_id)
+        VALUES (?, ?, 'NFO', ?, ?, ?, 'FILLED', ?, ?, 100.0000, ?, ?)
         """,
         book,
         signalId,
@@ -789,7 +972,9 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
         side,
         qty,
         filledAt,
-        filledAt);
+        filledAt,
+        legKind,
+        settlesPositionId);
   }
 
   private int countRuns() {

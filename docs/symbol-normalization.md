@@ -73,6 +73,49 @@ tradingsymbol; index derivatives → `NSE`, BSE → `BFO`).
   mirror). A renamed/removed/retyped field → ntfy critical (missing/type-change) or warning (added), so a
   source changing a name can't silently corrupt the feed.
 
+## A tradingsymbol that CHANGES while the company keeps trading
+
+Everything above answers "the same instrument, named differently by three sources at the same
+moment". It does **not** answer "the same listing, renamed by the exchange" — NSE renames ~59 tickers
+a year (measured over the 13.5 months of `nse_eod_bhavcopy` that exist), and on the day it happens
+`marketdata.instruments` tombstones the old row (`is_active=false`) and admits the new one as a
+brand-new PK with a fresh `first_seen_at`. **Nothing linked them.** The cost lands on the equity
+screens, which require 252 sessions over a trailing 420-day window: a successor accrues from zero and
+cannot re-enter for ~a year, even though the history exists in the database under the retired key.
+61 symbols were invisible for that reason on 2026-08-03 (N2 / #1285).
+
+`marketdata.symbol_lineage` (V055) records those links — **as DATA, never as identity**:
+
+- **The canonical key is unchanged.** It is still `(exchange, tradingsymbol)`. Lineage is a
+  *view-time join* a reader opts into when it wants depth; it is not consulted by the live feed, the
+  ticker, the order path, or any cross-source mapper, and a reader that does not join it behaves
+  byte-identically to before.
+- **Derived, not transcribed** (`SymbolLineageDetector`): the successor's first-bar `prev_close`
+  equals the predecessor's last-bar `close_price` exactly, within 5 sessions, 1:1 or dropped.
+- **BSE `scrip_code` is the independent check, and it can REFUTE, not just confirm.** One scrip
+  carrying two tickers is a rename observed without reference to any NSE price ⇒ `confirmed`.
+  Neither ticker on BSE ⇒ `inferred` (nothing to check). **Both tickers on BSE under DIFFERENT
+  scrip_codes ⇒ `refuted`** — BSE contradicts continuity, and the pair is withheld automatically.
+  Measured across all 66 pairs: 58 / 6 / 2, and the 2 are `CREATIVE→CNL` and `WORTH→WORTHPERI`,
+  amalgamations whose predecessors **never stopped** (both still print on BSE; they delisted from
+  NSE only). `status` is a one-way ratchet — the detector may demote `ACTIVE→WITHHELD`, never promote.
+- **Biased toward false negatives on purpose.** A wrong pair merges two unrelated companies' price
+  histories into an owner-facing screen, so every ambiguity resolves to DROP. Known misses: a switch
+  across a suspension longer than 5 sessions, concurrent-trading renames, anything before the
+  bhavcopy floor.
+- **A demerger on the SAME listing is the one thing no signal separates** — `TATAMOTORS→TMPV` keeps
+  its BSE scrip AND its ISIN and stops printing on the switch date, so structurally it *is* a
+  rename; what changed is the asset mix behind it. The escape hatch is data: `status = 'WITHHELD'`,
+  seeded by V055, which the detector never promotes.
+- **The lineage read is not just a relabel.** `eod_corporate_actions` records an action under the
+  ticker live at its ex-date, so the CA plane is resolved through lineage on BOTH sides — otherwise
+  a split dated after a rename adjusts only the successor's bars and opens a price cliff at the
+  join (the audit-H6 defect `AdjustedEquityDailySql` exists to prevent). The walk is also bounded by
+  the screen date, so a historical replay never sees a ticker that did not exist yet.
+- `marketdata.symbol_rename_events` captures NSE "Change in Name" corporate actions (which arrive
+  with their ISIN) so detection stays current from a primary source instead of inference alone. The
+  feed names the COMPANY, not the predecessor ticker, so it corroborates rather than pairs.
+
 ## Known-thin areas
 
 - **Upstox F&O coverage** was index+cash only pre-W-U4; the F&O master lookup (`UpstoxFnoInstrumentKeys` /

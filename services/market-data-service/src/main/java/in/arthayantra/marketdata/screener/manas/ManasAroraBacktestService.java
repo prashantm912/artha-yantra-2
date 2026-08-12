@@ -74,45 +74,53 @@ public class ManasAroraBacktestService {
   // v6 slot sweep: does adding concurrent positions capture more of the signal flood?
   private static final int[] SLOT_SWEEP = {8, 12, 16, 20};
 
+  // @Schema(name) is load-bearing on the five records below: MinerviniBacktestService declares
+  // same-simple-name twins of each, and springdoc keys components by simple name — twins collapse
+  // to ONE spec schema on scan order (task_1c04803f; fields identical TODAY, but identical twins
+  // drift, and post-rename their nested $refs diverge anyway).
+
   /** Per-setup aggregate over the backtest window. Decimals ride as JSON strings. */
+  @Schema(name = "ManasSetupStat")
   public record SetupStat(
       String setup,
       int trades,
       int wins,
       int losses,
-      BigDecimal winRatePct,
-      BigDecimal avgWinPct,
-      BigDecimal avgLossPct,
-      BigDecimal payoffRatio,
-      BigDecimal expectancyPct,
-      BigDecimal profitFactor,
-      BigDecimal avgBarsHeld,
-      BigDecimal bestTradePct,
-      BigDecimal worstTradePct,
+      @Schema(type = "string") BigDecimal winRatePct,
+      @Schema(type = "string") BigDecimal avgWinPct,
+      @Schema(type = "string") BigDecimal avgLossPct,
+      @Schema(type = "string") BigDecimal payoffRatio,
+      @Schema(type = "string") BigDecimal expectancyPct,
+      @Schema(type = "string") BigDecimal profitFactor,
+      @Schema(type = "string") BigDecimal avgBarsHeld,
+      @Schema(type = "string") BigDecimal bestTradePct,
+      @Schema(type = "string") BigDecimal worstTradePct,
       int longestHoldBars,
       int shortestHoldBars,
       int maxWinStreak,
       int maxLossStreak,
-      BigDecimal stopOutPct) {}
+      @Schema(type = "string") BigDecimal stopOutPct) {}
 
   /** One calendar year's realised portfolio return + the trades that closed in it. */
-  public record YearReturn(int year, BigDecimal returnPct, int trades) {}
+  @Schema(name = "ManasYearReturn")
+  public record YearReturn(int year, @Schema(type = "string") BigDecimal returnPct, int trades) {}
 
   /** Portfolio-level stats for one variant (all setups + pyramid lots combined through the book). */
+  @Schema(name = "ManasPortfolioStat")
   public record PortfolioStat(
       int slots,
-      BigDecimal totalReturnPct,
-      BigDecimal cagrPct,
-      BigDecimal maxDrawdownPct,
-      BigDecimal sharpe,
+      @Schema(type = "string") BigDecimal totalReturnPct,
+      @Schema(type = "string") BigDecimal cagrPct,
+      @Schema(type = "string") BigDecimal maxDrawdownPct,
+      @Schema(type = "string") BigDecimal sharpe,
       int tradesTaken,
       int tradesSkipped,
-      BigDecimal avgExposurePct,
+      @Schema(type = "string") BigDecimal avgExposurePct,
       int months,
-      BigDecimal positiveMonthsPct,
-      BigDecimal bestMonthPct,
-      BigDecimal worstMonthPct,
-      BigDecimal avgMonthPct,
+      @Schema(type = "string") BigDecimal positiveMonthsPct,
+      @Schema(type = "string") BigDecimal bestMonthPct,
+      @Schema(type = "string") BigDecimal worstMonthPct,
+      @Schema(type = "string") BigDecimal avgMonthPct,
       List<YearReturn> annual) {}
 
   /**
@@ -120,6 +128,7 @@ public class ManasAroraBacktestService {
    * {@code portfolio} (FIFO, gross), {@code portfolioRsPriority} (RS-rank-priority slots, gross), and
    * {@code portfolioRsPriorityNet} (RS-priority, NET of turnover-scaled transaction costs).
    */
+  @Schema(name = "ManasReport")
   public record Report(
       String status,
       @Schema(types = {"string", "null"}) String variant,
@@ -134,14 +143,15 @@ public class ManasAroraBacktestService {
       @Schema(types = {"string", "null"}) String note) {}
 
   /** One slot-sweep row: the RS-priority portfolio at {@code slots} concurrent positions (v6). */
+  @Schema(name = "ManasSlotCell")
   public record SlotCell(
       int slots,
       int tradesTaken,
       int tradesSkipped,
-      BigDecimal grossCagrPct,
-      BigDecimal netCagrPct,
-      BigDecimal netDrawdownPct,
-      BigDecimal netSharpe) {}
+      @Schema(type = "string") BigDecimal grossCagrPct,
+      @Schema(type = "string") BigDecimal netCagrPct,
+      @Schema(type = "string") BigDecimal netDrawdownPct,
+      @Schema(type = "string") BigDecimal netSharpe) {}
 
   /**
    * The full multi-variant result: technical / rs / turnover / float / pyramiding A/B, side by side.

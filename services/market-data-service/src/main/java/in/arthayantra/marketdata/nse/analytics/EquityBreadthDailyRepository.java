@@ -24,7 +24,7 @@ public class EquityBreadthDailyRepository {
       int declines,
       int unchanged,
       int total,
-      @Schema(types = {"number", "null"}) BigDecimal avgDeliveryPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal avgDeliveryPct,
       @Schema(types = {"integer", "null"}) Integer aboveSma50,
       @Schema(types = {"integer", "null"}) Integer sma50Universe,
       @Schema(types = {"integer", "null"}) Integer aboveSma200,

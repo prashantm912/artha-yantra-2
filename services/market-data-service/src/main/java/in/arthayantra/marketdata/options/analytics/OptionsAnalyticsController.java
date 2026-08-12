@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Set;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -122,32 +123,76 @@ public class OptionsAnalyticsController {
   }
 
   /**
-   * The freshness envelope for an OI read: {@code live} provenance for a live read OR a past session
-   * whose captured rows carry IV (real snapshots); {@code derived} only when a fully-past read fell
-   * back to the candle-derived chain (iv/greeks all null — the §11.12 sanctioned inference, no reader
-   * plumbing). {@code asOf} + {@code complete} are supplied by the caller from the rows it already read.
+   * The freshness envelope for an OI read. {@code provenance} is the data KIND, INDEPENDENT of the
+   * query mode ({@link DataFreshness} — "a past captured session is still live provenance, just with
+   * a large staleSeconds"), so it is decided by the ROW PROVENANCE behind {@code rows}: {@code live}
+   * / {@code capture} when the buckets those rows span hold a LIVE-captured snapshot row, {@code
+   * derived} / {@code candle-derived} otherwise — i.e. when the read came from the candle-derived
+   * chain (no snapshot row at all) or from a candle-derived WARM ({@code source='UPSTOX_1M'}, the
+   * on-demand stock chain). "Holds a captured row" is not good enough and is not what is asked:
+   * the label tracks the row that WON each {@code last(…, ts)} group, so ONE derived leg, or one
+   * derived row arriving later in an otherwise-captured bucket, makes the whole read derived —
+   * see {@link OptionsSnapshotReader#allGroupsCaptured}. {@code asOf} + {@code complete} are
+   * supplied by the caller from the rows it already read.
+   *
+   * <p>This used to test {@code !q.live() && rows.stream().allMatch(p -> p.iv() == null)}, which was
+   * wrong in BOTH directions. (a) The {@code !q.live()} conjunct made {@code derived} unreachable in
+   * LIVE mode — the default — while {@code StockChainWarmService} deliberately writes candle-derived
+   * rows that ARE served today, so a warmed STOCK chain was published as {@code capture}/{@code live}
+   * (measured live 2026-08-03 on {@code SBIN}: both {@code /active-strikes} and {@code /oi-stats}).
+   * (b) {@code iv == null} is a SYMPTOM of derivation, not its identity: {@code
+   * CandleDerivedChainReader.enrichIv} back-solves ATM-band IVs, so derived rows can carry IV, and a
+   * genuine live capture whose solver produced nothing carries none. {@code source} is the identity —
+   * see {@link OptionsSnapshotReader#allGroupsCaptured}, which reuses the platform's existing
+   * capture-trust predicate for it.
    */
   private DataFreshness oiFreshness(
-      OiQuery q, OffsetDateTime asOf, List<OptionsSnapshotReader.StrikePoint> rows, boolean complete) {
-    boolean derived =
-        !q.live() && !rows.isEmpty() && rows.stream().allMatch(p -> p.iv() == null);
+      OiQuery q,
+      LocalDate expiry,
+      OffsetDateTime asOf,
+      List<OptionsSnapshotReader.StrikePoint> rows,
+      boolean complete) {
+    boolean derived = !rows.isEmpty() && !capturedBehind(q, expiry, rows);
     return derived
         ? DataFreshness.of(asOf, DataFreshness.DERIVED, "candle-derived", null, complete, clock)
         : DataFreshness.of(asOf, DataFreshness.LIVE, "capture", null, complete, clock);
   }
 
+  /**
+   * Did EVERY group behind the buckets {@code rows} span resolve to a LIVE-captured row? The window is
+   * taken from the rows themselves — {@code [oldest bucket, newest bucket + one interval)} — so it is
+   * exactly the window the reader served them from, and it holds no snapshot row at all on the
+   * candle-derived path (the facade only derives when the snapshot read came back EMPTY for that
+   * day), which is how that path still reads {@code derived}.
+   */
+  private boolean capturedBehind(
+      OiQuery q, LocalDate expiry, List<OptionsSnapshotReader.StrikePoint> rows) {
+    OffsetDateTime oldest = rows.get(0).bucket();
+    OffsetDateTime newest = oldest;
+    for (OptionsSnapshotReader.StrikePoint p : rows) {
+      if (p.bucket().isBefore(oldest)) {
+        oldest = p.bucket();
+      }
+      if (p.bucket().isAfter(newest)) {
+        newest = p.bucket();
+      }
+    }
+    return reader.allGroupsCaptured(
+        q.name(), expiry, q.interval(), oldest, newest.plus(q.interval().bucket()));
+  }
+
   public record OiStats(
-      @Schema(types = {"number", "null"}) BigDecimal pcr,
-      @Schema(types = {"number", "null"}) BigDecimal maxPain,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pcr,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal maxPain,
       long ceOi,
       long peOi,
       OffsetDateTime asOf,
       @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {}
 
   public record ActiveStrikesResponse(
-      @Schema(types = {"number", "null"}) BigDecimal sentimentPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal sentimentPct,
       // §18.6: the oipulse LEVEL-based sentiment beside the ΔOI-flow number, for the live compare.
-      @JsonInclude(JsonInclude.Include.NON_NULL) BigDecimal sentimentLevelPct,
+      @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(type = "string") BigDecimal sentimentLevelPct,
       List<StrikeView> items,
       @JsonInclude(JsonInclude.Include.NON_NULL) List<ActiveStrikeService.SentimentPoint>
               sentimentSeries,
@@ -161,7 +206,7 @@ public class OptionsAnalyticsController {
       OffsetDateTime asOf,
       @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {}
 
-  public record StrikeView(BigDecimal strike, long ceOi, long peOi) {}
+  public record StrikeView(@Schema(type = "string") BigDecimal strike, long ceOi, long peOi) {}
 
   /**
    * Interval deltas overlaid on a live chain leg (the §20.7.1 faithful columns the point-in-time
@@ -170,9 +215,9 @@ public class OptionsAnalyticsController {
    */
   public record LegDeltas(
       @Schema(types = {"integer", "null"}) Long oiChange,
-      @Schema(types = {"number", "null"}) BigDecimal oiChangePct,
-      @Schema(types = {"number", "null"}) BigDecimal ltpChange,
-      @Schema(types = {"number", "null"}) BigDecimal ltpChangePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal oiChangePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltpChange,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltpChangePct,
       OiInterpretation interpretation) {}
 
   /** A live chain leg (greeks/IV/OI/LTP from {@code /chain}) plus its interval deltas (or null). */
@@ -180,18 +225,31 @@ public class OptionsAnalyticsController {
       OptionsChainService.Leg leg, @Schema(types = {"object", "null"}) LegDeltas deltas) {}
 
   /** One faithful-chain row: CE | strike | PE, each leg enriched with deltas. */
-  public record ChainTableRow(BigDecimal strike, ChainTableLeg ce, ChainTableLeg pe) {}
+  public record ChainTableRow(@Schema(type = "string") BigDecimal strike, ChainTableLeg ce, ChainTableLeg pe) {}
 
-  /** The faithful Options Chain feed: the live chain header + enriched rows + the delta interval. */
+  /**
+   * The faithful Options Chain feed: the live chain header + enriched rows + the delta interval.
+   *
+   * <p>{@code lastCaptured} mirrors {@link OptionsChainService.Chain}: true ⇒ LIVE mode had no spot
+   * quote and the rows are the most recent CAPTURED chain, with {@code asOf} = the capture time —
+   * render it as an explicit staleness badge. It is orthogonal to {@code stale} (market not open),
+   * and always false in HISTORY mode, which is an explicit request for a past session rather than a
+   * degraded live read.
+   *
+   * <p>{@code riskFreeRate} is null in HISTORY mode ({@code historicalChainTable} has no live
+   * forward/rate context to project from, so {@code forward}/{@code riskFreeRate} both ride null) —
+   * only the LIVE path resolves it from the configured {@code artha.options.risk-free-rate}.
+   */
   public record ChainTable(
       String underlying,
       LocalDate expiry,
-      @Schema(types = {"number", "null"}) BigDecimal spot,
-      @Schema(types = {"number", "null"}) BigDecimal forward,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal forward,
       String forwardSource,
-      BigDecimal riskFreeRate,
-      @Schema(types = {"number", "null"}) BigDecimal pcr,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal riskFreeRate,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pcr,
       boolean stale,
+      boolean lastCaptured,
       OffsetDateTime asOf,
       String interval,
       List<ChainTableRow> rows,
@@ -200,13 +258,59 @@ public class OptionsAnalyticsController {
   // ── /multiple-oi (oipulse Multiple OI Chart): per-leg OI line + the underlying price line ────────────
 
   /** One bucket of a leg's OI line (null oi where the leg has no snapshot at that bucket). */
-  public record OiLinePoint(OffsetDateTime bucket, Long oi) {}
+  public record OiLinePoint(
+      OffsetDateTime bucket, @Schema(types = {"integer", "null"}) Long oi) {}
 
   /** One selected leg ("57200 CE") and its per-bucket OI series. */
   public record OiLeg(String leg, List<OiLinePoint> points) {}
 
-  /** One bucket of the underlying price (spot) reference line. */
-  public record SpotPoint(OffsetDateTime bucket, BigDecimal spot) {}
+  /**
+   * One bucket of the underlying price (spot) reference line (null where no bucket carried one).
+   * {@code spot} is a decimal STRING on the wire — {@code ArthaJacksonAutoConfiguration} serializes
+   * every {@code BigDecimal} via {@code ToStringSerializer}, so {@code number} would be a lie.
+   */
+  public record SpotPoint(
+      OffsetDateTime bucket, @Schema(type = "string", types = {"string", "null"}) BigDecimal spot) {}
+
+  /**
+   * {@code /oi-analysis}: the {@code {items}} envelope of raw per-strike chain points (D3 — was an
+   * opaque {@code Map}). Unconditional: the handler emits this one key on every path, including the
+   * no-snapshot path, whose {@code items} is simply empty.
+   */
+  public record OiAnalysis(List<OptionsSnapshotReader.StrikePoint> items) {}
+
+  /**
+   * {@code /oi-analysis/strike-series}: one strike's CE+PE points across the session buckets, plus
+   * the echo of the resolved query. D3 — was a 6-key {@code Map.of}, whose iteration order is
+   * JVM-salted, so this record NORMALISES the key order rather than preserving one (there was no
+   * stable emitted order to preserve); the key SET and every value are unchanged. Every component is
+   * non-null by construction — {@code Map.of} rejects nulls, so the pre-D3 handler would have thrown
+   * on any of them, and the only empty path throws a 422 before reaching here.
+   *
+   * <p>{@code strike} echoes the request's {@code BigDecimal} and so is a decimal STRING on the
+   * wire, not a number — see {@code ArthaJacksonAutoConfiguration}.
+   */
+  public record StrikeSeries(
+      List<OptionsSnapshotReader.StrikePoint> items,
+      String underlying,
+      LocalDate expiry,
+      @Schema(type = "string") BigDecimal strike,
+      String interval,
+      OffsetDateTime asOf) {}
+
+  /**
+   * {@code /multiple-oi}: the selected legs' OI lines + the one shared underlying-price line. D3 —
+   * was a {@code LinkedHashMap}, so its insertion order WAS the emitted order and is load-bearing:
+   * these components mirror it exactly ({@code items}, {@code spot}, then the query echo). All are
+   * non-null; the nullability lives one level down, in {@code OiLinePoint.oi}/{@code SpotPoint.spot}.
+   */
+  public record MultipleOi(
+      List<OiLeg> items,
+      List<SpotPoint> spot,
+      String underlying,
+      LocalDate expiry,
+      String interval,
+      OffsetDateTime asOf) {}
 
   @GetMapping("/oi-stats")
   public OiStats oiStats(
@@ -232,7 +336,7 @@ public class OptionsAnalyticsController {
     }
     OffsetDateTime asOf = latest.get(latest.size() - 1).bucket();
     BigDecimal pcr = OptionsChainService.pcr(ce, pe);
-    DataFreshness freshness = oiFreshness(q, asOf, latest, true);
+    DataFreshness freshness = oiFreshness(q, exp, asOf, latest, true);
     BigDecimal maxPain = MaxPainCalculator.maxPain(chain);
     // source.optionanalytics=upstox: replace the band-computed PCR/max-pain with Upstox's full-chain
     // values (ceOi/peOi stay native — Upstox exposes only the ratio). Any Upstox miss keeps native.
@@ -298,6 +402,8 @@ public class OptionsAnalyticsController {
   }
 
   /** One strike's interval OI move for the Interval-wise OI bars (e.g. {@code "57400 PE"}). */
+  // Keeps the plain `StrikeMove` component name: this record is the INCUMBENT owner of it, and the
+  // twin (OptionsDigestService.StrikeMove) is the one that got renamed (task_1c04803f).
   public record StrikeMove(String strike, long oiChange, OiInterpretation interpretation) {}
 
   /** Top OI gainer/loser strikes across three lookbacks (oipulse §options/interval-wise-oi). */
@@ -395,7 +501,7 @@ public class OptionsAnalyticsController {
             .map(s -> new StrikeView(s.strike(), s.ceOi(), s.peOi()))
             .toList();
     OffsetDateTime asOf = latest.get(latest.size() - 1).bucket();
-    DataFreshness freshness = oiFreshness(q, asOf, latest, true);
+    DataFreshness freshness = oiFreshness(q, exp, asOf, latest, true);
     if (buckets == null) {
       // NON_NULL on all series omits the keys, keeping the absent-buckets response byte-identical.
       return new ActiveStrikesResponse(
@@ -431,7 +537,7 @@ public class OptionsAnalyticsController {
 
   /** /oi-analysis: the data-table archetype source (per-strike rows for the latest bucket). */
   @GetMapping("/oi-analysis")
-  public Map<String, Object> oiAnalysis(
+  public OiAnalysis oiAnalysis(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
@@ -440,7 +546,7 @@ public class OptionsAnalyticsController {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
     LocalDate exp = requireExpiry(q);
     List<OptionsSnapshotReader.StrikePoint> latest = reader.latest(q.name(), exp, q.interval(), q.date());
-    return Map.of("items", latest); // {items:[...]} envelope (CLAUDE.md)
+    return new OiAnalysis(latest); // {items:[...]} envelope (CLAUDE.md)
   }
 
   /**
@@ -477,7 +583,7 @@ public class OptionsAnalyticsController {
     if (!q.live() && q.date() != null) {
       return historicalChainTable(q, exp, deltas);
     }
-    OptionsChainService.Chain chain = chainService.chain(q.name(), exp);
+    OptionsChainService.Chain chain = chainService.chainOrLastCaptured(q.name(), exp);
     List<ChainTableRow> rows = new ArrayList<>(chain.rows().size());
     for (OptionsChainService.StrikeRow r : chain.rows()) {
       rows.add(
@@ -495,12 +601,19 @@ public class OptionsAnalyticsController {
         chain.riskFreeRate(),
         chain.pcr(),
         chain.stale(),
+        chain.lastCaptured(),
         chain.asOf(),
         q.interval().token(),
         rows,
-        // Live black76 chain — complete unless the underlying quote is stale (off-hours / feed gap).
+        // Live black76 chain — complete unless the market is closed OR the chain degraded to the
+        // last captured book (no live spot); asOf is then the capture time, so staleSeconds is real.
         DataFreshness.of(
-            chain.asOf(), DataFreshness.LIVE, "capture", null, !chain.stale(), clock));
+            chain.asOf(),
+            DataFreshness.LIVE,
+            "capture",
+            null,
+            !chain.stale() && !chain.lastCaptured(),
+            clock));
   }
 
   /**
@@ -511,7 +624,7 @@ public class OptionsAnalyticsController {
    * when that strike has no snapshots; 422 only when the underlying has none at all.
    */
   @GetMapping("/oi-analysis/strike-series")
-  public Map<String, Object> strikeSeries(
+  public StrikeSeries strikeSeries(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
@@ -531,13 +644,7 @@ public class OptionsAnalyticsController {
     OffsetDateTime to = newest.plus(q.interval().bucket());
     List<OptionsSnapshotReader.StrikePoint> series =
         reader.strikeSeries(q.name(), exp, strike, q.interval(), from, to);
-    return Map.of(
-        "items", series,
-        "underlying", q.name(),
-        "expiry", exp,
-        "strike", strike,
-        "interval", q.interval().token(),
-        "asOf", newest);
+    return new StrikeSeries(series, q.name(), exp, strike, q.interval().token(), newest);
   }
 
   /**
@@ -545,10 +652,10 @@ public class OptionsAnalyticsController {
    * user-selected option legs' OI lines (right axis) + the underlying price line (left axis) over the
    * session. {@code leg} is a REPEATED param ({@code ?leg=57200 CE&leg=57100 PE}). One snapshot read
    * (all strikes) is folded per leg + a single spot line (the chain-wide underlying price per bucket).
-   * Map envelope. 400 when no leg is given; 422 only when the underlying has no snapshot at all.
+   * 400 when no leg is given; 422 only when the underlying has no snapshot at all.
    */
   @GetMapping("/multiple-oi")
-  public Map<String, Object> multipleOi(
+  public MultipleOi multipleOi(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
@@ -601,14 +708,8 @@ public class OptionsAnalyticsController {
       spot.add(new SpotPoint(b, spotByBucket.get(b)));
     }
 
-    Map<String, Object> out = new LinkedHashMap<>();
-    out.put("items", items);
-    out.put("spot", spot);
-    out.put("underlying", q.name());
-    out.put("expiry", exp);
-    out.put("interval", q.interval().token());
-    out.put("asOf", newest);
-    return out;
+    // Component order mirrors the pre-D3 LinkedHashMap insertion order — see MultipleOi.
+    return new MultipleOi(items, spot, q.name(), exp, q.interval().token(), newest);
   }
 
   /** Parses a leg label ("57200 CE") into the snapshot join key; 400 on a malformed leg. */
@@ -806,24 +907,27 @@ public class OptionsAnalyticsController {
       @RequestParam BigDecimal strike,
       @RequestParam(required = false, defaultValue = "CE") String optionType,
       @RequestParam(required = false) String nearExpiry,
-      @RequestParam(required = false) String farExpiry,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate farExpiry,
       @RequestParam(required = false, defaultValue = "3") int interval) {
     OiQuery q = OiQuery.of(mode, name, date, null, nearExpiry);
-    java.time.LocalDate far =
-        farExpiry == null || farExpiry.isBlank() ? null : java.time.LocalDate.parse(farExpiry);
     return calendarSpreadChartService.chart(
-        q.name(), strike, optionType, q.expiry(), far, interval, q.date());
+        q.name(), strike, optionType, q.expiry(), farExpiry, interval, q.date());
   }
 
   /**
    * /options-chart: the oipulse Options Chart (plan §options/options-chart) — per LEG (Call + Put of one
    * {@code strike}) the option-premium candlestick + OI line (the FE adds VWAP + day H/L). One fetch
    * returns BOTH legs; the FE Show toggle picks which render. {@code interval} is RAW MINUTES
-   * (1/3/5/10/15/30/60). Map envelope (no typed schema). 422 on an unlisted strike, 400 on an off-set
-   * interval. The nullable header quote (off-hours) rides a LinkedHashMap (Map.of rejects nulls).
+   * (1/3/5/10/15/30/60). 422 on an unlisted strike, 400 on an off-set interval.
+   *
+   * <p>D3: this used to re-emit the service record field-by-field through a {@code LinkedHashMap}
+   * purely to carry the nullable header quote ({@code Map.of} rejects nulls). Jackson emits a record
+   * component whether or not it is null, so the record serves that need directly — and {@code
+   * OptOiChart}'s components were reordered to the map's ce/pe-first insertion order so the response
+   * stays byte-identical.
    */
   @GetMapping("/options-chart")
-  public Map<String, Object> optionsChart(
+  public OptionsOiChartService.OptOiChart optionsChart(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
@@ -831,21 +935,7 @@ public class OptionsAnalyticsController {
       @RequestParam BigDecimal strike,
       @RequestParam(required = false, defaultValue = "3") int interval) {
     OiQuery q = OiQuery.of(mode, name, date, null, expiry);
-    OptionsOiChartService.OptOiChart chart =
-        optionsOiChartService.chart(q.name(), q.expiry(), strike, interval, q.date());
-    Map<String, Object> out = new LinkedHashMap<>();
-    out.put("ce", chart.ce());
-    out.put("pe", chart.pe());
-    out.put("underlying", chart.underlying());
-    out.put("expiry", chart.expiry());
-    out.put("strike", chart.strike());
-    out.put("ceTradingsymbol", chart.ceTradingsymbol());
-    out.put("peTradingsymbol", chart.peTradingsymbol());
-    out.put("interval", chart.interval());
-    out.put("underlyingLtp", chart.underlyingLtp()); // nullable off-hours
-    out.put("underlyingDayOpen", chart.underlyingDayOpen()); // nullable off-hours
-    out.put("asOf", chart.asOf());
-    return out;
+    return optionsOiChartService.chart(q.name(), q.expiry(), strike, interval, q.date());
   }
 
   /**
@@ -904,7 +994,7 @@ public class OptionsAnalyticsController {
       }
     }
     OiTrendingService.TrendSeries out = trendingService.trending(filterToBasket(series, strikes));
-    return out.withFreshness(oiFreshness(q, out.asOf(), latest, true));
+    return out.withFreshness(oiFreshness(q, exp, out.asOf(), latest, true));
   }
 
   /** Restricts the series to the comma-separated strike basket; null/blank = the whole chain. */
@@ -928,20 +1018,26 @@ public class OptionsAnalyticsController {
 
   /**
    * /strike-session-stats: per-strike session OH/OL grading (Siva #2) for the {@code 2*window+1}
-   * strikes nearest the ATM. {@code window} default 3; {@code interval} (minutes) default = the
-   * snapshot capture cadence; {@code session} default = today IST. Empty items -> 200 (no error).
+   * strikes nearest the ATM. {@code window} default 3, must be {@code >= 0} (a negative value
+   * would make {@code Stream.limit} reject it, so it 400s here instead); {@code window=0} is a
+   * valid, distinct case — just the single nearest (ATM) strike. {@code interval} (minutes)
+   * default = the snapshot capture cadence; {@code session} default = today IST. Empty items ->
+   * 200 (no error).
    */
   @GetMapping("/strike-session-stats")
   public OpenHighStatsService.StrikeSessionStats strikeSessionStats(
       @RequestParam String underlying,
-      @RequestParam String expiry,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate expiry,
       @RequestParam(required = false) Integer window,
       @RequestParam(required = false) Integer interval,
-      @RequestParam(required = false) String session) {
-    LocalDate exp = LocalDate.parse(expiry);
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate session) {
+    if (window != null && window < 0) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "window must be >= 0");
+    }
+    LocalDate exp = expiry;
     int win = window == null ? 3 : window;
     int intervalMinutes = interval == null ? defaultSessionIntervalMinutes : interval;
-    LocalDate sess = session == null ? LocalDate.now(Ist.ZONE) : LocalDate.parse(session);
+    LocalDate sess = session == null ? LocalDate.now(Ist.ZONE) : session;
 
     List<OptionsSnapshotReader.PerStrikeSessionStat> stats =
         reader.sessionStats(underlying, exp, sess, intervalMinutes);
@@ -977,7 +1073,7 @@ public class OptionsAnalyticsController {
     if (latest.isEmpty()) {
       return heatmapService
           .fold(List.of(), null, heatmapWindow)
-          .withFreshness(oiFreshness(q, null, List.of(), false));
+          .withFreshness(oiFreshness(q, exp, null, List.of(), false));
     }
     OffsetDateTime newest = latest.get(0).bucket();
     LocalDate day = newest.atZoneSameInstant(Ist.ZONE).toLocalDate();
@@ -988,7 +1084,7 @@ public class OptionsAnalyticsController {
     BigDecimal spot = latestSpot(latest);
     BigDecimal atm = nearestListedStrike(series, spot);
     OiHeatmapService.Heatmap hm = heatmapService.fold(series, atm, heatmapWindow);
-    return hm.withFreshness(oiFreshness(q, hm.asOf(), latest, true));
+    return hm.withFreshness(oiFreshness(q, exp, hm.asOf(), latest, true));
   }
 
   /**
@@ -1233,8 +1329,8 @@ public class OptionsAnalyticsController {
             ? null
             : BigDecimal.valueOf(peOi).divide(BigDecimal.valueOf(ceOi), 4, RoundingMode.HALF_UP);
     return new ChainTable(
-        q.name(), exp, spot, null, null, null, pcr, false, asOf, q.interval().token(), rows,
-        oiFreshness(q, asOf, latest, true));
+        q.name(), exp, spot, null, null, null, pcr, false, false, asOf, q.interval().token(), rows,
+        oiFreshness(q, exp, asOf, latest, true));
   }
 
   /** Builds a chain leg from a captured snapshot point (greeks null — the projection carries IV only). */

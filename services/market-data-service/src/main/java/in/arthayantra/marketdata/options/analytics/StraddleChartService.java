@@ -60,12 +60,12 @@ public class StraddleChartService {
   /** One interval's combined straddle candle: summed OHLC + each leg's close + summed volume. */
   public record StraddleCandle(
       OffsetDateTime time,
-      BigDecimal open,
-      BigDecimal high,
-      BigDecimal low,
-      BigDecimal close,
-      BigDecimal ceClose,
-      BigDecimal peClose,
+      @Schema(type = "string") BigDecimal open,
+      @Schema(type = "string") BigDecimal high,
+      @Schema(type = "string") BigDecimal low,
+      @Schema(type = "string") BigDecimal close,
+      @Schema(type = "string") BigDecimal ceClose,
+      @Schema(type = "string") BigDecimal peClose,
       long volume) {}
 
   /**
@@ -77,15 +77,15 @@ public class StraddleChartService {
   public record StraddleChart(
       String underlying,
       LocalDate expiry,
-      BigDecimal callStrike,
-      BigDecimal putStrike,
+      @Schema(type = "string") BigDecimal callStrike,
+      @Schema(type = "string") BigDecimal putStrike,
       String interval,
-      @Schema(types = {"number", "null"}) BigDecimal underlyingLtp,
-      @Schema(types = {"number", "null"}) BigDecimal underlyingDayOpen,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal underlyingLtp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal underlyingDayOpen,
       OffsetDateTime asOf,
-      @Schema(types = {"number", "null"}) BigDecimal combinedVwap,
-      BigDecimal slBufferPoints,
-      @Schema(types = {"number", "null"}) BigDecimal slLevel,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal combinedVwap,
+      @Schema(type = "string") BigDecimal slBufferPoints,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal slLevel,
       List<StraddleCandle> items) {}
 
   private final InstrumentRepository instruments;

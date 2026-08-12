@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.futures.analytics;
 
 import in.arthayantra.marketdata.options.OiInterpretation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -35,15 +36,59 @@ public class FuturesBankAnalysisService {
   private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
   /** One bank's cell at one interval: cumulative LTP% / OI% + the per-interval 4-state interpretation. */
+  @Schema(types = {"object", "null"})
   public record BankAnalysisCell(
-      String bank, BigDecimal ltpPct, BigDecimal oiPct, OiInterpretation interpretation) {}
+      String bank,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltpPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal oiPct,
+      // NULLABLE ENUM — this annotation is only HALF the contract (cross-vendor review, 2026-07-30).
+      // `interp` is declared null and assigned only when `prev != null`, so it IS null for each
+      // bank's FIRST point, inside an otherwise non-null cell.
+      //
+      // The annotation supplies `type: ["string","null"]`. That alone is NOT enough: under JSON
+      // Schema 2020-12 `type` and `enum` BOTH apply, so a four-member enum still REJECTS null and a
+      // strict validator refuses a response the server legitimately emits. swagger-core does not
+      // emit the null member for a Java enum, so `NullableRefCustomizer.appendNullEnumMember` adds
+      // it at assembly time — response-only, and pinned by NullableRefCustomizerTest.
+      // Do NOT "simplify" by dropping either half; each is load-bearing.
+      @Schema(types = {"string", "null"}) OiInterpretation interpretation) {}
 
-  /** One matrix row: a snapshot bucket + a cell per bank in the configured column order (null = absent). */
+  /**
+   * One matrix row: a snapshot bucket + a cell per bank in the configured column order.
+   *
+   * <p>{@code cells} contains NULL ELEMENTS by design — the row loop does
+   * {@code cells.add(byBank.get(bank).get(b))}, which is null when that bank has no point at this
+   * bucket, and positional alignment with {@code banks} is the whole point of the matrix so the
+   * nulls cannot be filtered out. That IS expressed in the contract, just not on {@code items}:
+   * {@link BankAnalysisCell} is annotated nullable at the RECORD level, so the captured schema is
+   * {@code items: $ref BankAnalysisCell} where BankAnalysisCell itself is {@code type:
+   * ["object","null"]}, and the generated TS reads {@code BankAnalysisCell: {...} | null}.
+   *
+   * <p>⚠️ Do NOT "fix" this with {@code @ArraySchema(schema = @Schema(types = {"object","null"}))}.
+   * That was tried (2026-07-30) and it DESTROYS the $ref — items collapse to a bare
+   * {@code {"type":["object","null"]}} and the entire BankAnalysisCell shape disappears from the
+   * spec and the generated TS, trading a precise contract for total blindness about the element.
+   * Nullability on the referenced record is the correct seam here.
+   */
   public record BankAnalysisRow(OffsetDateTime bucket, List<BankAnalysisCell> cells) {}
 
   /** The matrix: the ordered bank columns + the newest-first rows + the latest bucket. */
   public record BankAnalysisMatrix(
-      List<String> banks, List<BankAnalysisRow> rows, OffsetDateTime asOf) {}
+      List<String> banks,
+      List<BankAnalysisRow> rows,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
+
+  /** The banks-analysis response, adding the selected interval to the matrix. */
+  public record BankAnalysisResponse(
+      List<String> banks,
+      List<BankAnalysisRow> rows,
+      String interval,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
+
+  /** Adds the requested interval without moving response-shape assembly into the controller. */
+  public BankAnalysisResponse response(BankAnalysisMatrix matrix, String interval) {
+    return new BankAnalysisResponse(matrix.banks(), matrix.rows(), interval, matrix.asOf());
+  }
 
   /**
    * Pivots a multi-underlying day series into the bank matrix. {@code banks} drives BOTH the column set

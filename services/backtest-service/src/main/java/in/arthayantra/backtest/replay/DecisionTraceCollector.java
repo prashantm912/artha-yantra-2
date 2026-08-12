@@ -76,12 +76,16 @@ public final class DecisionTraceCollector implements DecisionListener {
     return root;
   }
 
-  /** One persisted/API decision-day row. */
+  /**
+   * One persisted/API decision-day row. {@code maxComposite} is a decimal STRING on the wire (the
+   * platform mapper routes BigDecimal through {@code ToStringSerializer}), so it needs {@code type =
+   * "string"} to REPLACE springdoc's inferred {@code number} — {@code types} alone only unions.
+   */
   public record Trace(
       LocalDate sessionDate,
       String reason,
       int bars,
-      @Schema(types = {"number", "null"}) BigDecimal maxComposite,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal maxComposite,
       @Schema(types = {"string", "null"}) OffsetDateTime sampleBucket,
       JsonNode sampleBreakdown) {}
 

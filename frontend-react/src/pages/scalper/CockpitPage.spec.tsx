@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ChainTable, ConnectingDots, OiHeatmap, StraddleChart } from '../../api/types.ts';
@@ -18,6 +18,7 @@ const chain: ChainTable = {
   riskFreeRate: null,
   pcr: '0.92',
   stale: false,
+  lastCaptured: false,
   asOf: '2026-06-24T09:20:00+05:30',
   interval: '3m',
   rows: [
@@ -88,6 +89,17 @@ import { CockpitPage } from './CockpitPage.tsx';
 
 const idle = { isFetching: false, isLoading: false, refetch: vi.fn() };
 
+/**
+ * The Option-chain panel's own <section>. Freshness assertions MUST be scoped to it: the page
+ * header carries its own LiveDot, so a bare getByText('Live') matches two nodes and would also
+ * pass if the chip landed on the wrong panel.
+ */
+function chainPanel(): HTMLElement {
+  const section = screen.getByRole('heading', { name: 'Option chain' }).closest('section');
+  if (section == null) throw new Error('Option chain panel <section> not found');
+  return section as HTMLElement;
+}
+
 function renderCockpit() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -100,6 +112,7 @@ function renderCockpit() {
 }
 
 describe('CockpitPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 5104ms in a full-suite run.
   it('renders the single shared FilterBar and all five panel headings when data is present', () => {
     useChainTable.mockReturnValue({ data: chain, ...idle });
     useConnectingDots.mockReturnValue({ data: cd, ...idle });
@@ -128,6 +141,63 @@ describe('CockpitPage', () => {
     expect(screen.getByTestId('straddle-chart')).toBeInTheDocument();
     expect(screen.getByTestId('ce-heatmap')).toBeInTheDocument();
     expect(screen.getByTestId('pe-heatmap')).toBeInTheDocument();
+  }, 15_000);
+
+  it('badges the Option-chain panel as stale, with the capture DATE, when the chain degraded to the last captured book', () => {
+    // After market close the server serves the last CAPTURED chain instead of 503-ing (freshness
+    // complete=false + the capture asOf). Those rows render in the SAME table as live ones, so
+    // without this chip the panel would show yesterday's book as though it were live — worse than
+    // the 503 it replaced. The date must be visible, not just HH:MM: a chain from three weeks ago
+    // and yesterday's close would otherwise be identical on screen.
+    useChainTable.mockReturnValue({
+      data: {
+        ...chain,
+        lastCaptured: true,
+        asOf: '2026-06-23T15:30:00+05:30',
+        freshness: {
+          asOf: '2026-06-23T15:30:00+05:30',
+          source: 'capture',
+          historyStart: null,
+          staleSeconds: 63_000,
+          complete: false,
+          provenance: 'live',
+        },
+      },
+      ...idle,
+    });
+    useConnectingDots.mockReturnValue({ data: cd, ...idle });
+    useStraddleChart.mockReturnValue({ data: straddle, ...idle });
+    useOiHeatmap.mockReturnValue({ data: heat, ...idle });
+    renderCockpit();
+
+    const panel = chainPanel();
+    expect(within(panel).getByText('Stale')).toBeInTheDocument();
+    expect(within(panel).getByText('as of 2026-06-23 15:30')).toBeInTheDocument();
+  });
+
+  it('leaves the Option-chain panel badged Live when the chain is a real live computation', () => {
+    useChainTable.mockReturnValue({
+      data: {
+        ...chain,
+        freshness: {
+          asOf: new Date().toISOString(),
+          source: 'capture',
+          historyStart: null,
+          staleSeconds: 5,
+          complete: true,
+          provenance: 'live',
+        },
+      },
+      ...idle,
+    });
+    useConnectingDots.mockReturnValue({ data: cd, ...idle });
+    useStraddleChart.mockReturnValue({ data: straddle, ...idle });
+    useOiHeatmap.mockReturnValue({ data: heat, ...idle });
+    renderCockpit();
+
+    const panel = chainPanel();
+    expect(within(panel).getByText('Live')).toBeInTheDocument();
+    expect(within(panel).queryByText('Stale')).not.toBeInTheDocument();
   });
 
   it('renders each panel’s empty state independently when its data is absent', () => {

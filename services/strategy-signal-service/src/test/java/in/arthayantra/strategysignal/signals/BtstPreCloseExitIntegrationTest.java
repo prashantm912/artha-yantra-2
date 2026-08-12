@@ -245,7 +245,7 @@ class BtstPreCloseExitIntegrationTest extends StrategySignalIntegrationTestBase 
                     null,
                     List.of("it"),
                     CONFIG.replace("id: btst-exit-it", "id: " + slug).replace("BTSTIT", sym))
-                .get("id");
+                .id();
     UUID versionId = strategyRepo.latestVersion(strategyId).orElseThrow().id();
     StrategyDefinition definition =
         StrategyCompiler.compile(signals.versionConfig(versionId).orElseThrow());

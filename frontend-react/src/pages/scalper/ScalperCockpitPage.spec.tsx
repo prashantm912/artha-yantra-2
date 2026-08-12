@@ -76,6 +76,7 @@ describe('ScalperCockpitPage', () => {
     chainRows.current = DEFAULT_ROWS.map((r) => ({ ...r }));
   });
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 6446ms in a full-suite run.
   it('loads the ticket from a signal, places a paper order, and shows positions', () => {
     renderPage();
     // signal feed + open position
@@ -96,7 +97,7 @@ describe('ScalperCockpitPage', () => {
     // close a position
     fireEvent.click(screen.getByText('Close'));
     expect(close).toHaveBeenCalledWith({ id: 3 });
-  });
+  }, 15_000);
 
   it('option quick-pick fills the ticket with the NFO leg + its LTP', () => {
     renderPage();

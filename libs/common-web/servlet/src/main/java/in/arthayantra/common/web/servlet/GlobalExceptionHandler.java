@@ -4,6 +4,9 @@ import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.ErrorResponse;
 import in.arthayantra.common.web.http.ArthaHeaders;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
+import jakarta.validation.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -20,6 +23,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
@@ -44,6 +48,38 @@ public class GlobalExceptionHandler {
     Map<String, Object> fields = new LinkedHashMap<>();
     for (FieldError fieldError : ex.getBindingResult().getFieldErrors()) {
       fields.putIfAbsent(fieldError.getField(), fieldError.getDefaultMessage());
+    }
+    return ResponseEntity.badRequest()
+        .body(
+            new ErrorResponse(
+                ErrorCodes.VALIDATION_FAILED, "Request validation failed", Map.of("fields", fields)));
+  }
+
+  /**
+   * Method-level bean validation — {@code @Validated} on the controller plus a constraint on a
+   * parameter: 400 VALIDATION_FAILED, not the catch-all 500 (task_92cef30c).
+   *
+   * <p>Class-level {@code @Validated} does not merely add validation, it <b>disables</b> Spring
+   * MVC's own method validation and delegates to the AOP {@code MethodValidationInterceptor} on a
+   * CGLIB proxy, which throws {@link ConstraintViolationException} — not {@link
+   * MethodArgumentNotValidException}, not {@code HandlerMethodValidationException}, and not a
+   * {@link ResponseStatusException} subtype, so nothing above could claim it. Without this mapping
+   * the idiomatic Spring answer to "reject a bad query param" answered <b>500 INTERNAL_ERROR</b>
+   * with a logged stack trace, and three PRs in one night (#1154/#1157/#1161) each hand-rolled an
+   * {@link ApiException} to avoid it.
+   *
+   * <p>The envelope mirrors {@link #handleValidation} exactly so a client cannot tell which
+   * validation mechanism rejected it. Only the TRAILING node of the property path becomes the field
+   * key: the raw path is {@code methodName.paramName} (e.g. {@code window.lookbackDays}), and the
+   * leading java method name is an implementation detail the caller neither knows nor can act on —
+   * the trailing node is the parameter, or on a cascaded {@code @Valid} bean the offending field,
+   * which is precisely what {@code FieldError.getField()} yields on the request-body path.
+   */
+  @ExceptionHandler(ConstraintViolationException.class)
+  public ResponseEntity<ErrorResponse> handleConstraintViolation(ConstraintViolationException ex) {
+    Map<String, Object> fields = new LinkedHashMap<>();
+    for (ConstraintViolation<?> violation : ex.getConstraintViolations()) {
+      fields.putIfAbsent(leafNode(violation.getPropertyPath()), violation.getMessage());
     }
     return ResponseEntity.badRequest()
         .body(
@@ -98,7 +134,43 @@ public class GlobalExceptionHandler {
                 ErrorCodes.MEDIA_TYPE_UNSUPPORTED, "Unsupported request Content-Type", details));
   }
 
-  /** Unknown paths/static resources: 404 envelope, never the container error page. */
+  /**
+   * A controller that raises {@link ResponseStatusException} has already named its status — honour
+   * it instead of dropping to the catch-all 500 (task_e2e01j).
+   *
+   * <p>Without this mapping every {@code ResponseStatusException(NOT_FOUND, …)} answered <b>500
+   * INTERNAL_ERROR</b> with a logged stack trace; the E2E T1b sweep caught it on all five
+   * {@code /api/v1/insights/{id}} endpoints, and every future servlet controller reaching for the
+   * idiom inherited the same bug. The status→code switch mirrors the reactive gateway's
+   * {@code GatewayErrorWebExceptionHandler} exactly so the two D8 handlers cannot disagree; a
+   * {@code null} reason falls back to the status' own phrase.
+   */
+  @ExceptionHandler(ResponseStatusException.class)
+  public ResponseEntity<ErrorResponse> handleResponseStatus(ResponseStatusException ex) {
+    HttpStatus status = HttpStatus.valueOf(ex.getStatusCode().value());
+    String code =
+        switch (status) {
+          case NOT_FOUND -> ErrorCodes.NOT_FOUND_RESOURCE;
+          case SERVICE_UNAVAILABLE -> ErrorCodes.UPSTREAM_UNAVAILABLE;
+          case UNAUTHORIZED -> ErrorCodes.AUTH_REQUIRED;
+          case FORBIDDEN -> ErrorCodes.AUTH_FORBIDDEN;
+          default -> status.is4xxClientError()
+              ? ErrorCodes.VALIDATION_FAILED
+              : ErrorCodes.INTERNAL_ERROR;
+        };
+    return ResponseEntity.status(status)
+        .body(
+            ErrorResponse.of(
+                code, ex.getReason() == null ? status.getReasonPhrase() : ex.getReason()));
+  }
+
+  /**
+   * Unknown paths/static resources: 404 envelope, never the container error page.
+   *
+   * <p>Kept as its own mapping deliberately: {@code NoResourceFoundException} extends
+   * {@code ServletException} (NOT {@link ResponseStatusException}) at Spring 6.2.x, so nothing above
+   * can claim it — see {@code GlobalExceptionHandlerTest} for the dispatch pin.
+   */
   @ExceptionHandler(NoResourceFoundException.class)
   public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException ex) {
     return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -114,5 +186,19 @@ public class GlobalExceptionHandler {
     details.put("correlationId", correlationId);
     return ResponseEntity.internalServerError()
         .body(new ErrorResponse(ErrorCodes.INTERNAL_ERROR, "Internal error", details));
+  }
+
+  /**
+   * The trailing node of a violation's property path — the reasoning is in {@link
+   * #handleConstraintViolation}. A path is never empty in practice; the fallback exists only so an
+   * exotic constraint can never turn a 400 into an NPE-driven 500, which is the very bug being
+   * fixed.
+   */
+  private static String leafNode(Path propertyPath) {
+    String leaf = null;
+    for (Path.Node node : propertyPath) {
+      leaf = node.getName();
+    }
+    return leaf == null ? propertyPath.toString() : leaf;
   }
 }

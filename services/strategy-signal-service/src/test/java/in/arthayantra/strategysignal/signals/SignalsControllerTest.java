@@ -12,8 +12,8 @@ import in.arthayantra.strategysignal.signals.SignalRepository.SignalRow;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -22,7 +22,8 @@ import org.springframework.context.ApplicationEventPublisher;
 /** The signal detail DTO must surface the V009 scalper side-channel for the confirm panel. */
 class SignalsControllerTest {
 
-  private static final ObjectMapper OM = new ObjectMapper();
+  /** Modules registered so the wire-shape assertions can serialize the {@code OffsetDateTime}s. */
+  private static final ObjectMapper OM = new ObjectMapper().findAndRegisterModules();
 
   private static SignalRow row(String tradeableExch, String tradeableSym, JsonNode scalperDetail) {
     return new SignalRow(
@@ -41,11 +42,45 @@ class SignalsControllerTest {
     SignalsController controller =
         new SignalsController(repo, mock(ApplicationEventPublisher.class));
 
-    Map<String, Object> dto = controller.detail(1L);
+    SignalViews.SignalDto dto = controller.detail(1L);
 
-    assertThat(dto.get("tradeableExchange")).isEqualTo("NFO");
-    assertThat(dto.get("tradeableTradingsymbol")).isEqualTo("NIFTY24JUN24000CE");
-    assertThat(dto.get("scalperDetail")).isEqualTo(detail);
+    assertThat(dto.tradeableExchange()).isEqualTo("NFO");
+    assertThat(dto.tradeableTradingsymbol()).isEqualTo("NIFTY24JUN24000CE");
+    assertThat(dto.scalperDetail()).isEqualTo(detail);
+  }
+
+  /**
+   * The D3 retyping's load-bearing claim: {@code SignalViews.SignalDto} must serialize the SAME keys
+   * in the SAME order the {@code LinkedHashMap} did, because Jackson emits a record in
+   * canonical-constructor order and a moved component moves the bytes. Asserted on the SERIALIZED
+   * form, not the accessors — accessors cannot see key order, and order is precisely what a record
+   * conversion can silently break.
+   *
+   * <p>The list is also the record of what this surface deliberately does NOT emit: {@code
+   * SignalRow} carries {@code minerviniDetail} and {@code manasAroraDetail}, and neither has ever
+   * appeared here.
+   *
+   * <p>Scope, stated so it is not over-read: this pins KEYS and ORDER only. It uses a bare mapper,
+   * not the Spring-configured one, so it says nothing about value FORMATTING — that is set at the
+   * mapper ({@code ArthaJacksonAutoConfiguration} serializes every {@code BigDecimal} through
+   * {@code ToStringSerializer}) and therefore applies to a record exactly as it did to the map.
+   */
+  @Test
+  void theDtoSerializesTheFormerLinkedHashMapKeysInOrder() {
+    SignalRepository repo = mock(SignalRepository.class);
+    when(repo.find(1L)).thenReturn(Optional.of(row("NFO", "NIFTY24JUN24000CE", OM.nullNode())));
+    SignalsController controller =
+        new SignalsController(repo, mock(ApplicationEventPublisher.class));
+
+    List<String> keys = new ArrayList<>();
+    OM.valueToTree(controller.detail(1L)).fieldNames().forEachRemaining(keys::add);
+
+    assertThat(keys)
+        .containsExactly(
+            "id", "strategyVersionId", "exchange", "tradingsymbol", "interval", "signalType",
+            "side", "entryPrice", "stopLoss", "target", "compositeScore", "scoreBreakdown",
+            "status", "generatedAt", "expiresAt", "suggestedQty", "tradeableExchange",
+            "tradeableTradingsymbol", "scalperDetail", "exitReason");
   }
 
   @Test
@@ -55,11 +90,15 @@ class SignalsControllerTest {
     SignalsController controller =
         new SignalsController(repo, mock(ApplicationEventPublisher.class));
 
-    Map<String, Object> dto = controller.detail(1L);
+    SignalViews.SignalDto dto = controller.detail(1L);
 
-    assertThat(dto).containsKey("scalperDetail");
-    assertThat(dto.get("scalperDetail")).isNull();
-    assertThat(dto.get("tradeableExchange")).isNull();
+    assertThat(dto.scalperDetail()).isNull();
+    assertThat(dto.tradeableExchange()).isNull();
+    // The key must still be PRESENT-and-null on the wire, as the LinkedHashMap made it — the panel
+    // distinguishes "not a scalper signal" from "field missing". A record only preserves that while
+    // the service configures no NON_NULL inclusion, so assert the emitted JSON, not the accessor.
+    assertThat(OM.valueToTree(dto).has("scalperDetail")).isTrue();
+    assertThat(OM.valueToTree(dto).get("scalperDetail").isNull()).isTrue();
   }
 
   private static SignalRow exitRow(String exitReason) {
@@ -84,7 +123,7 @@ class SignalsControllerTest {
     SignalsController controller =
         new SignalsController(repo, mock(ApplicationEventPublisher.class));
 
-    assertThat(controller.detail(2L).get("exitReason")).isEqualTo("CONFLUENCE_FLIP");
+    assertThat(controller.detail(2L).exitReason()).isEqualTo("CONFLUENCE_FLIP");
 
     String csv =
         new String(

@@ -77,6 +77,7 @@ function renderPage() {
 const timeline = () => within(screen.getByRole('table', { name: 'Strategy versions' }));
 
 describe('StrategyVersionsPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 4085ms in a full-suite run.
   it('shows the version timeline, the structured diff, and opens the publish dialog', () => {
     renderPage();
     expect(screen.getByText('EMA Cross — versions')).toBeInTheDocument();
@@ -88,7 +89,7 @@ describe('StrategyVersionsPage', () => {
     expect(screen.getByText('Publish version')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
     expect(publish).toHaveBeenCalled();
-  });
+  }, 15_000);
 
   it('renders the lifecycle timeline and confirm-gates the enabled toggle and clone', () => {
     renderPage();

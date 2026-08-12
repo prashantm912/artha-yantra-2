@@ -54,40 +54,50 @@ public class OptionsChainService {
   public record Leg(
       @Schema(types = {"string", "null"}) String exchange,
       String tradingsymbol,
-      @Schema(types = {"number", "null"}) BigDecimal ltp,
-      @Schema(types = {"number", "null"}) BigDecimal bid,
-      @Schema(types = {"number", "null"}) BigDecimal ask,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal bid,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ask,
       @Schema(types = {"integer", "null"}) Long volume,
       @Schema(types = {"integer", "null"}) Long oi,
       @Schema(types = {"integer", "null"}) Long prevOi,
-      @Schema(types = {"number", "null"}) BigDecimal iv,
-      @Schema(types = {"number", "null"}) BigDecimal delta,
-      @Schema(types = {"number", "null"}) BigDecimal gamma,
-      @Schema(types = {"number", "null"}) BigDecimal theta,
-      @Schema(types = {"number", "null"}) BigDecimal vega,
-      @Schema(types = {"number", "null"}) BigDecimal rho,
-      @Schema(types = {"number", "null"}) BigDecimal vanna,
-      @Schema(types = {"number", "null"}) BigDecimal charm,
-      @Schema(types = {"number", "null"}) BigDecimal vomma,
-      @Schema(types = {"number", "null"}) BigDecimal speed,
-      @Schema(types = {"number", "null"}) BigDecimal zomma,
-      @Schema(types = {"number", "null"}) BigDecimal color,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal iv,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal delta,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal gamma,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal theta,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal vega,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal rho,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal vanna,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal charm,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal vomma,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal speed,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal zomma,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal color,
       @Schema(types = {"string", "null"}) String ivReason,
       @Schema(types = {"string", "null"}) String priceSource) {}
 
   /** One chain row. */
-  public record StrikeRow(BigDecimal strike, Leg ce, Leg pe) {}
+  public record StrikeRow(@Schema(type = "string") BigDecimal strike, Leg ce, Leg pe) {}
 
-  /** The computed chain. */
+  /**
+   * The computed chain.
+   *
+   * <p>{@code stale} and {@code lastCaptured} are ORTHOGONAL and must never be conflated:
+   * {@code stale} = the market is not open (a live chain computed off-hours is still live);
+   * {@code lastCaptured} = the rows are the most recent CAPTURED chain rather than a live
+   * computation, because no live spot quote was available — then {@code asOf} is the CAPTURE
+   * timestamp, not {@code now}. A mid-session feed gap yields {@code stale=false,
+   * lastCaptured=true}, which is exactly why one boolean cannot carry both meanings.
+   */
   public record Chain(
       String underlying,
       LocalDate expiry,
-      @Schema(types = {"number", "null"}) BigDecimal spot,
-      @Schema(types = {"number", "null"}) BigDecimal forward,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal forward,
       String forwardSource,
-      BigDecimal riskFreeRate,
-      @Schema(types = {"number", "null"}) BigDecimal pcr,
+      @Schema(type = "string") BigDecimal riskFreeRate,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pcr,
       boolean stale,
+      boolean lastCaptured,
       OffsetDateTime asOf,
       List<StrikeRow> rows) {}
 
@@ -104,6 +114,8 @@ public class OptionsChainService {
    * {@code /v2/option/chain} call instead, with the greeks/IV pipeline downstream untouched.
    */
   private final OptionChainQuoteSource optionChainSource;
+  /** Read-path degradation source: the captured chains behind {@link #chainOrLastCaptured}. */
+  private final OptionsSnapshotRepository snapshots;
 
   /** Wires the chain inputs; {@code artha.options.iv-enabled} is the S1-SEQ gate switch. */
   public OptionsChainService(
@@ -113,7 +125,8 @@ public class OptionsChainService {
       Clock clock,
       @Value("${artha.options.risk-free-rate:0.065}") BigDecimal riskFreeRate,
       @Value("${artha.options.iv-enabled:true}") boolean ivEnabled,
-      Optional<OptionChainQuoteSource> optionChainSource) {
+      Optional<OptionChainQuoteSource> optionChainSource,
+      OptionsSnapshotRepository snapshots) {
     this.instruments = instruments;
     this.quoteGateway = quoteGateway;
     this.calendar = calendar;
@@ -121,6 +134,7 @@ public class OptionsChainService {
     this.riskFreeRate = riskFreeRate;
     this.ivEnabled = ivEnabled;
     this.optionChainSource = optionChainSource.orElse(null);
+    this.snapshots = snapshots;
   }
 
   /** Default-expiry resolution: the nearest expiry on/after today. */
@@ -149,8 +163,34 @@ public class OptionsChainService {
         .toList();
   }
 
-  /** Computes the full chain for (underlying, expiry). */
+  /**
+   * Computes the full LIVE chain for (underlying, expiry), refusing with 503 {@code DATA_STALE}
+   * when no live spot quote exists.
+   *
+   * <p>This is the WRITE-path entry point ({@code OptionsSnapshotService} capture + broadcast,
+   * {@code OptionAtmPinner}) and must keep refusing: a capture that degraded to the last captured
+   * chain would persist yesterday's book back into {@code options_chain_snapshots} as a fresh row,
+   * freezing OI forever. READ paths call {@link #chainOrLastCaptured} instead.
+   */
   public Chain chain(String underlying, LocalDate requestedExpiry) {
+    return computeChain(underlying, requestedExpiry, false);
+  }
+
+  /**
+   * The READ-path chain: identical to {@link #chain} while a live spot quote exists, and otherwise
+   * the most recent CAPTURED chain marked {@code lastCaptured=true} with {@code asOf} = the capture
+   * timestamp, instead of a 503 that blanks every consumer's panel after market close.
+   *
+   * <p>The platform's freshness doctrine: entries need fresh truth (you can always NOT enter), reads
+   * need the best available truth (you cannot refuse to read forever). Degrading is the goal, lying
+   * is not — with no live spot AND no captured chain the 503 {@code DATA_STALE} stands.
+   */
+  public Chain chainOrLastCaptured(String underlying, LocalDate requestedExpiry) {
+    return computeChain(underlying, requestedExpiry, true);
+  }
+
+  private Chain computeChain(
+      String underlying, LocalDate requestedExpiry, boolean degradeToCapture) {
     LocalDate expiry = resolveExpiry(underlying, requestedExpiry);
     List<Instrument> chainInstruments = instruments.optionChain(underlying, expiry);
     if (chainInstruments.isEmpty()) {
@@ -167,17 +207,15 @@ public class OptionsChainService {
         optionChainSource == null ? Optional.empty() : optionChainSource.fetch(underlying, expiry);
 
     BigDecimal spot;
+    String noSpotMessage;
     Map<InstrumentKey, QuoteGateway.Quote> quotes;
     Map<String, Long> prevOiByStrikeType = new java.util.HashMap<>();
     if (upstox.isPresent()) {
       OptionChainQuoteSource.ChainQuotes cq = upstox.get();
-      spot =
-          Optional.ofNullable(cq.spot())
-              .orElseThrow(
-                  () ->
-                      new ApiException(
-                          503, ErrorCodes.DATA_STALE, "no Upstox spot for " + underlying));
-      quotes = upstoxQuotes(chainInstruments, cq, now, prevOiByStrikeType);
+      spot = cq.spot();
+      noSpotMessage = "no Upstox spot for " + underlying;
+      quotes =
+          spot == null ? Map.of() : upstoxQuotes(chainInstruments, cq, now, prevOiByStrikeType);
     } else {
       // spot from the UNDERLYING quote — never a strike average (the v1 defect)
       InstrumentKey underlyingKey =
@@ -189,15 +227,25 @@ public class OptionsChainService {
       spot =
           Optional.ofNullable(quoteGateway.quotes(List.of(underlyingKey)).get(underlyingKey))
               .map(QuoteGateway.Quote::lastPrice)
-              .orElseThrow(
-                  () ->
-                      new ApiException(
-                          503, ErrorCodes.DATA_STALE, "no spot quote for " + underlying));
+              .orElse(null);
+      noSpotMessage = "no spot quote for " + underlying;
+      // no spot ⇒ skip the per-strike batch too; there is nothing to price the chain against
       quotes =
-          quoteGateway.quotes(
-              chainInstruments.stream()
-                  .map(i -> new InstrumentKey(i.exchange(), i.tradingsymbol()))
-                  .toList());
+          spot == null
+              ? Map.of()
+              : quoteGateway.quotes(
+                  chainInstruments.stream()
+                      .map(i -> new InstrumentKey(i.exchange(), i.tradingsymbol()))
+                      .toList());
+    }
+    if (spot == null) {
+      if (degradeToCapture) {
+        Optional<Chain> captured = lastCapturedChain(underlying, expiry, chainInstruments, open);
+        if (captured.isPresent()) {
+          return captured.get();
+        }
+      }
+      throw new ApiException(503, ErrorCodes.DATA_STALE, noSpotMessage);
     }
 
     OptionalDouble yearsOpt = ExpiryClock.yearsToExpiry(now.toInstant(), expiry);
@@ -237,8 +285,129 @@ public class OptionsChainService {
         riskFreeRate,
         pcr,
         !open,
+        false,
         now,
         rows);
+  }
+
+  /**
+   * The most recent CAPTURED chain for (underlying, expiry), shaped exactly like a live one so
+   * every consumer renders it unchanged — but marked {@code lastCaptured=true} with {@code asOf} =
+   * the CAPTURE timestamp, never {@code now}. Empty when nothing was ever captured, or when nothing
+   * captured still matches the live instrument master (the caller then keeps its 503).
+   *
+   * <p>Reuses the capture's own storage ({@link OptionsSnapshotRepository#latestCapturedSnapshotTs}
+   * + {@link OptionsSnapshotRepository#capturedRowsAt}) rather than a second reader, so the served
+   * legs carry the full captured book — bid/ask/volume/OI, the solved IV and its first-order greeks,
+   * and the {@code ivReason}/{@code priceSource} provenance the capture wrote. Both reads apply the
+   * SAME live-capture + not-quarantined predicate: a BACKFILL or UPSTOX_1M row must never be
+   * relabelled {@code CAPTURED}, and a row quarantined as an implausible OI print must not re-enter
+   * through this path. Fields the snapshot table does not hold are null, never fabricated:
+   * {@code prevOi} (an Upstox-source-only live field) and the second/third-order greeks (live-only
+   * per {@link Leg}). {@code forwardSource} reads {@code CAPTURED} because the forward's precedence
+   * rule is not persisted — only its value is.
+   *
+   * <p>{@code riskFreeRate} is the rate the capture STORED, not today's configured one: every
+   * snapshot persists the {@code r} its IV/greeks were solved with, so serving the current config
+   * beside older greeks would advertise an input those numbers were not computed from. The
+   * configured rate is used only when the stored one is null (pre-provenance rows).
+   *
+   * <p>Rows come from the live instrument master, so the chain's strike ladder, CE/PE pairing and
+   * {@code (exchange, tradingsymbol)} identity are the same ones a live chain publishes; a strike
+   * with no captured row yields a null leg, exactly like a live quote miss.
+   */
+  private Optional<Chain> lastCapturedChain(
+      String underlying, LocalDate expiry, List<Instrument> chainInstruments, boolean open) {
+    OffsetDateTime capturedAt = snapshots.latestCapturedSnapshotTs(underlying, expiry).orElse(null);
+    if (capturedAt == null) {
+      return Optional.empty();
+    }
+    Map<String, OptionsSnapshotRepository.SnapshotRow> captured = new java.util.HashMap<>();
+    for (OptionsSnapshotRepository.SnapshotRow row :
+        snapshots.capturedRowsAt(underlying, expiry, capturedAt)) {
+      captured.put(strikeTypeKey(row.strike(), row.optionType()), row);
+    }
+
+    Map<BigDecimal, Leg[]> byStrike = new LinkedHashMap<>();
+    BigDecimal spot = null;
+    BigDecimal forward = null;
+    BigDecimal capturedRate = null;
+    int matched = 0;
+    long ceOi = 0;
+    long peOi = 0;
+    for (Instrument instrument : chainInstruments) {
+      OptionsSnapshotRepository.SnapshotRow row =
+          captured.get(strikeTypeKey(instrument.strike(), instrument.instrumentType()));
+      Leg leg = row == null ? null : capturedLeg(instrument, row);
+      Leg[] pair = byStrike.computeIfAbsent(instrument.strike(), s -> new Leg[2]);
+      if ("CE".equals(instrument.instrumentType())) {
+        pair[0] = leg;
+        ceOi += leg != null && leg.oi() != null ? leg.oi() : 0;
+      } else {
+        pair[1] = leg;
+        peOi += leg != null && leg.oi() != null ? leg.oi() : 0;
+      }
+      if (row != null) {
+        matched++;
+        spot = spot == null ? row.spotPrice() : spot;
+        forward = forward == null ? row.forwardPrice() : forward;
+        capturedRate = capturedRate == null ? row.riskFreeRate() : capturedRate;
+      }
+    }
+    if (matched == 0) {
+      // captured rows exist but none is on today's ladder — an all-null chain would be a lie
+      return Optional.empty();
+    }
+    List<StrikeRow> rows = new ArrayList<>(byStrike.size());
+    byStrike.forEach((strike, pair) -> rows.add(new StrikeRow(strike, pair[0], pair[1])));
+    return Optional.of(
+        new Chain(
+            underlying,
+            expiry,
+            spot,
+            forward,
+            "CAPTURED",
+            capturedRate == null ? riskFreeRate : capturedRate,
+            putCallRatio(ceOi, peOi),
+            !open,
+            true,
+            capturedAt,
+            rows));
+  }
+
+  /** One captured row in the live {@link Leg} shape; unpersisted fields stay null. */
+  private static Leg capturedLeg(Instrument instrument, OptionsSnapshotRepository.SnapshotRow row) {
+    return new Leg(
+        instrument.exchange(),
+        instrument.tradingsymbol(),
+        row.ltp(),
+        row.bid(),
+        row.ask(),
+        row.volume(),
+        row.oi(),
+        null, // prevOi: an Upstox-source live field, never persisted
+        row.iv(),
+        row.delta(),
+        row.gamma(),
+        row.theta(),
+        row.vega(),
+        row.rho(),
+        null, // vanna
+        null, // charm
+        null, // vomma
+        null, // speed
+        null, // zomma
+        null, // color — second/third-order greeks are live-only (see Leg)
+        row.ivReason(),
+        row.priceSource());
+  }
+
+  /**
+   * Scale-insensitive (strike, side) key: the instrument master's NUMERIC scale need not equal the
+   * snapshot column's, so {@code 18000} must match {@code 18000.00} (docs/symbol-normalization.md).
+   */
+  private static String strikeTypeKey(BigDecimal strike, String optionType) {
+    return strike.stripTrailingZeros().toPlainString() + "|" + optionType;
   }
 
   /**

@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.upstox;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
@@ -17,8 +18,10 @@ import java.time.OffsetDateTime;
 public record PreOpenIndex(
     String name,
     String key,
-    BigDecimal ltp,
-    BigDecimal prevClose,
-    BigDecimal netChange,
-    BigDecimal changePct,
+    // all four are null when the live tick did not resolve — the index still lists so the pre-open
+    // table shows the full set (UpstoxMarketStatusClient:233)
+    @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
+    @Schema(type = "string", types = {"string", "null"}) BigDecimal prevClose,
+    @Schema(type = "string", types = {"string", "null"}) BigDecimal netChange,
+    @Schema(type = "string", types = {"string", "null"}) BigDecimal changePct,
     OffsetDateTime asOf) {}

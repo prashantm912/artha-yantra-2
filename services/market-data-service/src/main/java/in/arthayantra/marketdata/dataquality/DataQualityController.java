@@ -22,7 +22,7 @@ public class DataQualityController {
       String symbol,
       long expected,
       long present,
-      @Schema(types = {"number", "null"}) BigDecimal coveragePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal coveragePct,
       boolean ok,
       @Schema(types = {"string", "null"}) String detail,
       OffsetDateTime computedAt) {}

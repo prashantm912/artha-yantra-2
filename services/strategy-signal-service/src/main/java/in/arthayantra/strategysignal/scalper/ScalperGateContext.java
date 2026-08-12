@@ -69,7 +69,39 @@ public record ScalperGateContext(
       BigDecimal spurtPricePct,
       // E2 M3: the PE−CE OI gap as a % of the latest bucket's total OI (the "lines diverge ~20-30%"
       // magnitude); null when the series is short/flat. The producer computes it in deriveTrending.
-      BigDecimal oiDivergencePct) {
+      BigDecimal oiDivergencePct,
+      // MEASUREMENT-ONLY carrier (never read by a gate or a dot): the LEVEL-based active-strike
+      // sentiment — 100·(ΣputOI − ΣcallOI)/ΣputOI, the oipulse-dashboard convention — beside the
+      // ΔOI-FLOW number `sentimentPct` the two live sign tests actually consume. Its sole reader is
+      // {@link SentimentLevelShadow}, which records the counterfactual on the diagnostic JSONB.
+      // Null whenever market-data omits the field (older deploy / monthly-expiry suppression), which
+      // degrades to "no shadow verdict" — never to an exception or a changed live decision.
+      BigDecimal sentimentLevelPct) {
+
+    /**
+     * Pre-shadow 14-arg form: {@code sentimentLevelPct} defaults to null (keeps existing literals
+     * intact, and null is exactly the "no shadow verdict" degrade).
+     */
+    public Oi(
+        OiQuadrant underlying,
+        OiQuadrant futures,
+        BigDecimal sentimentPct,
+        BigDecimal trendingPeMinusCePct,
+        BigDecimal futuresBasis,
+        BigDecimal ceOiDelta,
+        BigDecimal peOiDelta,
+        BigDecimal callPutDeltaImbalancePct,
+        boolean crossedThisWindow,
+        boolean gapWidening,
+        BigDecimal sentimentSlope,
+        BigDecimal spurtOiPct,
+        BigDecimal spurtPricePct,
+        BigDecimal oiDivergencePct) {
+      this(
+          underlying, futures, sentimentPct, trendingPeMinusCePct, futuresBasis, ceOiDelta, peOiDelta,
+          callPutDeltaImbalancePct, crossedThisWindow, gapWidening, sentimentSlope, spurtOiPct,
+          spurtPricePct, oiDivergencePct, null);
+    }
 
     /** Pre-M3 13-arg form: {@code oiDivergencePct} defaults to null (keeps existing literals intact). */
     public Oi(

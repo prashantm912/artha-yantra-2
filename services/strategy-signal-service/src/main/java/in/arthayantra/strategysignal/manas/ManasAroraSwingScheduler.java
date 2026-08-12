@@ -11,14 +11,14 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Fires the Manas Arora swing batch once per trading evening (20:05 IST, weekdays), just after the
- * Minervini batch. Execution stays inert when the family flag is false, while this scheduler records
- * the effective schedule-time arming intent for the missed-batch detector.
+ * Settles the Manas Arora swing book at 16:02 IST, on the same contract as its Minervini twin: EXITS
+ * ONLY at the close, entries deferred to the 08:35 morning pass. See {@link
+ * in.arthayantra.strategysignal.minervini.MinerviniSwingScheduler} for why the two halves need
+ * different data and therefore different hours, and for why the run marker this writes is
+ * deliberately not the catch-up's skip signal.
  *
- * <p>The inert-when-disarmed gate is {@code SwingBatchEngine.runDaily}'s own {@code
- * doctrine.enabled()} check, NOT the recorder's — {@code SwingBatchRecorder.runAndRecord} calls the
- * engine before consulting its own flag. That one line is what makes it safe for this scheduler to
- * fire unconditionally so the intent row is always written.
+ * <p>Two minutes after Minervini, not the same minute: both share the single-thread scheduler, and a
+ * settle that queues behind its twin would report a run time that is not when it read the tape.
  */
 @Component
 public class ManasAroraSwingScheduler {
@@ -43,19 +43,42 @@ public class ManasAroraSwingScheduler {
     this.clock = clock;
   }
 
-  /** Post-close daily run (20:05 IST, weekdays). */
-  @Scheduled(cron = "${artha.manas-arora.swing.cron:0 5 20 * * MON-FRI}", zone = "Asia/Kolkata")
-  public void run() {
+  /**
+   * Records the session's arming hourly through the trading day, independently of the settle — see
+   * the Minervini twin for why the settle alone is not enough (a container down at 16:02 would leave
+   * the catch-up with no intent row and forfeit the session's entries).
+   */
+  @Scheduled(cron = "${artha.manas-arora.swing.intent-cron:0 7 9-15 * * MON-FRI}", zone = "Asia/Kolkata")
+  public void recordIntent() {
     LocalDate session = LocalDate.now(clock.withZone(IST));
     try {
       intents.recordScheduled(doctrine.batchName(), session, doctrine.enabled());
     } catch (RuntimeException e) {
-      log.warn(
-          "{} swing schedule-intent record failed for {} - continuing scheduled batch: {}",
+      log.debug(
+          "{} swing intent tick failed for {} — a later tick or the settle will retry: {}",
           doctrine.batchName(),
           session,
           e.getMessage());
     }
-    recorder.runScheduled(doctrine);
+  }
+
+  /** 16:02 IST settle: evaluate every held stop against this session's own daily bar. */
+  @Scheduled(cron = "${artha.manas-arora.swing.cron:0 2 16 * * MON-FRI}", zone = "Asia/Kolkata")
+  public void run() {
+    LocalDate session = LocalDate.now(clock.withZone(IST));
+    try {
+      // recordSettled — the authoritative reading, overwriting the intraday ticks. See the
+      // Minervini twin for the transition defect this closes.
+      intents.recordSettled(doctrine.batchName(), session, doctrine.enabled());
+    } catch (RuntimeException e) {
+      log.warn(
+          "{} swing schedule-intent record failed for {} — continuing: {}",
+          doctrine.batchName(),
+          session,
+          e.getMessage());
+    }
+    // runScheduled, not a bare runAndRecord — it keeps the FAILED-alert envelope, and it gates
+    // execution on doctrine.enabled(). See the Minervini twin for why both matter.
+    recorder.runScheduled(doctrine, false);
   }
 }

@@ -78,16 +78,62 @@ public interface EmissionGuard {
   }
 
   /**
-   * The book's current aggregate OPEN risk in ₹: {@code Σ qty × max(0, avgEntry − stopLoss)} over its
-   * open positions (a position whose stop has trailed above its entry contributes 0 — "trailing reduces
-   * open risk", §2.2/§3.5.B). The persisted stop is the position's ORIGINAL bracket, so this is a
-   * conservative (never-understated) read. The Manas pyramiding gate adds the prospective new lot's risk
-   * to this and blocks the add if the total would breach the ≤5–6% portfolio cap (§3.4.3). Default 0 ⇒
-   * paper disabled / no open positions (the gate then never blocks on risk).
+   * The book's current aggregate OPEN risk in ₹: {@code Σ qty × max(0, avgEntry − effectiveStop)} over
+   * its open positions (a position whose stop has trailed above its entry contributes 0 — "trailing
+   * reduces open risk", §2.2/§3.5.B). The Manas pyramiding gate adds the prospective new lot's risk to
+   * this and blocks the add/fresh-entry if the total would breach the ≤5–6% portfolio cap (§3.4.3).
+   * Default 0 ⇒ paper disabled / no open positions (the gate then never blocks on risk).
+   *
+   * <p>{@code effectiveStop} is the persisted {@code stopLoss} for every family EXCEPT Manas, where
+   * it is the IN-MEMORY {@code ManasGoverningStopCache} entry when the daily Chandelier trail has
+   * armed (see {@link #cacheManasGoverningStop}), else {@code stopLoss} (the initial bracket, before
+   * the trail arms or on a fresh boot). Before the M40 Critical 3 fix (2026-08-02) Manas's trail was
+   * computed fresh every batch run but never read anywhere else, so "trailing reduces open risk" was
+   * true in doctrine but not in this figure — always conservative (overstated), never current. The
+   * fix is IN MEMORY ONLY, never a database write: {@code stopLoss} is ALSO the intraday
+   * disaster-stop {@code PaperBracketEvaluator} polls every 15s with no book filter, so this figure
+   * deliberately never reaches that column (or any new persisted column — two earlier drafts of this
+   * fix tried exactly that and were reverted) — M40 owns the risk calculation only; whether {@code
+   * stopLoss} itself should ever reflect the trail (making Manas intraday-trail-managed) is a
+   * separate, later, owner decision.
    */
   default BigDecimal openRiskInr(String book) {
     return BigDecimal.ZERO;
   }
+
+  /**
+   * M40 Critical 3 fix, round 3 (owner ruling, 2026-08-02): caches a held Manas position's CURRENT
+   * governing stop — IN MEMORY ONLY, never a database write, never {@code stopLoss}, never any new
+   * column — so {@link #openRiskInr} (and the Manas aggregate open-risk cap it feeds) reads the
+   * position's LIVE governing stop instead of the stale one frozen at open, with ZERO effect on the
+   * column the paper module's intraday bracket poller reads. Pure accounting: this never itself
+   * closes a position or otherwise changes what the engine's own {@code ExitEvaluator} decides, and
+   * cannot affect intraday exit behaviour by construction — there is nothing here for a 15-second
+   * poll to read. The paper adapter enforces "never loosens" AND "LONG only" in the cache itself (a
+   * no-op when {@code newStop} is not strictly tighter than whatever is already cached, or when
+   * {@code side} is not {@code "BUY"} — Manas trades long-only, and short-arithmetic support is
+   * intentionally NOT implemented here; see {@code RiskService#manasAggregateRiskCheck}'s
+   * javadoc for why a non-BUY row fails the aggregate CLOSED rather than being silently mispriced).
+   * Empty on a fresh boot / before the trail arms — callers then fall back to {@code stopLoss}, the
+   * SAME reading as before this whole M40 effort, not a regression, but NOT a rare edge case either
+   * (#1228, 2026-08-02): the trail arms at +9% gain and zero of the six live Manas positions
+   * qualified on the day measured, so this is the normal operating regime, not a fallback branch.
+   * Default no-op keeps non-paper and test adapters permissive.
+   *
+   * <p><b>{@code openingSignalId} (round 5, cross-vendor review Critical 1, 2026-08-02): the identity
+   * this stop was computed FOR, not merely the key it should be cached under.</b> {@code
+   * SwingBatchEngine}'s exit pass computes {@code newStop} from one PARTICULAR held signal anchor;
+   * passing only the {@code (book,exchange,symbol,side)} tuple let the paper adapter cache it against
+   * WHATEVER position happened to be open for that key when the write landed — if the anchor's own
+   * position had since closed and a DIFFERENT position opened on the same key (a dead-anchor row
+   * misread as fresh, or a close racing this write), the new position would silently inherit a trail
+   * computed for a position it has no relationship to. The adapter MUST validate the currently-open
+   * row's own {@code opening_signal_id} equals this parameter before caching — matching {@code null}
+   * (no cache) is the safe outcome, never a best-effort attach to whatever is open.
+   */
+  default void cacheManasGoverningStop(
+      String book, String exchange, String tradingsymbol, String side, long openingSignalId,
+      BigDecimal newStop) {}
 
   /**
    * §3.7 hero-zero profit-funded sizing — the lot-rounded qty for an expiry-day hero-zero leg sized to
@@ -131,4 +177,21 @@ public interface EmissionGuard {
       BigDecimal premium,
       BigDecimal stopDistance,
       String side) {}
+
+  /**
+   * Records that a §3.4.3 pyramid ADD, or (M40, 2026-08-02) a FRESH Manas entry, was blocked because it
+   * would have breached the family's portfolio open-risk cap — see {@code
+   * docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md} for the gap this closes. Three of
+   * RiskService's four audited threshold rails — daily-loss, profit-target, heat-cap — write a durable
+   * {@code risk_audit} row AND push an ntfy alert on trip; the fourth, deployment, audits only (no
+   * alert). Before this method existed (E4 §2f), a pyramid-cap block matched NEITHER group — it only
+   * reached the application log (SwingBatchEngine's own {@code log.info}). The ADD call site stays
+   * UNREACHABLE while pyramiding is disabled ({@code artha.manas-arora.pyramid.enabled}, default OFF —
+   * a disabled policy's {@code hasRoom} never lets an add reach the risk-cap check); the FRESH-entry
+   * call site is live regardless of that flag, since the aggregate cap on a first lot never depended on
+   * pyramiding. The signals module owns only this port; the paper adapter supplies the durable
+   * implementation (mirrors {@link #recordZeroSizedEntry}). Default no-op keeps non-paper and test
+   * adapters permissive.
+   */
+  default void recordPyramidRiskCapBreach(String book, String symbol, String detail) {}
 }

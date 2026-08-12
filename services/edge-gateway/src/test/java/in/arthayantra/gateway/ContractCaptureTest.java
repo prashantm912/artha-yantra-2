@@ -40,6 +40,9 @@ class ContractCaptureTest {
 
   @Autowired private WebTestClient client;
 
+  @Autowired
+  private in.arthayantra.common.web.openapi.SchemaNameCollisionDetector collisionDetector;
+
   @Test
   void specCapturesCleanAndHonorsTheD8Conventions() throws Exception {
     // the docs surface sits behind the owner session like everything else
@@ -70,6 +73,12 @@ class ContractCaptureTest {
     ObjectMapper objectMapper = new ObjectMapper();
     JsonNode spec = objectMapper.readTree(new String(raw, StandardCharsets.UTF_8));
     ((ObjectNode) spec).remove("servers");
+
+    // task_1c04803f: two distinct Java types must never collapse into one schema component —
+    // springdoc keys components by simple name and the loser's fields silently vanish.
+    assertThat(collisionDetector.collisions())
+        .as("schema-name collisions (disambiguate with @Schema(name = ...))")
+        .isEmpty();
 
     spec.path("paths")
         .fieldNames()

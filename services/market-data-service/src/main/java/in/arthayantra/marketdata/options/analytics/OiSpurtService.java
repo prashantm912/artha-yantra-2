@@ -27,15 +27,15 @@ public class OiSpurtService {
    * buckets ((now - prior) / prior * 100); null when the prior LTP is absent or zero.
    */
   public record StrikeSpurt(
-      BigDecimal strike,
+      @Schema(type = "string") BigDecimal strike,
       String optionType,
-      @Schema(types = {"number", "null"}) BigDecimal ltp,
-      @Schema(types = {"number", "null"}) BigDecimal prevLtp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal prevLtp,
       @Schema(types = {"integer", "null"}) Long oi,
       long oiChange,
-      @Schema(types = {"number", "null"}) BigDecimal spurtPct,
-      @Schema(types = {"number", "null"}) BigDecimal ltpChange,
-      @Schema(types = {"number", "null"}) BigDecimal ltpChangePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spurtPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltpChange,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltpChangePct,
       @Schema(types = {"integer", "null"}) Long volume,
       OiInterpretation interpretation) {}
 
@@ -47,10 +47,10 @@ public class OiSpurtService {
    */
   public record SpurtSummary(
       OiInterpretation interpretation,
-      @Schema(types = {"number", "null"}) BigDecimal spotDelta,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spotDelta,
       long oiChange,
-      @Schema(types = {"number", "null"}) BigDecimal oiChangePct,
-      @Schema(types = {"number", "null"}) BigDecimal priceChangePct) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal oiChangePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal priceChangePct) {}
 
   public record SpurtChain(
       List<StrikeSpurt> items,

@@ -170,7 +170,7 @@
   "type" : "RISK_STALE_TICK",
   "severity" : "WARN",
   "scope" : "book:scalper",
-  "title" : "SL/TP evaluation degraded on NFO:NIFTY25JUL25200CE — feed stalled",
+  "title" : "SL/TP evaluation degraded on NFO:NIFTY25JUL25200CE (scalper BUY) — feed stalled",
   "explanation" : "The scalper book holds a bracketed BUY position on NFO:NIFTY25JUL25200CE but the live feed is stalled (ticks flowing but no 1m bar closed for 240s), so its SL/TP cannot be evaluated on fresh bars.",
   "evidence" : [ {
     "label" : "feed health",
@@ -187,7 +187,32 @@
   "priorityDetail" : null,
   "dataTrust" : "BLOCKED",
   "trustReasons" : [ "live-capture stalled on NFO:NIFTY25JUL25200CE" ],
-  "dedupeKey" : "RISK_STALE_TICK:NFO:NIFTY25JUL25200CE:2026-07-12",
+  "dedupeKey" : "RISK_STALE_TICK:NFO:NIFTY25JUL25200CE:scalper:BUY:3001:2026-07-12",
+  "cooldownMinutes" : 15,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "RISK_STALE_TICK",
+  "severity" : "WARN",
+  "scope" : "book:manual",
+  "title" : "SL evaluation degraded on NFO:NIFTY25JUL25200CE (manual BUY) — feed stalled",
+  "explanation" : "The manual book holds a bracketed BUY position on NFO:NIFTY25JUL25200CE but the live feed is stalled (ticks flowing but no 1m bar closed for 240s), so its SL cannot be evaluated on fresh bars.",
+  "evidence" : [ {
+    "label" : "feed health",
+    "value" : "ticks flowing but no 1m bar closed for 240s",
+    "source" : {
+      "endpoint" : "/api/v1/market/health/data",
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  }, {
+    "label" : "bracket",
+    "value" : "SL on BUY NIFTY25JUL25200CE"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "BLOCKED",
+  "trustReasons" : [ "live-capture stalled on NFO:NIFTY25JUL25200CE" ],
+  "dedupeKey" : "RISK_STALE_TICK:NFO:NIFTY25JUL25200CE:manual:BUY:3002:2026-07-12",
   "cooldownMinutes" : 15,
   "expiresAt" : null,
   "suppressed" : false

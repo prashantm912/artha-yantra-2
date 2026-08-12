@@ -21,10 +21,9 @@
  * re-scoring"), so I3 reuses the board rather than copies it. This is a one-way edge (paper never
  * imports insights → acyclic, {@code ModularityTest}-verified).
  *
- * <p><b>Delivery is SHADOW by default.</b> Insights are rows + read APIs; the I3 {@code insights} WS
- * channel ({@link in.arthayantra.strategysignal.insights.InsightPublisher}) is gated on
- * {@code artha.insights.delivery.ws} (default FALSE) — nothing pushes until the owner arms it (Stage 1,
- * §10.3); ntfy/Telegram floors are I4. Generators shipped: I1 {@code SIGNAL_PRIORITY}/{@code
+ * <p><b>Delivery is OFF by default.</b> The insights WS and I4 ntfy/Telegram phone channels are
+ * gated by the delivery flags in {@link in.arthayantra.strategysignal.insights.InsightPublisher};
+ * nothing pushes until the owner arms a channel (Stage 1, §10.3). Generators shipped: I1 {@code SIGNAL_PRIORITY}/{@code
  * DATA_TRUST}/{@code RISK_HEAT}; I2 context/rejection/hygiene/expiry breadth; I3 {@code
  * STRATEGY_EVIDENCE} + {@code SELL_DECISION}. I3 also adds the PROPOSE {@code /act} (prefill /
  * idempotent-instruction + audit, never places an order), {@code /compare}, and the strategy dossier.

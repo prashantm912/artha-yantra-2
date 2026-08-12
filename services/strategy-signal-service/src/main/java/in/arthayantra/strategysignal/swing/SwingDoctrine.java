@@ -139,4 +139,51 @@ public interface SwingDoctrine {
       ExitEvaluator.Position position,
       int lastIndex,
       int entryIndex);
+
+  /**
+   * M40 cross-vendor review Critical 3 fix, round 3 (owner ruling, 2026-08-02): the position's
+   * CURRENT effective governing stop, for CACHING IN MEMORY (never persisted — see {@code
+   * EmissionGuard#cacheManasGoverningStop}) so the Manas aggregate open-risk cap sees LIVE risk
+   * instead of the value frozen at open in {@code paper_positions.stop_loss}. Called by {@link
+   * SwingBatchEngine}'s exit pass on a bar where the position did NOT exit; it never affects the exit
+   * DECISION itself (that stays exactly {@link ExitEvaluator#evaluate}, unchanged), and — because
+   * nothing this value feeds is ever written to the database — it cannot affect {@code stop_loss} or
+   * any intraday-exit path either. M40 owns the risk calculation only; whether {@code stop_loss}
+   * itself should ever reflect the trail is a separate, later, owner decision.
+   *
+   * <p><b>Deliberately DISTINCT from {@link #trailLevel}</b>, which is a family-specific ADVISORY
+   * display figure whose CONTRACT does not require it to equal the family's enforced exit trigger.
+   * The distinction is about the guarantee, not about any particular family diverging today —
+   * caching {@code trailLevel} for every family would feed the risk calc a number nothing promises is
+   * the governing stop (moot in practice since only Manas has an aggregate-risk consumer, but wrong
+   * in principle).
+   *
+   * <p>⚠️ This paragraph used to justify itself by claiming Minervini's 50-day-MA is a display-only
+   * reference and its real exit is "percent/ATR-based". BOTH halves were FALSE and the error misled a
+   * live investigation (corrected 2026-08-03, see {@code
+   * docs/signal-analysis/2026-08-03-swing-exit-window-stretch.md}). Measured against all four
+   * published Minervini strategies at version 1.0.1: {@code exit_rules} is {@code
+   * [{stop_loss, basis:percent, value:8}, {trailing_stop, alias:sma50, basis:indicator}]} — there is
+   * NO ATR anywhere in the family's exit rules, and {@code sma50} IS a live exit trigger, second in
+   * precedence behind the 8% stop ({@link SwingBatchEngine} exit pass → {@link
+   * ExitEvaluator#evaluate} → the {@code basis:indicator} branch, which fires {@code
+   * ExitDecision("trailing_stop", …)} on {@code close <= level}). {@code MinerviniDoctrine.trailLevel}
+   * returns {@code bank.valueAt("sma50", lastIndex)} — byte-for-byte the level that branch compares
+   * against. So for Minervini the advisory figure and the enforced trigger DO coincide; the override
+   * is still declined because the contract does not guarantee that, not because they differ. The default returns {@code null} (a safe no-op — nothing is
+   * cached) so only a family whose OWN governing exit rule this figure actually mirrors byte-for-byte
+   * need override it; today that is Manas alone, via {@code ExitEvaluator#trailStop} — see that
+   * method's javadoc for the "equals the price the live exit check uses" guarantee that makes it safe
+   * to feed into the risk-accounting cache. The write side ({@code
+   * EmissionGuard#cacheManasGoverningStop}) separately enforces "never loosens", so a stale/late read
+   * of this value can only be a costless no-op, never a wrong tighten OR a silent loosen.
+   */
+  default BigDecimal governingStop(
+      StrategyDefinition definition,
+      IndicatorBank bank,
+      ExitEvaluator.Position position,
+      int lastIndex,
+      int entryIndex) {
+    return null;
+  }
 }

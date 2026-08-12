@@ -25,7 +25,7 @@ public final class ScreenerHistory {
   public record ScreenDatesResponse(List<ScreenDate> items) {}
 
   /** One name that entered or left the passers set between two screen dates (ranked by RS-rank). */
-  public record DiffRow(String symbol, @Schema(types = {"number", "null"}) BigDecimal rsRank) {}
+  public record DiffRow(String symbol, @Schema(type = "string", types = {"string", "null"}) BigDecimal rsRank) {}
 
   /**
    * The day-over-day passer diff: names that PASS all gates on {@code screenDate} but did not on

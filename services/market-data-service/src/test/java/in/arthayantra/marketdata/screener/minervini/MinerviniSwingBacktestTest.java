@@ -20,7 +20,8 @@ import org.junit.jupiter.api.Test;
  */
 class MinerviniSwingBacktestTest {
 
-  private final VcpDetector detector = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40, 60, 3, 65);
+  // min-base-weeks=0 mirrors the LIVE default — the constructor fail-fasts on a positive value.
+  private final VcpDetector detector = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40, 60, 0, 65);
 
   @Test
   void primaryBaseTakesABreakoutTradeAndStopsOutOnTheRollover() {

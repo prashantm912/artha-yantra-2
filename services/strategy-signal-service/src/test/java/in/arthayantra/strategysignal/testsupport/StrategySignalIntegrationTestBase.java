@@ -73,6 +73,20 @@ public abstract class StrategySignalIntegrationTestBase {
     registry.add("spring.datasource.username", TIMESCALE::getUsername);
     registry.add("spring.datasource.password", TIMESCALE::getPassword);
     registry.add("spring.flyway.enabled", () -> "false");
+    // ⚠️ Disable the notifier-health BOOT catch-up (task_7e754e11) for every IT context.
+    // NotifierHealthCatchUp fires on ApplicationReadyEvent and dispatches onto notifierExecutor, so
+    // a CACHED context would read notification_events and INSERT into canary_runs at an arbitrary
+    // later moment — inside whichever unrelated test happens to be running, against the SHARED
+    // singleton container. The default lives here, on the substrate every IT context extends, and
+    // there is NO in-hierarchy opt-out: a subclass @DynamicPropertySource runs BEFORE this one, so
+    // this registration is last and wins. NotifierHealthCatchUpIntegrationTest covers the path by
+    // calling catchUpIfMissed() DIRECTLY on a hand-constructed check with a fixed clock.
+    registry.add("artha.notifier.health.startup-catchup", () -> "false");
+    // ⚠️ Same rule, other door: NotifierHealthCheck.check() now CLAIMS a canary_runs row before
+    // publishing, so the 08:30 IST cron became a cached-context writer too — a CI run crossing
+    // 03:00 UTC would have a long-dead context stamp a row (and push) mid-test. Spring cron "-" =
+    // disabled; nothing asserts the scheduled tick, and the tests drive check() directly.
+    registry.add("artha.notifier.health.cron", () -> "-");
   }
 
   /** Raw-JDBC connection details (grant tests SET ROLE off this). */

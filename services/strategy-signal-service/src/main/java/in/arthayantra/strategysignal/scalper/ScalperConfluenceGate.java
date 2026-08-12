@@ -17,6 +17,7 @@ import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.stereotype.Component;
 
 /**
@@ -132,7 +133,35 @@ public class ScalperConfluenceGate {
       String underlying,
       LocalDate expiry,
       StrikePicker.Pick pick,
-      BigDecimal structuralStop) {}
+      BigDecimal structuralStop,
+      // G17/T14: the comparison direction of the BLOCKING rail, declared by the gate function that
+      // compared it. The persist seam judges `margin` against this, so the self-contradiction check
+      // is derived from the operator rather than a name table that drifts from the wiring.
+      RailMarginSign marginSign) {
+
+    /** Pre-G17 form: {@code marginSign} defaults to UNSIGNED (asserts nothing). */
+    public RejectionDiagnostic(
+        String blockingRail,
+        OptionType side,
+        BigDecimal operand,
+        BigDecimal threshold,
+        BigDecimal margin,
+        String reason,
+        BigDecimal compositeScore,
+        BigDecimal compositeThreshold,
+        List<RailCheck> checks,
+        Confluence confluence,
+        ScalperGateContext context,
+        String underlying,
+        LocalDate expiry,
+        StrikePicker.Pick pick,
+        BigDecimal structuralStop) {
+      this(
+          blockingRail, side, operand, threshold, margin, reason, compositeScore, compositeThreshold,
+          checks, confluence, context, underlying, expiry, pick, structuralStop,
+          RailMarginSign.UNSIGNED);
+    }
+  }
 
   /**
    * INT §13 row 19 / FID P1-8: the fired-side counterpart of {@link RejectionDiagnostic}. When the gate
@@ -163,13 +192,65 @@ public class ScalperConfluenceGate {
    * was rejected — and, symmetrically, the full condition matrix behind a FIRED entry (§13 row 19).
    */
   public record Result(
-      Optional<Decision> decision, RejectionDiagnostic rejection, FiredDiagnostic fired) {
+      Optional<Decision> decision, RejectionDiagnostic rejection, FiredDiagnostic fired,
+      // MEASUREMENT ONLY (V056). Non-null ONLY on the oracle path, and only when the evaluation got
+      // far enough to score a confluence AND market-data published a level operand. Read by nothing
+      // on the live path.
+      SentimentCounterfactual sentimentCounterfactual) {
+
+    /** Pre-counterfactual 3-arg form: {@code sentimentCounterfactual} defaults to null (= unknown). */
+    public Result(
+        Optional<Decision> decision, RejectionDiagnostic rejection, FiredDiagnostic fired) {
+      this(decision, rejection, fired, null);
+    }
 
     /** True when the gate blocked the entry (a rejection diagnostic is present). */
     public boolean blocked() {
       return decision.isEmpty();
     }
   }
+
+  /**
+   * MEASUREMENT ONLY — the EXACT verdict the oracle would have reached had the sentiment rules read
+   * the LEVEL operand ({@code sentimentLevelPct}) instead of the ΔOI-FLOW one they do read.
+   *
+   * <p><b>Why this is a DECISION and not a pair of operand verdicts.</b> Round-3 cross-vendor review:
+   * recording only "the sentiment dot would have flipped" cannot tell a still-passing bar from one
+   * that fell below threshold, nor a cleared block from one still held by another rail. Those rows
+   * would show operand disagreement while looking like evidence of changed exit timing — the same
+   * bias as the original entry-only sampling gap, one level down, and capable of producing a wrong
+   * money conclusion. So the full verdict is computed and stored.
+   *
+   * <p><b>How it is exact.</b> The sentiment operand reaches the decision through EXACTLY two places:
+   * the {@code sentiment} dot (via {@code ConnectTheDotsScorer.sideSigned}) and the
+   * {@code oi-slope-agree} rail. ({@code ScalperGates.oiQuadrant} also passes {@code sentimentPct} to
+   * its {@code GateOutcome}, but only as the REPORTED operand — its verdict comes from the futures
+   * quadrant.) Every other rail is sentiment-independent, so its LIVE outcome is also its
+   * counterfactual outcome and is read straight off the recorded rail matrix. The two dependent ones
+   * are recomputed by running the REAL predicates over the substituted context — no formula is
+   * re-implemented here, and no second fetch is made.
+   *
+   * <p>{@code side} is sentiment-independent (VWAP-derived), so a counterfactual that fires fires on
+   * the SAME side; {@code oracleSide} is that side when {@link #wouldFire()}, else null.
+   *
+   * @param oracleSide the side the level-based oracle would have CONFIRMED; null when it would not fire
+   * @param wouldFire whether the level-based oracle would have produced a decision at all
+   * @param composite the counterfactual confluence aggregate
+   * @param threshold the composite threshold it was judged against
+   * @param compositeValid whether the counterfactual composite cleared threshold AND its decisive legs
+   * @param slopeGatePass the counterfactual {@code oi-slope-agree} verdict; null when that tag is unarmed
+   * @param blockingRail the first SENTIMENT-INDEPENDENT rail that blocked live — when non-null the
+   *     counterfactual cannot fire whatever the operand says, which is what makes the verdict provable
+   *     from the row alone
+   */
+  public record SentimentCounterfactual(
+      OptionType oracleSide,
+      boolean wouldFire,
+      BigDecimal composite,
+      BigDecimal threshold,
+      boolean compositeValid,
+      Boolean slopeGatePass,
+      String blockingRail) {}
 
   /**
    * Mutable per-evaluation collector: accumulates the rail checks and the resolved state (side, context,
@@ -183,20 +264,49 @@ public class ScalperConfluenceGate {
     private Confluence confluence;
     private BigDecimal confluenceThreshold;
     private RailCheck firstFailure;
+    // G17/T14: the comparison direction the FIRST failing rail declared, captured alongside it so
+    // the persist seam can judge the summary margin against the operator that produced it. Kept
+    // here rather than on RailCheck so the diagnostic JSON + its 3 test builders stay untouched.
+    private RailMarginSign firstFailureSign = RailMarginSign.UNSIGNED;
     private String underlying;
     private LocalDate expiry;
     private StrikePicker.Pick pick;
     private BigDecimal structuralStop;
+    // V056 measurement-only: set on the ORACLE path once every rail has been recorded. Null means
+    // "no counterfactual" — no level operand, or the gate blocked before a confluence was scored.
+    private SentimentCounterfactual counterfactual;
+
+    /**
+     * The rails whose outcome the sentiment operand can change. Everything else is
+     * sentiment-independent, so its LIVE pass/fail is also its counterfactual pass/fail.
+     */
+    private static final Set<String> SENTIMENT_DEPENDENT_RAILS =
+        Set.of("oi-slope-agree", "confluence-composite");
+
+    /**
+     * The FIRST recorded rail that blocked and that the sentiment operand cannot influence. Non-null
+     * ⇒ the counterfactual cannot fire however the substituted operand reads, and the row can be
+     * verified without re-deriving anything.
+     */
+    String firstSentimentIndependentBlock() {
+      for (RailCheck c : checks) {
+        if (!c.pass() && !SENTIMENT_DEPENDENT_RAILS.contains(c.rail())) {
+          return c.rail();
+        }
+      }
+      return null;
+    }
 
     /** True once any recorded rail has failed — the entry is blocked (checked once, at the end). */
     boolean anyFailed() {
       return firstFailure != null;
     }
 
-    private RailCheck record(RailCheck rc) {
+    private RailCheck record(RailCheck rc, RailMarginSign sign) {
       checks.add(rc);
       if (!rc.pass() && firstFailure == null) {
         firstFailure = rc; // the FIRST failing rail becomes the summary blockingRail
+        firstFailureSign = sign; // ...and its operator direction rides with it (G17)
       }
       return rc;
     }
@@ -208,13 +318,16 @@ public class ScalperConfluenceGate {
           operand != null && threshold != null ? operand.subtract(threshold) : null;
       return !record(
               new RailCheck(
-                  rail, o.pass(), operand, threshold, margin, o.reason(), RailPolicies.of(rail)))
+                  rail, o.pass(), operand, threshold, margin, o.reason(), RailPolicies.of(rail)),
+              o.marginSign()) // DERIVED: the sign the gate function itself declared
           .pass();
     }
 
     /** Records a boolean/verdict rail (no scalar operand); returns true when it FAILED. */
     boolean failsBool(String rail, boolean pass, String reason) {
-      return !record(new RailCheck(rail, pass, null, null, null, reason, RailPolicies.of(rail)))
+      return !record(
+              new RailCheck(rail, pass, null, null, null, reason, RailPolicies.of(rail)),
+              RailMarginSign.UNSIGNED) // no scalar operand/threshold -> margin is always null
           .pass();
     }
 
@@ -223,7 +336,10 @@ public class ScalperConfluenceGate {
       return !record(
               new RailCheck(
                   rail, valid, aggregate, threshold,
-                  compositeMargin(valid, aggregate, threshold), reason, RailPolicies.of(rail)))
+                  compositeMargin(valid, aggregate, threshold), reason, RailPolicies.of(rail)),
+              // aggregate >= threshold is a floor; compositeMargin() already records NULL for a
+              // decisive-leg block (B5/#985), so a NON-null blocked margin is the scalar shortfall.
+              RailMarginSign.NEGATIVE_WHEN_BLOCKED)
           .pass();
     }
 
@@ -239,8 +355,10 @@ public class ScalperConfluenceGate {
           new RejectionDiagnostic(
               b.rail(), side, b.operand(), b.threshold(), b.margin(), b.reason(),
               confluence == null ? null : confluence.aggregate(), confluenceThreshold,
-              List.copyOf(checks), confluence, context, underlying, expiry, pick, structuralStop),
-          null);
+              List.copyOf(checks), confluence, context, underlying, expiry, pick, structuralStop,
+              firstFailureSign),
+          null,
+          counterfactual);
     }
 
     /**
@@ -263,12 +381,19 @@ public class ScalperConfluenceGate {
               underlying,
               expiry,
               pick,
-              structuralStop));
+              structuralStop),
+          counterfactual);
     }
   }
 
   /**
    * Confluence-gate one passing chart entry. Empty BLOCKS the signal.
+   *
+   * <p><b>This is the non-enforcing ORACLE read</b> — it does NOT enforce the strategy's declared
+   * {@code option_types}, because its caller is the E9 D4 confluence-flip EXIT oracle, which must see
+   * the TRUE market side including the one the strategy will not ENTER. Thin delegation to
+   * {@link #evaluateOracle}, where that contract is spelled out; entry paths use
+   * {@link #evaluateWithDiagnostic} instead.
    *
    * @param cfg the strategy's scalper knobs (underlying, strike band, threshold)
    * @param bank the engine indicator bank for the index future at this bar
@@ -286,12 +411,35 @@ public class ScalperConfluenceGate {
       Instant barInstant,
       LocalTime istTime,
       LocalDate eodDate) {
-    // Bare-decision ORACLE read (E9 D4 confluence-flip EXIT, SignalEngine.confluenceFlipExit): does NOT
-    // enforce option_types — the flip oracle must see the TRUE market side, including the one the strategy
-    // will not ENTER, so a held single-side position can detect a confluence flip against it.
+    return evaluateOracle(cfg, bank, future, index, barInstant, istTime, eodDate).decision();
+  }
+
+  /**
+   * The ORACLE read as a full {@link Result} — byte-identical evaluation to {@link #evaluate}, which
+   * now delegates here and simply drops everything but the decision.
+   *
+   * <p><b>This is NOT {@link #evaluateWithDiagnostic}.</b> The two differ on {@code enforceOptionSide}
+   * ({@code false} here, {@code true} there), and that difference is load-bearing: the flip oracle must
+   * see the TRUE market side, INCLUDING the one the strategy will not ENTER, so a held single-side
+   * position can detect a confluence flip against it. Calling the entry form from the exit path would
+   * silently change which held positions exit — a money defect. The oracle keeps its own accessor
+   * precisely so nobody has to choose between "I need the diagnostic" and "I need oracle semantics".
+   *
+   * <p>Exists because the diagnostic was ALREADY being computed and discarded: the shared core builds
+   * the full {@link Result} either way, so exposing it costs nothing at runtime and lets the caller
+   * record what the oracle saw (the measurement-only {@code SentimentLevelShadow}) without a second
+   * evaluation and without touching the decision.
+   */
+  public Result evaluateOracle(
+      ScalperConfig cfg,
+      BarValues bank,
+      EngineSeries future,
+      int index,
+      Instant barInstant,
+      LocalTime istTime,
+      LocalDate eodDate) {
     return evaluateInternal(
-            cfg, bank, future, index, barInstant, istTime, eodDate, null, false, false)
-        .decision();
+        cfg, bank, future, index, barInstant, istTime, eodDate, null, false, false, true);
   }
 
   /**
@@ -309,7 +457,7 @@ public class ScalperConfluenceGate {
       LocalDate eodDate) {
     // The ENTRY evaluation the live engine persists — ENFORCES the declared option-side constraint.
     return evaluateInternal(
-        cfg, bank, future, index, barInstant, istTime, eodDate, null, false, true);
+        cfg, bank, future, index, barInstant, istTime, eodDate, null, false, true, false);
   }
 
   /**
@@ -339,7 +487,7 @@ public class ScalperConfluenceGate {
       OptionType forcedSide,
       boolean carryClock) {
     return evaluateInternal(
-        cfg, bank, future, index, barInstant, istTime, eodDate, forcedSide, carryClock, true);
+        cfg, bank, future, index, barInstant, istTime, eodDate, forcedSide, carryClock, true, false);
   }
 
   /**
@@ -360,7 +508,11 @@ public class ScalperConfluenceGate {
       LocalDate eodDate,
       OptionType forcedSide,
       boolean carryClock,
-      boolean enforceOptionSide) {
+      boolean enforceOptionSide,
+      // MEASUREMENT ONLY: compute the level-operand counterfactual verdict. TRUE only from
+      // evaluateOracle (the exit path); every ENTRY path passes false, so the entry hot path does no
+      // extra work and its behaviour is byte-identical.
+      boolean captureSentimentCounterfactual) {
     Diag diag = new Diag();
     // §0B hard pre-flight (§12.1): the time window — the one the YAML session cannot express (the
     // 11:00–13:00 midday block). Blocked early, before the chain fetch, to skip the HTTP fan-out.
@@ -417,7 +569,7 @@ public class ScalperConfluenceGate {
     // floor, so the rail stays byte-identical for every shipped strategy. Computed ONCE, used by both the
     // straddle branch and the directional §0B volume check below.
     BigDecimal absVolFloor = ScalperGates.volumeFloorFor(cfg.signalIndex(), cfg.params().volumeFloor());
-    BigDecimal effVolFloor =
+    BigDecimal windowVolFloor =
         cfg.has("relative-volume-floor")
             ? ScalperGates.relativeVolumeFloor(
                 priorVolumes(bank, index, oiProps.relativeVolumeWindow().intValue()),
@@ -425,6 +577,36 @@ public class ScalperConfluenceGate {
                 oiProps.relativeVolumeMinBars().intValue(),
                 absVolFloor)
             : absVolFloor;
+    // G10 (tag time-of-day-volume-floor, default-OFF): the in-session window above is SYSTEMATICALLY
+    // biased against the open. Measured over 21 sessions, its opening-10 median runs mean 3.52x /
+    // worst 8.42x the session median and over-estimates on 19 of 21 — because the opening surge is a
+    // LEVEL SHIFT, not an outlier (07-29's first ten 3m bars had a MINIMUM of 32,760 against a session
+    // median of 15,015), and a median cannot reject a level. Consequence: bars clear the floor 11.9%
+    // of the time in the first 90 minutes vs 30.9% for the rest of the day.
+    //
+    // The fix is to compare a bar against the SAME TIME OF DAY on prior sessions, so a busy 09:18 is
+    // judged against other 09:18s. Bake-off on the same 21 sessions (open-pass / rest-pass):
+    //   status quo 11.9/30.9 (ratio 0.39)  ·  prior-session SEED 57.8/29.5 (1.96)  ·  profile 27.5/29.2 (0.94)
+    // ⚠️ The flat prior-session seed is NOT the fix — it REVERSES the bias instead of removing it,
+    // making the open the LOOSEST part of the day. Only a per-time-of-day baseline tracks the shape.
+    //
+    // Depth is deliberately shallow: the live 3m series warms 4 CALENDAR days (LiveSeriesStore
+    // .warmupDays has no 3m case, so it takes default 4), which is 2-3 sessions. That is not a
+    // limitation — 2 sessions measured the MOST uniform of all depths tried (0.94 vs 0.85 at 3 and
+    // 0.79 at 5), a shallow profile tracking the current regime more closely.
+    //
+    // Fail-safe by construction: too few prior sessions carry this offset and relativeVolumeFloor
+    // falls through to `windowVolFloor`, i.e. exactly today's behaviour. Reuses the SAME median x
+    // multiplier math as the window floor — only the SAMPLE differs.
+    BigDecimal effVolFloor =
+        cfg.has("time-of-day-volume-floor")
+            ? ScalperGates.relativeVolumeFloor(
+                timeOfDayVolumes(
+                    bank, future, index, oiProps.timeOfDayProfileSessions().intValue()),
+                oiProps.relativeVolumeMultiplier(),
+                MIN_TIME_OF_DAY_SESSIONS,
+                windowVolFloor)
+            : windowVolFloor;
     // #11 (section 3.11) Straddle: a direction-NEUTRAL volatility position trading BOTH legs of the
     // SAME ATM strike (delta≈0.5 each). It must NOT take the CE/PE directional split below — there is no
     // single side — so it branches here on the side-agnostic §0B rails (time window already passed +
@@ -986,13 +1168,26 @@ public class ScalperConfluenceGate {
             cfg.has("iv-per-strike"), cfg.has("premium-skew"), cfg.has("dow-confluence"),
             // T24: the dot must test the SAME floor the rail did (effVolFloor above), not the
             // static per-index default it resolved on its own.
-            effVolFloor);
+            effVolFloor,
+            // A3: `iv_rank` is default-OFF. Its input is suppressed below the 60-trading-day
+            // IvAnalyticsService history floor and would start resolving on a CALENDAR trigger
+            // (~late Sep 2026) — arming it stays an owner decision (tag ⇒ republish), never a date.
+            cfg.has("iv-rank-dot"),
+            // F5 U4b: `dot-null-withheld` unifies the scorer's THREE missing-input rules (withheld /
+            // supports / opposes-in-denominator) to one — input-missing ⇒ withheld. DEFAULT-OFF: the
+            // unarmed LEGACY policy leaves the dot list and the aggregate byte-identical, and only the
+            // never-read `withheldAggregate` shadow rides along. Arming changes which signals fire and
+            // needs a REPUBLISH (the engine reads the PUBLISHED config).
+            cfg.has("dot-null-withheld") ? NullPolicy.WITHHELD : NullPolicy.LEGACY,
+            coverageFloorArmed(cfg));
     diag.confluence = conf;
     diag.confluenceThreshold = cfg.confluenceThreshold();
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();
     diag.failsScore(
         "confluence-composite", valid, conf.aggregate(), cfg.confluenceThreshold(),
-        compositeReason(conf, cfg.confluenceThreshold(), vwapHardGate));
+        compositeReason(
+            conf, cfg.confluenceThreshold(), vwapHardGate,
+            coverageFloorArmed(cfg) ? oiProps.dotCoverageFloor() : null));
     BigDecimal stop = structuralStop;
     // #7 (section 7) Hero-Zero buys the option ONE STRIKE INSIDE the short-covering strike (a CALL one
     // strike below the max-CE-OI strike for a bullish break, a PUT one above the max-PE-OI strike for a
@@ -1022,6 +1217,17 @@ public class ScalperConfluenceGate {
     diag.structuralStop = stop;
     // All-eval: EVERY applicable rail (and the composite + strike pick) is now recorded above. The entry
     // fires only when NONE failed; a single failure blocks, but the DB row still carries the full matrix.
+    //
+    // MEASUREMENT ONLY, and ONLY on the oracle path (captureSentimentCounterfactual) so the entry hot
+    // path pays nothing and stays byte-identical. Runs HERE because the rail matrix is complete: every
+    // sentiment-INDEPENDENT rail's live outcome is also its counterfactual outcome, so the exact verdict
+    // needs only the two dependent ones recomputed. Pure arithmetic over the already-fetched immutable
+    // context — no second fetch, so the counterfactual provably saw what the live decision saw.
+    if (captureSentimentCounterfactual) {
+      diag.counterfactual =
+          sentimentCounterfactual(
+              diag, cfg, ctx, side, bank, index, vwapHardGate, effVolFloor, conf);
+    }
     if (diag.anyFailed()) {
       return diag.block();
     }
@@ -1058,9 +1264,22 @@ public class ScalperConfluenceGate {
    * A human reason for a blocked confluence composite: which of the decisive legs failed (VWAP side
    * — decisive only while {@code vwapHardGate} holds; the #9 opening-tick path degrades it to a soft
    * dot before 10:30, where naming it "decisive" would be the exact T14 contradiction — the 60m
-   * bias, the 40/40 stand-aside) or, when all held, the aggregate falling short of the threshold.
+   * bias, the 40/40 stand-aside, the §5.3 data-coverage floor) or, when all held, the aggregate
+   * falling short of the threshold.
+   *
+   * <p>{@code coverageFloor} is the ARMED floor value or NULL when the strategy has not armed it.
+   * Without this branch a coverage-floor block fell through to the scalar sentence and persisted
+   * <b>"aggregate 0.9202 below threshold 0.60"</b> — a statement that is false on its own face, with
+   * the real reason (a vanished data plane) recorded nowhere. It is the same T14 class of defect the
+   * margin fix above addresses: a diagnostic column asserting something the numbers contradict is
+   * worse than an empty one, because every later §3 query believes it.
+   *
+   * <p>The coverage branch sits LAST among the legs so the three original ones keep their exact
+   * precedence — an unarmed strategy, or an armed one whose coverage held, produces a byte-identical
+   * string.
    */
-  static String compositeReason(Confluence conf, BigDecimal threshold, boolean vwapHardGate) {
+  static String compositeReason(
+      Confluence conf, BigDecimal threshold, boolean vwapHardGate, BigDecimal coverageFloor) {
     if (conf.standAside()) {
       return "stand-aside (both-IV-high 40/40 suppression)";
     }
@@ -1069,6 +1288,10 @@ public class ScalperConfluenceGate {
     }
     if (!conf.biasAligned()) {
       return "60m bias opposes the side";
+    }
+    if (coverageFloor != null && !conf.coverageFloorHeld()) {
+      return "dot data coverage " + conf.coverage() + " below floor " + coverageFloor
+          + " (decisive)";
     }
     return "aggregate " + conf.aggregate() + " below threshold " + threshold;
   }
@@ -1210,12 +1433,150 @@ public class ScalperConfluenceGate {
    * session bar yields a short list and {@link ScalperGates#relativeVolumeFloor} falls back to the fixed
    * §0B floor below its {@code minBars} warmup.
    */
+  /**
+   * G10: how many prior sessions must carry this time-of-day offset before the profile is trusted.
+   * Below it {@link ScalperGates#relativeVolumeFloor} falls back to the caller's window floor — so a
+   * cold boot, a fresh contract after a roll, or the first session after a long weekend all degrade
+   * to exactly today's behaviour rather than to a floor computed off one sample.
+   */
+  private static final int MIN_TIME_OF_DAY_SESSIONS = 2;
+
+  /**
+   * The volume at the SAME IST TIME OF DAY in each of the previous {@code sessions} sessions — the
+   * G10 profile sample. Volumes come from {@code bank.builtin("volume", …)}, byte-identical to what
+   * the {@code volume} rail's own operand reads, so the profile and the operand can never drift onto
+   * different scales; {@code series} is used ONLY to walk session boundaries.
+   *
+   * <p>⚠️ Matched on the WALL-CLOCK bucket time, never on the ordinal bar offset within the session
+   * (cross-vendor review, 2026-07-30 — the first version matched by offset and was wrong). {@link
+   * LiveSeriesStore} warms from an exact {@code now.minusDays(4)} instant, so the OLDEST covered
+   * session routinely starts MID-SESSION: after a Monday 10:30 restart the Thursday slice begins at
+   * 10:30, and its "offset 25" is 11:45, not 10:30. Offset matching silently sampled the wrong
+   * bucket, and because the truncated session still yielded a value it satisfied {@link
+   * #MIN_TIME_OF_DAY_SESSIONS} and the fail-safe never fired — a wrong floor with no signal.
+   *
+   * <p>The common case stays O(1): every ordinary session starts 09:15, so the offset-derived
+   * candidate already carries the right bucket time and is accepted on the first check. Only a
+   * truncated or gapped session falls through to the bounded scan, and a session with no bar at that
+   * exact time contributes NOTHING — skipped, never substituted, so neither a half day nor a
+   * mid-session warm-up start can drag the median.
+   */
+  // package-private for ScalperConfluenceGateTest — the session walk is the new logic here and it
+  // deserves direct assertions rather than being inferred through a full gate evaluation.
+  static List<BigDecimal> timeOfDayVolumes(
+      BarValues bank, EngineSeries series, int index, int sessions) {
+    List<BigDecimal> out = new ArrayList<>();
+    java.time.LocalTime wanted = istBucketTime(series, index);
+    int offset = index - series.sessionStart(index);
+    int cursor = index;
+    for (int s = 0; s < sessions; s++) {
+      int previousEnd = series.previousSessionEnd(cursor);
+      if (previousEnd < 0) {
+        break; // no earlier session covered by the warm-up window
+      }
+      int previousStart = series.sessionStart(previousEnd);
+      int match = -1;
+      int candidate = previousStart + offset; // O(1) hit whenever both sessions open at 09:15
+      if (candidate <= previousEnd && wanted.equals(istBucketTime(series, candidate))) {
+        match = candidate;
+      } else {
+        for (int i = previousStart; i <= previousEnd; i++) {
+          if (wanted.equals(istBucketTime(series, i))) {
+            match = i;
+            break;
+          }
+        }
+      }
+      if (match >= 0) {
+        out.add(bank.builtin("volume", match));
+      }
+      cursor = previousEnd;
+    }
+    return out;
+  }
+
+  /** A bar's IST wall-clock bucket time — the key the G10 profile matches prior sessions on. */
+  private static java.time.LocalTime istBucketTime(EngineSeries series, int index) {
+    return series
+        .candle(index)
+        .bucketStart()
+        .withOffsetSameInstant(EngineSeries.IST)
+        .toLocalTime();
+  }
+
   private static List<BigDecimal> priorVolumes(BarValues bank, int index, int window) {
     List<BigDecimal> out = new ArrayList<>();
     for (int j = 1; j <= window && index - j >= 0; j++) {
       out.add(bank.builtin("volume", index - j));
     }
     return out;
+  }
+
+  /**
+   * MEASUREMENT ONLY (V056) — the EXACT verdict the oracle would have reached on the LEVEL operand.
+   *
+   * <p>Called once per ORACLE evaluation, after every rail has been recorded. Returns null when no
+   * counterfactual is computable: market-data published no {@code sentimentLevelPct}, or there is no
+   * scored confluence. Null is "unknown", never "would not fire" — collapsing those would bias the
+   * measurement toward the incumbent operand exactly where the data is thin.
+   *
+   * <p>Exactness rests on a closed argument, not on sampling: the sentiment operand reaches the
+   * decision through EXACTLY two rails ({@code oi-slope-agree} and, via the {@code sentiment} dot,
+   * {@code confluence-composite}). Both are recomputed here by running the REAL predicates —
+   * {@link ConnectTheDotsScorer#score} and {@link ScalperGates#oiSlopeAgree} — over the substituted
+   * context, so no formula is duplicated and a change to either rule moves the counterfactual with
+   * it. Every OTHER rail is sentiment-independent, so its recorded live outcome IS its counterfactual
+   * outcome; {@link Diag#firstSentimentIndependentBlock()} reports the first such block, and when it
+   * is non-null the verdict is false regardless of the operand — which is what makes the stored row
+   * provable on its own rather than something a reader has to re-derive.
+   *
+   * <p>The scorer arguments MIRROR the live call exactly (same threshold, props, vwapHardGate, tag
+   * flags, resolved volume floor and null policy) — the ONLY difference is the substituted operand.
+   * {@code bias60m} is re-read from the same bank rather than threaded through, so the live call site
+   * stays untouched; it is a pure indexed lookup, not a fetch.
+   */
+  private SentimentCounterfactual sentimentCounterfactual(
+      Diag diag, ScalperConfig cfg, ScalperGateContext ctx, OptionType side, BarValues bank,
+      int index, boolean vwapHardGate, BigDecimal effVolFloor, Confluence conf) {
+    ScalperGateContext shadowCtx = SentimentLevelShadow.withLevelAsFlow(ctx);
+    if (shadowCtx == null || conf == null || side == null) {
+      return null;
+    }
+    Confluence shadowConf =
+        ConnectTheDotsScorer.score(
+            shadowCtx, side, bias60m(bank, index), cfg.confluenceThreshold(), oiProps, vwapHardGate,
+            cfg.has("iv-per-strike"), cfg.has("premium-skew"), cfg.has("dow-confluence"),
+            effVolFloor, cfg.has("iv-rank-dot"),
+            cfg.has("dot-null-withheld") ? NullPolicy.WITHHELD : NullPolicy.LEGACY,
+            coverageFloorArmed(cfg));
+    boolean compositeValid = side == OptionType.CE ? shadowConf.bullish() : shadowConf.bearish();
+    Boolean slopeGatePass =
+        cfg.has("oi-slope-agree")
+            ? ScalperGates.oiSlopeAgree(shadowCtx.oi(), side).pass()
+            : null;
+    String blockingRail = diag.firstSentimentIndependentBlock();
+    boolean wouldFire =
+        blockingRail == null && compositeValid && (slopeGatePass == null || slopeGatePass);
+    return new SentimentCounterfactual(
+        wouldFire ? side : null, wouldFire, shadowConf.aggregate(), cfg.confluenceThreshold(),
+        compositeValid, slopeGatePass, blockingRail);
+  }
+
+  /**
+   * F5 U4b §5.3: whether the DEFAULT-OFF dot-plane data-coverage floor applies to this strategy.
+   *
+   * <p><b>{@code dot-null-withheld} IMPLIES the floor</b> — that is the point of the {@code ||}, not
+   * a convenience. Unifying the null rule to "withhold" is measured near-inert on a normal tape
+   * (zero bar-side flips over 11,068 post-P3 evaluations) but is overwhelmingly LOOSENING on the two
+   * sessions where the data was actually broken: withholding would have RAISED the aggregate on
+   * 1,812 of 1,816 rows across the 2026-07-20 Timescale outage and the 2026-07-28 monthly expiry.
+   * The decision sheet's rule is "arm the floor TOGETHER with the policy — never the policy alone";
+   * making the policy tag arm the floor enforces that structurally, so no future republish can
+   * separate them by omission. The floor tag ALONE (with the LEGACY policy) is a pure tightening and
+   * is the safe way to measure the floor on its own first.
+   */
+  private static boolean coverageFloorArmed(ScalperConfig cfg) {
+    return cfg.has("dot-coverage-floor") || cfg.has("dot-null-withheld");
   }
 
   private int bias60m(BarValues bank, int index) {

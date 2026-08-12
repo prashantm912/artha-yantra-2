@@ -252,15 +252,13 @@ public class PaperSignalListener {
         if (pct == null) {
           continue;
         }
-        java.math.BigDecimal fraction =
-            pct.divide(new java.math.BigDecimal("100"), 6, java.math.RoundingMode.HALF_UP);
+        // §9-04: the ONE definition, shared with the backtest replay and PremiumBracketRules. The
+        // exit-equivalence fixture called this a "genuine THIRD copy"; it is no longer a copy.
         String type = rule.path("type").asText();
         if ("stop_loss".equals(type)) {
-          sl = ltp.multiply(java.math.BigDecimal.ONE.subtract(fraction))
-              .setScale(2, java.math.RoundingMode.HALF_UP);
+          sl = in.arthayantra.strategyengine.eval.PremiumLevels.paiseRounded(ltp, pct, false);
         } else if ("take_profit".equals(type)) {
-          tp = ltp.multiply(java.math.BigDecimal.ONE.add(fraction))
-              .setScale(2, java.math.RoundingMode.HALF_UP);
+          tp = in.arthayantra.strategyengine.eval.PremiumLevels.paiseRounded(ltp, pct, true);
         }
       }
       return new PremiumBrackets(sl, tp);

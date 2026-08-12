@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.futures.screener;
 
 import in.arthayantra.marketdata.options.OiInterpretation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
@@ -43,13 +44,16 @@ public final class MarketMoversScreener {
   /** One graded mover row (LTP/move/OI%/quadrant/breakout/OH-OL/daily-RSI + the long/short verdicts). */
   public record ScreenerRow(
       String symbol,
-      BigDecimal ltp,
+      @Schema(type = "string") BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal pricePct,
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal oiPct,
       OiInterpretation interpretation,
       int breakoutDays,
       boolean openHigh,
       boolean openLow,
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal dailyRsi,
       long volume,
       boolean longCandidate,

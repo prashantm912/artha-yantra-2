@@ -69,6 +69,18 @@ fi
 if grep -Eq '^contracts/([^/]*\.openapi\.json|json-schema-2020-12-keywords\.json)$' <<<"$files"; then
   strategy_gateway=true
 fi
+# deploy/docker-compose.yml is a TEST INPUT for both of these shards, not just deploy config:
+#   - CronPassthroughParityTest (both services) reads every ARTHA_*_CRON default out of it and
+#     fails if one drifts from the @Scheduled code default it is supposed to mirror, and
+#   - strategy-signal's SwingCoverageGateDefaultTest reads the coverage-gate passthrough.
+# Without this rule the one edit those guards exist to catch — a cron changed in compose, touching
+# nothing else — classifies to NO shard, so the guard never runs and the PR goes green. That was
+# already true of SwingCoverageGateDefaultTest before this rule existed. backtest is deliberately
+# NOT marked: nothing in that shard reads this file.
+if grep -Eq '^deploy/docker-compose\.yml$' <<<"$files"; then
+  market_data=true
+  strategy_gateway=true
+fi
 
 # Every service directory this repo knows about. The four JVM services are mapped to shards
 # above; the two Python services own their own workflows (ci-optimizer / ci-margin) and are

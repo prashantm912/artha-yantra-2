@@ -485,6 +485,36 @@ class SwingBatchCatchUpTest {
     verify(state, never()).markDone(any(), any());
   }
 
+  /**
+   * ⚠️ A failure BEFORE the claim must not touch the row — it is not ours to touch.
+   *
+   * <p>Cross-vendor review Critical, and the reviewer also called out that my previous test could
+   * not have caught it: that fixture guarantees this caller WINS the claim, so it only ever
+   * exercised the post-claim path. The handler sat at the call site, outside {@code catchUpSession},
+   * so a pre-claim throw still ran {@code markPending} — flipping a row another invocation was
+   * holding as RUNNING back to PENDING. That releases someone else's claim mid-flight and lets a
+   * third invocation claim and emit concurrently: the doubled entry and averaged paper position the
+   * durable gate exists to prevent, since {@code PaperService} averages a second open on the same
+   * key rather than rejecting it.
+   *
+   * <p>Here the intent read throws, so the claim is never taken.
+   */
+  @Test
+  void aFailureBeforeTheClaimNeverWritesToTheRow() {
+    SwingDoctrine manas = doctrine(true, FRIDAY);
+    when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true);
+    when(runs.hasRunWithEntries("manas-arora", FRIDAY)).thenReturn(false);
+    when(intents.findIntent("manas-arora", FRIDAY))
+        .thenThrow(new IllegalStateException("intent store unreachable"));
+
+    catchUp(MONDAY_0835, true, manas).catchUp();
+
+    verify(state, never()).markPending(eq("manas-arora"), eq(FRIDAY), any());
+    verify(state, never()).markPending("manas-arora", FRIDAY);
+    verify(state, never()).markDone(any(), any());
+  }
+
   @Test
   void aPartialRunIsLeftRetryableNotRecordedDone() {
     // Critical 1: a held anchor's daily bar was missing (exitSkipped>0). The run must NOT be marked

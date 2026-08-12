@@ -267,19 +267,7 @@ public class SwingBatchCatchUp {
             batch);
         return;
       }
-      // ⚠️ A throw AFTER the atomic claim used to reach only the family-level catch, which logs and
-      // moves on WITHOUT touching this row's reason. The row stays RUNNING, becomes retryable once
-      // the lease expires, and if a later attempt then exhausts the budget, abandonment preserves
-      // whatever reason was recorded BEFORE the failure — so the ABANDONED alert, which tells the
-      // operator that column is the LAST failure, would be lying. Cross-vendor review Major, and it
-      // falsified a sentence I had just added. Recording here makes the sentence true instead of
-      // softening it; the rethrow leaves the family boundary's logging and sweep behaviour intact.
-      try {
-        catchUpSession(doctrine, session, retryable.contains(session));
-      } catch (RuntimeException failed) {
-        state.markPending(batch, session, "EXECUTION_FAILED");
-        throw failed;
-      }
+      catchUpSession(doctrine, session, retryable.contains(session));
     }
   }
 
@@ -379,6 +367,33 @@ public class SwingBatchCatchUp {
     if (claim.isEmpty()) {
       return;
     }
+    // ⚠️ FROM HERE ON THIS CALLER OWNS THE CLAIM, and that is the only window in which it may write
+    // to the row. An earlier version put this handler at the CALL SITE, outside this method — which
+    // meant a failure BEFORE the claim (or one on a pass whose claim was LOST to another caller)
+    // still ran markPending, flipping a row another invocation was holding as RUNNING back to
+    // PENDING. That releases someone else's claim mid-flight and lets a third invocation claim and
+    // emit concurrently: the doubled entry and averaged paper position this durable gate exists to
+    // prevent (PaperService averages a second open on the same key rather than rejecting it).
+    // Cross-vendor review Critical — and my own test could not have caught it, because its fixture
+    // guarantees this caller wins the claim.
+    try {
+      runClaimedSession(doctrine, session, batch, claim.get(), armingUnknown);
+    } catch (RuntimeException failed) {
+      // Safe now: we hold the claim, so PENDING is ours to write. Without this the row keeps its
+      // PREVIOUS reason and the ABANDONED alert would name a stale one.
+      state.markPending(batch, session, "EXECUTION_FAILED");
+      throw failed;
+    }
+  }
+
+  /** The claimed body. Every write in here is legitimate: the caller holds this session's claim. */
+  private void runClaimedSession(
+      SwingDoctrine doctrine,
+      LocalDate session,
+      String batch,
+      SwingCatchUpStateRepository.Claim heldClaim,
+      boolean armingUnknown) {
+    Optional<SwingCatchUpStateRepository.Claim> claim = Optional.of(heldClaim);
     if (claim.get().attempts() > maxAttempts) {
       String reason = "ATTEMPT_BUDGET_EXHAUSTED after " + maxAttempts + " attempts";
       state.markAbandoned(batch, session, reason);

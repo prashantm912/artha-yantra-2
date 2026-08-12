@@ -116,12 +116,14 @@ public class BhavcopyCloseCanary {
    * the channel. The margin is thin even at the current 20:10 against a 19:30 bhavcopy, and it
    * shrinks to nothing under the pending schedule move.
    *
-   * <p>⚠️ A skipped comparison is NOT automatically recovered. {@code BhavcopyStartupCatchup} starts
-   * the backfill on the next boot, so the DATA arrives — but this canary has no completion listener
-   * and only fires on its own cron, so that session's close comparison is simply not made until the
-   * next scheduled sweep finds it as the latest date. Skipping trades a missed check for a wrong
-   * one, which is the right trade; it does not make the check free. Wiring a bhavcopy-complete
-   * listener here is the real fix and is deliberately not in this change.
+   * <p>⚠️ A skipped comparison is PERMANENTLY missed for that session, not deferred.
+   * {@code BhavcopyStartupCatchup} starts the backfill on the next boot, so the DATA arrives — but
+   * this canary has no completion listener and only fires on its own cron, and by the time it next
+   * fires that session is no longer today, so the guard below skips it again. Forever. Only a
+   * same-day retry, or a bhavcopy-complete listener, can ever make it. Skipping still trades a
+   * missed check for a WRONG one, which is the right trade; it does not make the check free, and
+   * the loss is a whole session's close comparison rather than a delay. Wiring that listener is the
+   * real fix and is deliberately not in this change.
    */
   @Scheduled(cron = "${artha.bhavcopy-close.cron:0 10 20 * * MON-FRI}", zone = "Asia/Kolkata")
   public void sweep() {

@@ -1887,6 +1887,39 @@ shortened, this becomes reachable and should be built.** The structural guard th
 is narrower: the exception handler sits below the successful claim, so a pre-claim throw can no
 longer release another invocation's row.
 
+**RESOLVED 2026-08-12 · THE 09:15 DEADLINE-ATOMICITY CRITICAL IS REAL IN CODE BUT NOT REACHABLE AT
+08:35 — AND THE POLL IT WAS BLOCKING IS ALSO SAFE.** It had sat "unverified, live, money path" and was
+the stated blocker on restoring the morning poll. Resolved by reading the gate and MEASURING the run,
+rather than by reasoning about it.
+
+*The defect is real.* `SwingBatchCatchUp.marketOpenDeadlinePassed()` has six call sites, but the LAST
+one before a session actually runs is `SwingBatchCatchUp.java:377`, ahead of `repairPendingEffects`
+and ahead of the engine call. `SwingBatchEngine.runDaily` knows nothing about the deadline, so a
+session run that begins before 09:15 and finishes after it **does** emit entries into a live session,
+pricing off a daily bar that is now partial. There is no in-engine abort.
+
+*It is bounded much more tightly than "a pass may cross 09:15", though.* `SwingBatchCatchUp.java:259`
+re-checks the deadline **per session** inside the sweep loop and returns, explicitly leaving the
+remaining sessions retryable. So the exposure is never "the whole multi-day replay" — it is ONE
+session for ONE family, beginning at worst in the final moments before the open.
+
+*Measured, live, 2026-08-12* (`strategy.swing_catchup_runs`, claimed_at to updated_at): minervini
+**44.1 s**, manas-arora **37.1 s**; both families end-to-end 08:34:59 to 08:36:20 = **81 s**. Against
+an 08:35 start that is ~39 minutes of headroom — a ~29x margin, so **the deployed single-shot cannot
+reach the defect**.
+
+*And it does not block the poll either.* The proposed tick set is :05/:20/:35/:50, so the last tick
+before the open is **09:05**, finishing ~09:06 on measured durations; the 09:20 tick is refused by the
+entry gate. **The condition to state is not "no poll" but "no tick within one session-run of 09:15"**
+— keep every tick at least ~5 minutes clear and the shape stays unreachable. What WOULD make it
+reachable: a tick placed near 09:15, or a single session's run growing past the last tick's headroom
+(a slow market-data leg, not more sessions — sessions are re-gated individually).
+
+*Residual, not fixed here:* the engine still has no deadline of its own, so this is a reachability
+argument about the current schedule, not containment. A headroom precondition at the call site
+("refuse to START unless the deadline is more than N minutes away") is the cheap real fix and is not
+built.
+
 **N67 · A CRON MINUTE EXPRESSES ONLY WHEN A JOB STARTS — NOT WHAT WINDOW IT READS, WHAT IT WAITS
 FOR, OR WHICH THREAD IT BLOCKS.** 2026-08-12, #1358: moving three jobs across the 19:00 boundary
 produced three Criticals, and all three were the same mistake in different clothes. (1) The paper

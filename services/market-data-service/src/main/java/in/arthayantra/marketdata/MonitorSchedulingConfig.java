@@ -16,8 +16,11 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  *
  * <p>Scope-fenced: ONLY pure detectors move onto {@link #monitorTaskScheduler()} via
  * {@code @Scheduled(scheduler = "monitorTaskScheduler")} — {@code FeedWatchdog.check},
- * {@code DataHealthCanary.sweep}, {@code SessionHealthProbe.scheduledProbe}. Every other job keeps
- * the default pool (its serial single-thread assumption is load-bearing for the batch jobs).
+ * {@code DataHealthCanary.sweep}, {@code SessionHealthProbe.scheduledProbe}, and (2026-08-11)
+ * {@code EveningChainCanary.check} — the single-shot pre-shutdown "is tonight's chain done" push,
+ * bound here for the same reason as its siblings: it is exactly the detector that must never be
+ * starved by a hung batch job, since a hung job is precisely what it exists to notice. Every other
+ * job keeps the default pool (its serial single-thread assumption is load-bearing for the batch jobs).
  *
  * <p>A THIRD pool, {@link #barFlushTaskScheduler()}, carries the 1 s bar-close sweep. It is neither a
  * detector nor a batch job — see that method's javadoc (S1, 2026-07-25).

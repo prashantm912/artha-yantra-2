@@ -377,16 +377,18 @@ services:
       # way). Added so the owner's ticker flip is a one-line .env change. Default kite (no behaviour change).
       ARTHA_MD_SOURCE_TICKER: ${ARTHA_MD_SOURCE_TICKER:-kite}
       ARTHA_MD_SOURCE_FIIDII: ${ARTHA_MD_SOURCE_FIIDII:-nse}
-      # "Can I shut down yet?" evening-chain push (2026-08-11): EveningChainCanary polls
-      # marketdata.ingest_runs for TODAY's evening batch sources and ntfy-pushes ONCE per IST day —
-      # "chain complete N/N" or "still pending: ...". Default ON — this is exactly what the owner
-      # asked for; alerts-enabled is a separate knob so the push can be silenced without disabling
-      # the GET /market/health/evening-chain read surface the Data-Ops page uses (that GET is never
-      # gated). Names MUST byte-match EveningChainCanary's artha.evening-chain.* placeholders (#653).
+      # "Can I shut down yet?" evening-chain push (2026-08-11, single-shot per review — the owner's
+      # HARD 19:00 shutdown + the evening batch chain's own move to a compressed 18:20-18:59
+      # single-shot window killed the earlier polling design). EveningChainCanary checks
+      # marketdata.ingest_runs ONCE, at 18:59 IST by default (right after the jobs' own window
+      # closes, before the 19:00 shutdown), and ntfy-pushes exactly once — "chain complete N/N" or
+      # "still pending: ...". Default ON — this is exactly what the owner asked for; alerts-enabled
+      # is a separate knob so the push can be silenced without disabling the GET
+      # /market/health/evening-chain read surface the Data-Ops page uses (that GET is never gated).
+      # Names MUST byte-match EveningChainCanary's artha.evening-chain.* placeholders (#653).
       ARTHA_EVENING_CHAIN_ENABLED: ${ARTHA_EVENING_CHAIN_ENABLED:-true}
       ARTHA_EVENING_CHAIN_ALERTS_ENABLED: ${ARTHA_EVENING_CHAIN_ALERTS_ENABLED:-true}
-      ARTHA_EVENING_CHAIN_POLL_CRON: "${ARTHA_EVENING_CHAIN_POLL_CRON:-0 */5 18-21 * * MON-FRI}"
-      ARTHA_EVENING_CHAIN_FINAL_CHECK_TIME: ${ARTHA_EVENING_CHAIN_FINAL_CHECK_TIME:-21:55}
+      ARTHA_EVENING_CHAIN_CHECK_CRON: "${ARTHA_EVENING_CHAIN_CHECK_CRON:-0 59 18 * * MON-FRI}"
       ARTHA_MD_SOURCE_OPTIONANALYTICS: ${ARTHA_MD_SOURCE_OPTIONANALYTICS:-native}
       # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.
       ARTHA_UPSTOX_ANALYTICS_ENABLED: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:-false}

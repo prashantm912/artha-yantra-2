@@ -10,8 +10,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalTime;
-import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -19,25 +17,28 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ResultSetExtractor;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * "Can I shut the machine down yet?" — the owner's own ask: a routine that keeps checking whether
- * TODAY's evening batch chain has finished, so they can close the stack at 19:00 (or extend it if
- * something is still running). This is deliberately a DIFFERENT question from {@link
- * IngestCoverageCanary}/{@link IngestHealthBoard}: those are a T+1 EOD board — they evaluate
- * YESTERDAY's coverage, the morning after, and {@link IngestHealthBoard} explicitly windows
- * strictly BEFORE today so an in-flight batch never false-REDs the morning view. Nothing in this
- * service answers "is TODAY's chain done yet" before this class; that gap is the whole point.
+ * "Can I shut the machine down yet?" — the owner's own ask: a routine that checks, once, shortly
+ * before the hard 19:00 IST shutdown, whether TODAY's evening batch chain has actually finished —
+ * and pushes exactly one ntfy message reporting either "chain complete N/N" or naming what is still
+ * outstanding. This is deliberately a DIFFERENT question from {@link IngestCoverageCanary}/{@link
+ * IngestHealthBoard}: those are a T+1 EOD board — they evaluate YESTERDAY's coverage, the morning
+ * after, and {@link IngestHealthBoard} explicitly windows strictly BEFORE today so an in-flight
+ * batch never false-REDs the morning view. Nothing in this service answers "is TODAY's chain done
+ * yet" before this class; that gap is the whole point.
  *
  * <p><b>The expected-source list is the ONE place both consumers read.</b> {@link #report()} is
  * side-effect-free and is the single source of truth for both the scheduled ntfy push ({@link
- * #poll()}) and the {@code GET /api/v1/market/health/evening-chain} read surface the Data-Ops page
+ * #check()}) and the {@code GET /api/v1/market/health/evening-chain} read surface the Data-Ops page
  * consumes — the source list ({@link #EXPECTED}) lives only here, not duplicated in the controller
  * or the frontend.
  *
@@ -45,35 +46,48 @@ import org.springframework.stereotype.Component;
  * INSTRUMENT_SYNC} (08:30 IST, a morning job) and {@code OPTIONS_SNAPSHOT_CAPTURE} (a continuous
  * intraday capture that stops accumulating at the 15:30 close) — neither is an evening batch, so
  * reusing that list would report "still pending" on two sources that never run in the evening at
- * all. This list is the nine sources that write to {@code ingest_runs} AFTER the close (verified
- * against each job's {@code @Scheduled} cron 2026-08-11): the three {@code NseEodScheduler} pulls,
- * the bhavcopy backfill, the two swing screeners, and the three EOD analytics folds.
+ * all. This list is the nine sources that write to {@code ingest_runs} for the evening chain
+ * (verified against each job's ledger call site 2026-08-11): the three {@code NseEodScheduler}
+ * pulls, the bhavcopy backfill, the two swing screeners, and the three EOD analytics folds.
+ * {@code MINERVINI_SCREEN}'s own {@code ingest_runs} boundary was moved (2026-08-11, same review)
+ * to close only AFTER {@code MinerviniScheduler}'s plane-divergence probe finishes, specifically so
+ * this class never has to know that sub-step exists — the ledger row already means "this leg is
+ * fully done", not "the screen write happened".
  *
- * <p><b>Never derives completion from the clock.</b> The evening chain's cron TIMES are being moved
- * earlier in a separate, unmerged change (poll-from-18:00 rather than fire-once-at-a-fixed-time) —
- * so "is source X done" is answered ONLY from its {@code ingest_runs} row for today, never from
- * "has it turned 19:45 yet". A change to when the jobs fire needs no change here.
+ * <p><b>Never derives completion from the clock.</b> "Is source X done" is answered ONLY from its
+ * {@code ingest_runs} row for today, never from wall-clock time — a change to when the evening jobs
+ * fire needs no change here.
  *
- * <p><b>Stuck vs never-started (the MANAS_SCREEN finding).</b> A source with no row yet today reads
- * PENDING; a source whose latest row today is {@code RUNNING} and still fresh also reads PENDING
- * (it may yet finish); but a {@code RUNNING} row aged past {@code
- * artha.ingest-canary.running-stale-minutes} (the SAME threshold {@link IngestHealthBoard} and
- * {@link IngestCoverageCanary} use — one knob, never let it drift) reads STUCK, not PENDING. Without
- * that distinction an orphaned RUNNING row (a container recreate mid-job, no reaper) would read
- * "in-flight" forever and the chain would never be reported complete.
+ * <p><b>A source counts as done only in {@link SourceState#DONE}.</b> {@link SourceState#STUCK} — a
+ * {@code RUNNING} row aged past {@code artha.ingest-canary.running-stale-minutes} (the SAME
+ * threshold {@link IngestHealthBoard} and {@link IngestCoverageCanary} use — one knob, never let it
+ * drift) — is OUTSTANDING, exactly like {@link SourceState#PENDING}: it blocks {@link
+ * ChainReport#complete()} and is named in the push. ⚠️ An earlier version of this class let STUCK
+ * count as "resolved" (on the reasoning that nothing more is coming from a crashed job either way),
+ * which is precisely backwards for what this report is FOR — an orphaned RUNNING row (a container
+ * recreate mid-job, no reaper: the MANAS_SCREEN finding) would have produced "chain complete 9/9 —
+ * safe to shut down" while a job never actually finished, which is the exact false-safe verdict the
+ * whole feature exists to prevent. Caught in cross-vendor review before this shipped.
  *
- * <p><b>The push fires at most once per IST day</b> (a plain Redis {@code setIfAbsent} marker — the
- * same lightweight idempotency {@link in.arthayantra.marketdata.upstox.canary.UpstoxContractCanary}
- * uses; the heavier claim/lease protocol in {@link IngestCoverageCanary} exists only for its
- * boot-catch-up door, which this canary does not need — if the stack is down nobody is waiting on a
- * push). {@link #poll()} runs every few minutes across an evening window: the FIRST poll that finds
- * the chain complete pushes immediately ("chain complete N/N"); if the window's final check time
- * arrives with sources still outstanding, that poll pushes once naming them ("still pending: ...")
- * so the owner is not left waiting on a push that will never come. Default ON — this is exactly what
- * the owner asked for and a nightly "chain complete" ping (or a same-day "still pending" flag) is the
- * intended behaviour, not a false alarm; {@code artha.evening-chain.alerts-enabled} still lets the
- * ntfy send be disabled independently (mirrors every other canary here) without disabling the
- * page-facing {@link #report()}, which is never gated — the page must always show live status.
+ * <p><b>The push fires at most once per IST day</b>, via a provisional-claim protocol identical in
+ * shape to {@link IngestCoverageCanary}'s (a {@code canary_runs} row goes {@code CLAIMED} then
+ * {@code DONE}; a claim older than {@link #CLAIM_LEASE} is stealable) — but simpler, because there is
+ * only ONE door here (a single scheduled fire, no boot-catchup: if the stack is down nobody is
+ * waiting on a push). The row is confirmed {@code DONE} only once {@link NtfyClient#trySend} reports
+ * the delivery actually succeeded (or alerts are administratively off, in which case there is
+ * nothing to retry toward); a delivery failure leaves the claim {@code CLAIMED} and {@link
+ * #scheduleReclaim} retries once the lease expires, up to {@link #MAX_RECLAIM_ATTEMPTS}. Without
+ * this, a marker committed BEFORE send (the earlier design) could lose that evening's message
+ * entirely to one failed POST, silently and permanently.
+ *
+ * <p><b>Runs on the dedicated {@code monitorTaskScheduler} pool</b> ({@link MonitorSchedulingConfig}
+ * BEJ-01), not the shared default one — it is exactly the detector that must notice a hung batch
+ * job, so it cannot itself be starved by one.
+ *
+ * <p>Default ON — this is exactly what the owner asked for; {@code
+ * artha.evening-chain.alerts-enabled} still lets the ntfy send be disabled independently (mirrors
+ * every other canary here) without disabling the page-facing {@link #report()}, which is never
+ * gated — the page must always show live status.
  */
 @Component
 public class EveningChainCanary {
@@ -97,10 +111,10 @@ public class EveningChainCanary {
       @Schema(types = {"string", "null"}) Instant finishedAt) {}
 
   /**
-   * Today's whole-chain report. {@code complete} is true iff no source is {@link SourceState#PENDING}
-   * — a STUCK source does not block completion (nothing more is coming from it either), it is
-   * reported so the owner can see it named. On a non-trading day {@code tradingDay} is false and
-   * {@code sources} is empty (nothing was expected, so there is nothing to wait on).
+   * Today's whole-chain report. {@code complete} is true iff EVERY source is {@link
+   * SourceState#DONE} — PENDING and STUCK are both outstanding and both block completion. On a
+   * non-trading day {@code tradingDay} is false and {@code sources} is empty (nothing was expected,
+   * so there is nothing to wait on).
    */
   public record ChainReport(
       Instant generatedAt,
@@ -113,6 +127,26 @@ public class EveningChainCanary {
 
   /** One raw {@code ingest_runs} row for today, projected for classification. */
   private record RunRow(String source, String status, Instant startedAt, Instant finishedAt) {}
+
+  /**
+   * Why a claim attempt ended the way it did — same shape as {@link IngestCoverageCanary}'s, see
+   * its javadoc for the FINISHED-vs-HELD rationale (a HELD claim just means "not yet", a FINISHED
+   * one is final and correctly silences this door forever).
+   */
+  private record ClaimAttempt(boolean won, boolean finished, Instant heldUntil) {
+
+    static ClaimAttempt taken() {
+      return new ClaimAttempt(true, false, null);
+    }
+
+    static ClaimAttempt alreadyPublished() {
+      return new ClaimAttempt(false, true, null);
+    }
+
+    static ClaimAttempt blockedUntil(Instant until) {
+      return new ClaimAttempt(false, false, until);
+    }
+  }
 
   // The evening batch chain (owner's words: "followup jobs" to close the day). See the class
   // javadoc for why this is its own list rather than IngestCoverageCanary.EXPECTED.
@@ -128,84 +162,101 @@ public class EveningChainCanary {
           IngestRunLedger.SOURCE_MANAS_SCREEN,
           IngestRunLedger.SOURCE_EQUITY_BREADTH);
 
+  /**
+   * Default single-shot check time. Owner decision (2026-08-11, since the original brief): a HARD
+   * 19:00 IST shutdown, with the evening batch chain itself moving to a compressed 18:20-18:59
+   * single-shot window (no polling). The only slot that can answer "is it done" without either
+   * catching jobs mid-flight (a check inside 18:20-18:59 could fire before a job scheduled for
+   * 18:58 has even started) or missing the shutdown deadline is the ~60s gap between the two:
+   * right at 18:59, immediately after the jobs' own window closes, with up to a minute of margin
+   * before 19:00. Pinned by {@link
+   * in.arthayantra.marketdata.canary.EveningChainCanaryIntegrationTest#defaultCheckCronFiresAtTheEndOfThePreShutdownWindow}
+   * so a future edit cannot silently drift it back outside the safe slot.
+   */
+  static final String DEFAULT_CHECK_CRON = "0 59 18 * * MON-FRI";
+
   private static final String STATUS_RUNNING = "RUNNING";
   private static final String STATUS_FAILURE = "FAILURE";
-  private static final String REDIS_KEY_PREFIX = "evening-chain:pushed:";
-  private static final Duration REDIS_MARKER_TTL = Duration.ofDays(3);
+
+  /** {@code canary_runs.canary} key for this canary's per-IST-day push marker. */
+  public static final String CANARY_KEY = "EVENING_CHAIN";
+
+  private static final String STATE_CLAIMED = "CLAIMED";
+  private static final String STATE_DONE = "DONE";
+  private static final String SOURCE_TAG = "EVENING_CHAIN_CHECK";
+
+  /**
+   * How long a {@code CLAIMED} row suppresses a reclaim before it is treated as an attempt that
+   * died mid-publish and becomes stealable. Same sizing rationale as {@link
+   * IngestCoverageCanary#CLAIM_LEASE}: it only has to exceed the longest a publish can legally
+   * take (one best-effort ntfy POST, bounded by the module's HTTP client timeouts).
+   */
+  static final Duration CLAIM_LEASE = Duration.ofMinutes(5);
+
+  /** Margin added when re-checking a lease, since the claim's staleness test is strict ({@code <}). */
+  static final Duration RECLAIM_SLACK = Duration.ofSeconds(5);
+
+  /** Bound on the self-rescheduling reclaim chain — three attempts is generous for a single evening. */
+  static final int MAX_RECLAIM_ATTEMPTS = 3;
 
   private static final Logger log = LoggerFactory.getLogger(EveningChainCanary.class);
 
   private final JdbcTemplate jdbc;
   private final NtfyClient ntfy;
-  private final StringRedisTemplate redis;
   private final MarketCalendar calendar;
   private final Clock clock;
+  private final TaskScheduler reclaimScheduler;
   private final boolean live;
   private final boolean enabled;
   private final boolean alertsEnabled;
   private final Duration runningStale;
-  private final LocalTime finalCheckTime;
 
-  /** Wires the ledger reader, alerting, the once-per-day Redis marker, the calendar and clock. */
+  /** Wires the ledger reader, alerting, the claim/lease marker, the calendar and clock. */
   public EveningChainCanary(
       JdbcTemplate jdbc,
       NtfyClient ntfy,
-      StringRedisTemplate redis,
       MarketCalendar calendar,
       Clock clock,
       Environment environment,
+      // The detector pool (MAJOR 4, BEJ-01): a bounded read + one best-effort push is exactly the
+      // species that pool is fenced for, and this canary must not be starvable by the very batch
+      // jobs it is checking on.
+      @Qualifier("monitorTaskScheduler") TaskScheduler reclaimScheduler,
       @Value("${artha.evening-chain.enabled:true}") boolean enabled,
       @Value("${artha.evening-chain.alerts-enabled:true}") boolean alertsEnabled,
       // Same property + default as IngestHealthBoard/IngestCoverageCanary's aged-RUNNING rule — one
       // knob, so "stuck" can never mean something different here than on the ingest-health page.
-      @Value("${artha.ingest-canary.running-stale-minutes:120}") long runningStaleMinutes,
-      @Value("${artha.evening-chain.final-check-time:21:55}") String finalCheckTime) {
+      @Value("${artha.ingest-canary.running-stale-minutes:120}") long runningStaleMinutes) {
     this.jdbc = jdbc;
     this.ntfy = ntfy;
-    this.redis = redis;
     this.calendar = calendar;
     this.clock = clock;
+    this.reclaimScheduler = reclaimScheduler;
     this.live = environment.matchesProfiles("live");
     this.enabled = enabled;
     this.alertsEnabled = alertsEnabled;
     this.runningStale = Duration.ofMinutes(runningStaleMinutes);
-    this.finalCheckTime = LocalTime.parse(finalCheckTime);
   }
 
   /**
-   * The poll (every 5 minutes, 18:00-21:59 IST, weekdays — generous enough to survive the evening
-   * chain's cron times moving earlier without needing to change). Live-only and behind {@code
-   * artha.evening-chain.enabled}; {@link #report()} itself is never gated — this only decides
-   * whether/when to PUSH.
+   * The single pre-shutdown check (default 18:59 IST, weekdays — see {@link #DEFAULT_CHECK_CRON}).
+   * Live-only and behind {@code artha.evening-chain.enabled}; {@link #report()} itself is never
+   * gated. Bound to {@code monitorTaskScheduler} (MAJOR 4) rather than the shared default pool.
    */
   @Scheduled(
-      cron = "${artha.evening-chain.poll-cron:0 */5 18-21 * * MON-FRI}",
-      zone = "Asia/Kolkata")
-  public void poll() {
+      cron = "${artha.evening-chain.check-cron:" + DEFAULT_CHECK_CRON + "}",
+      zone = "Asia/Kolkata",
+      scheduler = "monitorTaskScheduler")
+  public void check() {
     if (!live || !enabled) {
       return;
     }
-    ZonedDateTime nowIst = clock.instant().atZone(Ist.ZONE);
-    LocalDate today = nowIst.toLocalDate();
-    ChainReport rep;
-    try {
-      rep = report();
-    } catch (RuntimeException e) {
-      log.warn("evening-chain poll failed: {}", e.getMessage());
-      return;
-    }
-    if (!rep.tradingDay()) {
-      return; // nothing was expected today; nothing to wait on
-    }
-    boolean finalCheck = !nowIst.toLocalTime().isBefore(finalCheckTime);
-    if (!rep.complete() && !finalCheck) {
-      return; // still waiting — try again on the next poll
-    }
-    maybePublish(rep, today);
+    LocalDate today = LocalDate.now(clock.withZone(Ist.ZONE));
+    runOnce(today, 0);
   }
 
   /**
-   * Today's chain report (IST). Side-effect-free — the GET and {@link #poll()} both call this. On a
+   * Today's chain report (IST). Side-effect-free — the GET and {@link #check()} both call this. On a
    * non-trading day (weekend/holiday, or a calendar-cliff year) returns {@code tradingDay=false} and
    * an empty source list rather than reporting every source PENDING, which would misread a holiday as
    * a stall.
@@ -225,8 +276,10 @@ public class EveningChainCanary {
     for (String source : EXPECTED) {
       sources.add(classify(source, bySource.get(source), generatedAt));
     }
-    int done = (int) sources.stream().filter(s -> s.state() != SourceState.PENDING).count();
-    boolean complete = sources.stream().noneMatch(s -> s.state() == SourceState.PENDING);
+    // Only DONE counts as finished — STUCK is outstanding, exactly like PENDING (review Critical 1:
+    // an orphaned RUNNING row must never read as "safe to shut down").
+    int done = (int) sources.stream().filter(s -> s.state() == SourceState.DONE).count();
+    boolean complete = done == sources.size();
     return new ChainReport(generatedAt, today, true, EXPECTED.size(), done, complete, List.copyOf(sources));
   }
 
@@ -262,11 +315,62 @@ public class EveningChainCanary {
         Timestamp.from(dayEnd));
   }
 
-  /** Builds and sends the one push for {@code today}, guarded by the once-per-day Redis marker. */
-  private void maybePublish(ChainReport rep, LocalDate today) {
-    if (!claimPushMarker(today)) {
-      return; // already pushed today (or the marker write itself failed — see claimPushMarker)
+  /**
+   * The evaluate → claim → publish protocol (mirrors {@link IngestCoverageCanary#runOnce}, minus
+   * the boot-catchup door this canary does not need). {@code report()} runs first because it is
+   * side-effect-free — a transient read failure returns before anything is claimed, so the check
+   * stays retryable. The claim gates the single side-effecting step (the push); it is provisional
+   * until {@link NtfyClient#trySend} confirms delivery, so a crash or a failed POST between claim
+   * and confirm leaves the row {@code CLAIMED} and stealable once {@link #CLAIM_LEASE} elapses —
+   * {@link #scheduleReclaim} is what comes back for it.
+   */
+  private void runOnce(LocalDate today, int attempt) {
+    ChainReport rep;
+    try {
+      rep = report();
+    } catch (RuntimeException e) {
+      log.warn("evening-chain check failed: {}", e.getMessage());
+      return;
     }
+    if (!rep.tradingDay()) {
+      return; // nothing was expected today; nothing to wait on
+    }
+    ClaimAttempt attempted;
+    try {
+      attempted = claim(today);
+    } catch (RuntimeException claimFailure) {
+      log.error(
+          "evening-chain: run marker for {} not written ({}) - publishing anyway, de-duplication is"
+              + " OFF",
+          today,
+          claimFailure.getMessage());
+      publish(rep);
+      return;
+    }
+    if (!attempted.won()) {
+      if (attempted.finished()) {
+        log.info("evening-chain: {} was already published - standing down", today);
+      } else {
+        scheduleReclaim(today, attempted.heldUntil(), attempt);
+      }
+      return;
+    }
+    boolean delivered = publish(rep);
+    if (delivered) {
+      confirmPublished(today);
+    } else {
+      // The claim stays CLAIMED — a genuine send failure, not a decision to skip. Retry once the
+      // lease expires rather than losing the evening's message to one bad POST.
+      scheduleReclaim(today, clock.instant().plus(CLAIM_LEASE), attempt);
+    }
+  }
+
+  /**
+   * Builds and sends today's one message. Returns whether the outcome is "confirmed" — either the
+   * ntfy push actually succeeded, or alerts are administratively disabled (nothing to retry toward,
+   * so the claim should still resolve to DONE rather than spinning reclaims forever).
+   */
+  private boolean publish(ChainReport rep) {
     List<SourceProgress> pending =
         rep.sources().stream().filter(s -> s.state() == SourceState.PENDING).toList();
     List<SourceProgress> stuck =
@@ -275,53 +379,143 @@ public class EveningChainCanary {
         rep.sources().stream()
             .filter(s -> s.state() == SourceState.DONE && STATUS_FAILURE.equals(s.status()))
             .toList();
+    boolean outstanding = !pending.isEmpty() || !stuck.isEmpty();
 
     String title;
-    String message;
-    if (pending.isEmpty()) {
+    StringBuilder sb = new StringBuilder();
+    if (!outstanding) {
       title = "ArthaYantra evening chain complete";
-      StringBuilder sb = new StringBuilder("chain complete " + rep.done() + "/" + rep.total());
-      appendIssues(sb, stuck, failed);
-      message = sb.toString();
-      log.info("evening chain: {}", message);
+      sb.append("chain complete ").append(rep.done()).append('/').append(rep.total());
     } else {
       title = "ArthaYantra evening chain still pending";
-      StringBuilder sb =
-          new StringBuilder(
-              "still pending: "
-                  + pending.stream().map(SourceProgress::source).collect(Collectors.joining(", ")));
-      appendIssues(sb, stuck, failed);
-      message = sb.toString();
-      log.warn("evening chain: {}", message);
-    }
-    if (alertsEnabled) {
-      ntfy.send(title, "default", message);
-    }
-  }
-
-  private static void appendIssues(
-      StringBuilder sb, List<SourceProgress> stuck, List<SourceProgress> failed) {
-    if (!stuck.isEmpty()) {
-      sb.append(" — stuck: ")
-          .append(stuck.stream().map(SourceProgress::source).collect(Collectors.joining(", ")));
+      List<String> names = new ArrayList<>();
+      pending.forEach(s -> names.add(s.source()));
+      stuck.forEach(s -> names.add(s.source() + " (stuck)"));
+      sb.append("still pending: ").append(String.join(", ", names));
     }
     if (!failed.isEmpty()) {
       sb.append(" — failed: ")
           .append(failed.stream().map(SourceProgress::source).collect(Collectors.joining(", ")));
     }
+    String message = sb.toString();
+
+    if (!alertsEnabled) {
+      log.info("evening chain (alerts disabled, not sent): {}", message);
+      return true; // nothing to deliver, by design — confirm rather than reclaim toward nothing
+    }
+    boolean sent = ntfy.trySend(title, "default", message);
+    if (sent) {
+      log.info("evening chain: {}", message);
+    } else {
+      log.warn("evening-chain push failed to send — will retry once the claim lease expires: {}", message);
+    }
+    return sent;
   }
 
-  /** Atomically claims today's push slot; {@code false} means another poll already sent it. */
-  private boolean claimPushMarker(LocalDate today) {
+  /**
+   * Takes the provisional {@code CLAIMED} claim on {@code today}. Wins when there is no row at all,
+   * or the existing row is a {@code CLAIMED} one whose lease has expired. Loses against {@code DONE}
+   * (already published) and against a fresh {@code CLAIMED} (another door — realistically only a
+   * concurrent reclaim — is live right now). Same shape as {@link IngestCoverageCanary#claim}.
+   */
+  private ClaimAttempt claim(LocalDate today) {
+    Instant now = clock.instant();
+    int taken =
+        jdbc.update(
+            """
+            INSERT INTO canary_runs (canary, run_day, state, source, claimed_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (canary, run_day) DO UPDATE
+               SET state = EXCLUDED.state, source = EXCLUDED.source, claimed_at = EXCLUDED.claimed_at
+             WHERE canary_runs.state = ? AND canary_runs.claimed_at < ?
+            """,
+            CANARY_KEY,
+            today,
+            STATE_CLAIMED,
+            SOURCE_TAG,
+            Timestamp.from(now),
+            STATE_CLAIMED,
+            Timestamp.from(now.minus(CLAIM_LEASE)));
+    if (taken == 1) {
+      return ClaimAttempt.taken();
+    }
     try {
-      Boolean first =
-          redis.opsForValue().setIfAbsent(REDIS_KEY_PREFIX + today, "1", REDIS_MARKER_TTL);
-      return Boolean.TRUE.equals(first);
-    } catch (RuntimeException redisFailure) {
-      // Fail toward NOT pushing again this poll cycle rather than risking a marker that never
-      // commits and re-alerts every 5 minutes; the next poll retries the same claim.
-      log.warn("evening-chain push marker write failed for {}: {}", today, redisFailure.getMessage());
-      return false;
+      return jdbc.query(
+          "SELECT state, claimed_at FROM canary_runs WHERE canary = ? AND run_day = ?",
+          (ResultSetExtractor<ClaimAttempt>)
+              rs -> {
+                if (!rs.next()) {
+                  return ClaimAttempt.blockedUntil(now);
+                }
+                if (STATE_DONE.equals(rs.getString("state"))) {
+                  return ClaimAttempt.alreadyPublished();
+                }
+                return ClaimAttempt.blockedUntil(
+                    rs.getTimestamp("claimed_at").toInstant().plus(CLAIM_LEASE));
+              },
+          CANARY_KEY,
+          today);
+    } catch (RuntimeException classificationFailure) {
+      log.warn(
+          "evening-chain: {} claim lost but the loss could not be classified ({}) - standing down"
+              + " and assuming the freshest possible lease",
+          today,
+          classificationFailure.getMessage());
+      return ClaimAttempt.blockedUntil(now.plus(CLAIM_LEASE));
+    }
+  }
+
+  /** Comes back when the current holder's lease runs out, so a send failure actually gets retried. */
+  private void scheduleReclaim(LocalDate today, Instant heldUntil, int attempt) {
+    if (attempt >= MAX_RECLAIM_ATTEMPTS) {
+      log.error(
+          "evening-chain: {} still unresolved after {} reclaim attempts - giving up; the push may"
+              + " not have gone out",
+          today,
+          attempt);
+      return;
+    }
+    Instant retryAt = heldUntil.plus(RECLAIM_SLACK);
+    log.warn(
+        "evening-chain: {} is held or unsent - re-checking at {} (reclaim attempt {} of {})",
+        today,
+        retryAt,
+        attempt + 1,
+        MAX_RECLAIM_ATTEMPTS);
+    try {
+      reclaimScheduler.schedule(() -> reclaim(today, attempt + 1), retryAt);
+    } catch (RuntimeException notQueued) {
+      log.error(
+          "evening-chain: could not queue the {} reclaim ({}) - will not self-heal this evening",
+          today,
+          notQueued.getMessage());
+    }
+  }
+
+  /** The scheduled retry body; never lets a failure escape onto the shared detector pool. */
+  private void reclaim(LocalDate today, int attempt) {
+    try {
+      runOnce(today, attempt);
+    } catch (RuntimeException reclaimFailure) {
+      log.warn("evening-chain reclaim for {} failed: {}", today, reclaimFailure.getMessage());
+    }
+  }
+
+  /** Promotes the held claim to {@code DONE} — the only state that suppresses a later door. */
+  private void confirmPublished(LocalDate today) {
+    try {
+      jdbc.update(
+          "UPDATE canary_runs SET state = ?, completed_at = ? WHERE canary = ? AND run_day = ?",
+          STATE_DONE,
+          Timestamp.from(clock.instant()),
+          CANARY_KEY,
+          today);
+    } catch (RuntimeException confirmFailure) {
+      log.error(
+          "evening-chain: {} published but NOT confirmed DONE ({}) - the claim stays provisional and"
+              + " a later door may re-alert",
+          today,
+          confirmFailure.getMessage());
     }
   }
 

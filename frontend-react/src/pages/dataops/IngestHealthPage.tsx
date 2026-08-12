@@ -262,7 +262,14 @@ function EveningChainPanel({ chain }: { chain: ChainReport }) {
       </div>
     );
   }
-  const pending = chain.sources.filter((s) => s.state === 'PENDING');
+  // Outstanding = anything not DONE — STUCK blocks completion exactly like PENDING (Critical 1:
+  // an orphaned RUNNING row must never read as "safe to shut down"), so it must be named here too,
+  // not just excluded from `complete` server-side. Server and client MUST agree on this set: a
+  // STUCK-only evening (no PENDING sources) must never render an empty "still pending:" list.
+  const outstanding = chain.sources.filter((s) => s.state !== 'DONE');
+  const outstandingNames = outstanding
+    .map((s) => (s.state === 'STUCK' ? `${s.source} (stuck)` : s.source))
+    .join(', ');
   return (
     <div
       className={cn(
@@ -273,9 +280,7 @@ function EveningChainPanel({ chain }: { chain: ChainReport }) {
       <p role="status" aria-live="polite" className="text-sm font-semibold text-ay-text">
         {chain.complete
           ? `Evening chain complete ${chain.done}/${chain.total} — safe to shut down.`
-          : `Evening chain ${chain.done}/${chain.total} done — still pending: ${pending
-              .map((s) => s.source)
-              .join(', ')}.`}
+          : `Evening chain ${chain.done}/${chain.total} done — still pending: ${outstandingNames}.`}
       </p>
       <div className="flex flex-wrap gap-1.5">
         {chain.sources.map((s) => (

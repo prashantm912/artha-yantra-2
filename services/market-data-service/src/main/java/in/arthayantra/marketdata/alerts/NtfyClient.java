@@ -37,7 +37,19 @@ public class NtfyClient {
   }
 
   /**
-   * Sends one alert; failures log, count and never propagate.
+   * Sends one alert; failures log, count and never propagate. Delegates to {@link #trySend}
+   * and discards the outcome — for a caller that needs to know whether delivery actually
+   * succeeded (to decide whether to retry), use {@link #trySend} directly.
+   */
+  public void send(String title, String priority, String message) {
+    trySend(title, priority, message);
+  }
+
+  /**
+   * Like {@link #send}, but reports whether the POST actually succeeded instead of swallowing
+   * the outcome — for a caller whose own durability guarantee depends on delivery having
+   * happened (e.g. confirming a claimed publish only once the push is actually out), rather
+   * than a fire-and-forget alert where "we tried" is good enough.
    *
    * <p>Title and priority ride HTTP HEADERS, so both are normalised to header-safe ASCII: the JDK
    * client rejects a non-ASCII header value outright with {@code invalid header value}, which is
@@ -45,10 +57,13 @@ public class NtfyClient {
    * alerts (both hardcode an em-dash). The body is free-form and stays full UTF-8 — sent explicitly
    * as such, since the converter default is ISO-8859-1 and mangled every non-ASCII char to '?'.
    * Every failure increments {@code ay_ntfy_send_failed_total} so a dead ops channel is visible.
+   *
+   * @return {@code true} iff the POST completed without throwing; {@code false} when no topic is
+   *     configured (mock mode — nothing was sent, by design) or the POST itself failed.
    */
-  public void send(String title, String priority, String message) {
+  public boolean trySend(String title, String priority, String message) {
     if (topic == null || topic.isBlank()) {
-      return;
+      return false;
     }
     try {
       restClient
@@ -60,9 +75,11 @@ public class NtfyClient {
           .body(message)
           .retrieve()
           .toBodilessEntity();
+      return true;
     } catch (Exception e) {
       meterRegistry.counter("ay_ntfy_send_failed_total").increment();
       log.warn("ntfy send failed: {}", e.getMessage());
+      return false;
     }
   }
 }

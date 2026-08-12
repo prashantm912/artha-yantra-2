@@ -115,6 +115,29 @@ const pendingChain: ChainReport = {
   ],
 };
 
+/**
+ * Critical-1 regression: a STUCK source alone (no PENDING) must still read as outstanding, not
+ * "complete". An earlier version let STUCK count as resolved server-side, which would have made
+ * this exact shape render "safe to shut down" while MANAS_SCREEN was actually orphaned.
+ */
+const stuckOnlyChain: ChainReport = {
+  generatedAt: '2026-09-15T18:59:00Z',
+  day: '2026-09-15',
+  tradingDay: true,
+  total: 9,
+  done: 8,
+  complete: false,
+  sources: [
+    {
+      source: 'MANAS_SCREEN',
+      state: 'STUCK',
+      status: 'RUNNING',
+      startedAt: '2026-09-15T12:30:00Z',
+      finishedAt: null,
+    },
+  ],
+};
+
 let chain: ChainReport = completeChain;
 
 vi.mock('../../api/ingestHealth.ts', async (importOriginal) => ({
@@ -191,5 +214,15 @@ describe('IngestHealthPage', () => {
 
     expect(screen.getByText(/still pending: EQUITY_BREADTH/)).toBeInTheDocument();
     expect(screen.getAllByText('STUCK').length).toBeGreaterThan(0);
+  }, 15_000);
+
+  it('never says safe-to-shut-down when the only outstanding source is STUCK (Critical 1)', () => {
+    chain = stuckOnlyChain;
+    renderPage();
+
+    expect(screen.queryByText(/safe to shut down/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Evening chain complete/)).not.toBeInTheDocument();
+    // The "still pending:" line must name the stuck source, not render an empty list.
+    expect(screen.getByText(/still pending: MANAS_SCREEN \(stuck\)/)).toBeInTheDocument();
   }, 15_000);
 });

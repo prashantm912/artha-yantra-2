@@ -413,14 +413,14 @@ public class SignalEvalOutcomeRollupJob {
   }
 
   /**
-   * The daily retention tick (02:30 IST), mirroring {@link RiskSuppressionPruneJob} exactly —
+   * The daily retention tick (18:11 IST — The 02:30/03:30 slot was retired on 2026-08-12: the machine is shut down at 19:00 IST and started after 08:00, so an overnight tick never fired at all — the retention this job exists to enforce was simply not happening. Mirrors {@link RiskSuppressionPruneJob} exactly —
    * six-field cron with an explicit Asia/Kolkata zone, property-overridable, live-only (the mock DB
    * is ephemeral, wiped by {@code ay reset-db}, so there is nothing to retain there). Bound to the
    * dedicated pool for the same reason as the rollup: a slow DELETE must not park paper stop-loss
    * alerting.
    */
   @Scheduled(
-      cron = "${artha.signals.eval-outcome-prune.cron:0 30 2 * * *}",
+      cron = "${artha.signals.eval-outcome-prune.cron:0 11 18 * * *}",
       zone = "Asia/Kolkata",
       scheduler = SCHEDULER)
   public void scheduledPrune() {
@@ -463,8 +463,11 @@ public class SignalEvalOutcomeRollupJob {
       // table, so a deleted row can only ever cost history, never a live boot's correctness.
       //
       // The cutoff is an IST LocalDate computed HERE, not `(now() - interval)::date` in Postgres.
-      // This cron fires 02:30 IST = 21:00 UTC on the PREVIOUS date, and in-container now()/::date are
-      // UTC, so the server-side cast landed a day early and retained one extra session every run.
+      // When this cron fired at 02:30 IST that was 21:00 UTC on the PREVIOUS date, and in-container
+      // now()/::date are UTC, so the server-side cast landed a day early and retained one extra
+      // session every run. The tick has since moved to 18:11 IST, where the UTC date happens to agree
+      // — which is exactly why the Java-side computation stays: the bug would now be invisible, and a
+      // future time change could reintroduce it silently.
       // session_date holds an IST session date, so its cutoff has to be an IST date too. (V045's
       // sibling call above is NOT affected: it does interval arithmetic on an absolute timestamptz,
       // where there is no date truncation to get wrong.)

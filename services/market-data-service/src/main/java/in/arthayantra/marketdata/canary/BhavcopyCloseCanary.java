@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.canary;
 
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.alerts.NtfyClient;
+import in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -12,6 +13,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.EventListener;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -82,6 +84,13 @@ public class BhavcopyCloseCanary {
   private final int redFloor;
   private final int sampleLimit;
 
+  /**
+   * The last trade date actually compared, so the cron and the completion listener below cannot both
+   * evaluate the same session and push the same alert twice. Written only from this canary's own two
+   * entry points; both run on scheduler/event threads, hence volatile rather than a lock.
+   */
+  private volatile LocalDate lastSwept;
+
   public BhavcopyCloseCanary(
       JdbcTemplate jdbc,
       NtfyClient ntfy,
@@ -116,14 +125,12 @@ public class BhavcopyCloseCanary {
    * the channel. The margin is thin even at the current 20:10 against a 19:30 bhavcopy, and it
    * shrinks to nothing under the pending schedule move.
    *
-   * <p>⚠️ A skipped comparison is PERMANENTLY missed for that session, not deferred.
-   * {@code BhavcopyStartupCatchup} starts the backfill on the next boot, so the DATA arrives — but
-   * this canary has no completion listener and only fires on its own cron, and by the time it next
-   * fires that session is no longer today, so the guard below skips it again. Forever. Only a
-   * same-day retry, or a bhavcopy-complete listener, can ever make it. Skipping still trades a
-   * missed check for a WRONG one, which is the right trade; it does not make the check free, and
-   * the loss is a whole session's close comparison rather than a delay. Wiring that listener is the
-   * real fix and is deliberately not in this change.
+   * <p>⚠️ A skipped comparison used to be PERMANENTLY missed for that session, not deferred: by the
+   * time the cron next fired, that session was no longer today and the guard skipped it again,
+   * forever. At 20:10 against a 19:30 publish the margin was thin; moving the chain inside the 19:00
+   * machine-off boundary put the cron at 18:52 against an 18:45 ASYNCHRONOUS submit, which would have
+   * made the miss the normal case rather than the exception. {@link #onBhavcopyCompleted} closes it —
+   * see there for why the guard above is what makes the listener safe.
    */
   @Scheduled(cron = "${artha.bhavcopy-close.cron:0 52 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void sweep() {
@@ -153,6 +160,33 @@ public class BhavcopyCloseCanary {
       return;
     }
     publish(report);
+    lastSwept = latest;
+  }
+
+  /**
+   * Second entry point: run the comparison the moment tonight's bhavcopy actually lands.
+   *
+   * <p>The cron alone cannot work here. {@code BhavcopyBackfillService} submits ASYNCHRONOUSLY and
+   * returns immediately, and NSE's publish time was measured at 17:52, 17:59, 18:47 and 19:31 across
+   * four days — so a fixed minute seven minutes after the submit is a coin flip at best. This makes
+   * the trigger the event it was always waiting for.
+   *
+   * <p><b>It is deliberately not a second unconditional run.</b> Completion is published even when
+   * both exchanges returned nothing, so the event does NOT prove today's file arrived — the
+   * {@code latest.isBefore(today)} guard in {@link #sweep} is what makes it safe, and an empty
+   * completion simply skips exactly as the cron would. {@code lastSwept} then stops the pair
+   * double-alerting when the file lands BEFORE the cron minute, which is the common case.
+   *
+   * <p>This also recovers the late-publish night for free: {@code BhavcopyStartupCatchup} replays the
+   * backfill on the next boot, that replay publishes completion, and the canary now hears it.
+   */
+  @EventListener(BhavcopyBackfillCompleted.class)
+  void onBhavcopyCompleted() {
+    LocalDate latest = latestTradeDate();
+    if (latest != null && latest.equals(lastSwept)) {
+      return;
+    }
+    sweep();
   }
 
   /** The newest EQ bhavcopy trade date, or {@code null} when the table is empty. */

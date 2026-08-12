@@ -107,11 +107,25 @@ public class MonitorSchedulingConfig {
   }
 
   /**
-   * A single daemon thread owned solely by {@code SwingBatchCatchUp.catchUp}. The catch-up is a
-   * synchronous multi-session DB + market-data HTTP sweep that can run for several minutes, and it
-   * can emit real paper entries/exits. Leaving it on the DEFAULT pool would let it park
-   * {@code PaperScheduler.bracketEvaluation}, the 15-second stop-loss/target sweep, along with every
-   * other default scheduled job.
+   * A single daemon thread carrying the PRE-OPEN serial chain, in cron order:
+   * {@code SwingBatchCatchUp.catchUp} (08:35), {@code PaperReconciliationScheduler.run} (08:50) and
+   * {@code PaperScheduler.pastExpiryRecovery} (08:52). The catch-up is a synchronous multi-session DB +
+   * market-data HTTP sweep that can run for several minutes, and it can emit real paper entries/exits.
+   * Leaving it on the DEFAULT pool would let it park {@code PaperScheduler.bracketEvaluation}, the
+   * 15-second stop-loss/target sweep, along with every other default scheduled job.
+   *
+   * <p><b>Why the two paper jobs joined it when they moved to morning (2026-08-12).</b> Pool size 1 is
+   * doing real work here — it is the ORDERING guarantee, not just isolation. Reconciliation reads what
+   * the catch-up writes, and a cron minute is not a dependency: 08:50 only means "start at 08:50", so
+   * on the default pool it could read a catch-up that is still mid-run. Sharing one thread makes it
+   * queue behind, which is the dependency the contract always claimed. Past-expiry recovery is here for
+   * the other reason: it does sequential per-position REST reads with 30-second timeouts, and on the
+   * default pool an overrun past 09:15 would stall the bracket sweep at exactly the wrong moment.
+   *
+   * <p><b>The cost, stated:</b> a catch-up that hangs now also blocks both. That is the deliberate
+   * trade — a reconciliation that reads torn mid-catch-up state reports false discrepancies on a money
+   * ledger, while a hung catch-up is already a paged condition via the missed-batch detector, which
+   * sits on {@code swingDetectorTaskScheduler} and keeps firing.
    *
    * <p><b>Why not {@code monitorTaskScheduler}.</b> That pool is fenced for pure liveness DETECTORS.
    * The catch-up has money effects and blocking I/O; putting it there could starve

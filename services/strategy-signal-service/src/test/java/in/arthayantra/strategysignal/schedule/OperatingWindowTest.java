@@ -10,10 +10,13 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.scheduling.support.CronExpression;
@@ -74,8 +77,58 @@ class OperatingWindowTest {
   @DisplayName("the catalogue is not silently shrunk")
   void theCatalogueCoversEveryJobItClaimsTo() {
     assertThat(JOBS)
-        .as("every assertion here iterates JOBS, so trimming it makes them all pass vacuously")
+        .as("the strict-window assertions iterate JOBS, so trimming it makes them pass vacuously")
         .hasSize(EXPECTED_JOB_COUNT);
+  }
+
+  /**
+   * Jobs that CANNOT fire inside the window, each with the reason it is allowed to stay that way.
+   * Keyed {@code SimpleClassName#cron} so any edit to either side surfaces here rather than passing.
+   *
+   * <p>Both entries are the same open question and neither is a judgement call this test may make:
+   * <b>is the machine up at all on a Saturday or a Sunday?</b> Everything known says only that it is
+   * shut at 19:00 and started after 08:00 on weekdays. If the answer is no, both of these are dead
+   * jobs and need weekday slots; if it is yes, both are fine as they are. They are listed rather
+   * than moved because guessing would silently retime a weekly canary.
+   */
+  private static final Map<String, String> EXCUSED_FROM_THE_WINDOW = new LinkedHashMap<>();
+
+  static {
+    EXCUSED_FROM_THE_WINDOW.put(
+        "CrossSourceOiCanary#0 0 7 * * SUN",
+        "weekly cross-source OI canary, Sunday 07:00 — before 08:00 AND on a weekend");
+    EXCUSED_FROM_THE_WINDOW.put(
+        "InsightSweeper#0 0 8 * * SAT",
+        "weekly insight quality report, Saturday 08:00 — exactly at the boundary, and the owner"
+            + " sometimes starts as late as 09:00");
+  }
+
+  @Test
+  @DisplayName("no scheduled job anywhere in either service is invisible to this guard")
+  void everyScheduledJobIsInsideTheWindowOrExplicitlyExcused() throws IOException {
+    // ⚠️ THE REASON THIS TEST EXISTS. The catalogue above is HAND-WRITTEN, so on its own it proves
+    // only that a hand-written map still has 16 entries — a job nobody added to it is not caught,
+    // it is invisible, and the sweep reports clean. Cross-vendor review found exactly that: six
+    // more jobs outside the window, four of which had never run at all since the machine started
+    // going off overnight. This walks the source instead of trusting the list.
+    List<DiscoveredJob> all = discoverEveryScheduledJob();
+    assertThat(all)
+        .as("the source walk found almost nothing — it is checking an empty set, not the schedule")
+        .hasSizeGreaterThan(50);
+
+    List<String> unreachable = new ArrayList<>();
+    for (DiscoveredJob job : all) {
+      if (!canEverFireInsideTheWindow(job.cron())) {
+        unreachable.add(job.simpleClassName() + "#" + job.cron());
+      }
+    }
+    assertThat(unreachable)
+        .as(
+            "a job that can never fire between %d:00 and %d:00 on a weekday does not run LATE, it"
+                + " does not run at all. Move it into the window, or add it to"
+                + " EXCUSED_FROM_THE_WINDOW with the reason",
+            WINDOW_START_HOUR, WINDOW_END_HOUR)
+        .containsExactlyInAnyOrderElementsOf(EXCUSED_FROM_THE_WINDOW.keySet());
   }
 
   @Test
@@ -258,6 +311,147 @@ class OperatingWindowTest {
       out.add(slashes >= 0 ? working.substring(0, slashes) : working);
     }
     return out;
+  }
+
+  /** One {@code @Scheduled} site found by walking the source. */
+  private record DiscoveredJob(String simpleClassName, String cron) {}
+
+  private static final Pattern SCHEDULED = Pattern.compile("@Scheduled\\s*\\(([^)]*)\\)", Pattern.DOTALL);
+  private static final Pattern CRON_ARG = Pattern.compile("cron\\s*=\\s*\"([^\"]*)\"");
+  private static final Pattern PLACEHOLDER = Pattern.compile("^\\$\\{([^:}]+)(?::(.*))?\\}$");
+
+  /**
+   * Every {@code @Scheduled} carrying a cron, across BOTH services. {@code fixedRate}/{@code
+   * fixedDelay} sites are skipped deliberately — they fire relative to boot, so they always run
+   * while the machine is up and have no wall-clock slot to be outside the window.
+   */
+  private static List<DiscoveredJob> discoverEveryScheduledJob() throws IOException {
+    List<DiscoveredJob> out = new ArrayList<>();
+    for (String service : List.of("market-data-service", "strategy-signal-service")) {
+      Path root = repoRoot().resolve("services/" + service + "/src/main/java");
+      List<Path> files;
+      try (Stream<Path> walk = Files.walk(root)) {
+        files = walk.filter(p -> p.getFileName().toString().endsWith(".java")).sorted().toList();
+      }
+      for (Path file : files) {
+        String source =
+            String.join("\n", uncommented(Files.readString(file, StandardCharsets.UTF_8)));
+        String simple = file.getFileName().toString().replace(".java", "");
+        Matcher site = SCHEDULED.matcher(source);
+        while (site.find()) {
+          Matcher cron = CRON_ARG.matcher(site.group(1));
+          if (cron.find()) {
+            out.add(new DiscoveredJob(simple, resolve(simple, cron.group(1))));
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The effective cron: a literal, or a {@code ${property:default}}'s default. A placeholder with NO
+   * inline default is resolved from the owning service's {@code application.yml}, which is where the
+   * one such job (the hourly expired-backfill self-heal) declares its value.
+   */
+  private static String resolve(String where, String raw) throws IOException {
+    Matcher m = PLACEHOLDER.matcher(raw.trim());
+    if (!m.matches()) {
+      return raw.trim();
+    }
+    if (m.group(2) != null) {
+      return m.group(2).trim();
+    }
+    String property = m.group(1);
+    String leaf = property.substring(property.lastIndexOf('.') + 1);
+    Pattern inYaml =
+        Pattern.compile("^\\s*" + Pattern.quote(leaf) + ":\\s*\\$\\{[^:}]+:([^}]*)\\}", Pattern.MULTILINE);
+    List<String> found = new ArrayList<>();
+    for (String service : List.of("market-data-service", "strategy-signal-service")) {
+      Path yaml = repoRoot().resolve("services/" + service + "/src/main/resources/application.yml");
+      Matcher hit = inYaml.matcher(Files.readString(yaml, StandardCharsets.UTF_8));
+      while (hit.find()) {
+        found.add(hit.group(1).trim());
+      }
+    }
+    if (found.size() != 1) {
+      return fail(
+          where + "'s ${" + property + "} has no inline default and resolving '" + leaf
+              + "' in application.yml found " + found.size() + " candidates — this test must not"
+              + " guess a schedule it cannot read");
+    }
+    return found.get(0);
+  }
+
+  /**
+   * Can this cron fire at least once between {@link #WINDOW_START_HOUR} and {@link #WINDOW_END_HOUR}
+   * on a weekday? Deliberately an INTERSECTION test, not containment: an intraday job firing every
+   * minute is outside the window most of the day and that is entirely correct — it runs whenever the
+   * machine is up. The failure this catches is the strictly-nocturnal or weekend-only job, which
+   * never runs at all. The 16 chain jobs get the stricter containment test separately, above.
+   */
+  private static boolean canEverFireInsideTheWindow(String cron) {
+    String[] f = cron.trim().split("\\s+");
+    if (f.length != 6) {
+      return false;
+    }
+    boolean hourReachable =
+        looseExpand(f[2], 23).stream().anyMatch(h -> h >= WINDOW_START_HOUR && h < WINDOW_END_HOUR);
+    return hourReachable && weekdayPossible(f[5]);
+  }
+
+  /** Values a cron field can take. Unlike {@link #expand} this ACCEPTS {@code *} and steps. */
+  private static List<Integer> looseExpand(String spec, int max) {
+    List<Integer> out = new ArrayList<>();
+    for (String part : spec.split(",")) {
+      int step = 1;
+      String base = part;
+      int slash = part.indexOf('/');
+      if (slash >= 0) {
+        base = part.substring(0, slash);
+        step = Math.max(1, Integer.parseInt(part.substring(slash + 1)));
+      }
+      int from;
+      int to;
+      if ("*".equals(base) || "?".equals(base)) {
+        from = 0;
+        to = max;
+      } else if (base.matches("\\d{1,2}-\\d{1,2}")) {
+        from = Integer.parseInt(base.substring(0, base.indexOf('-')));
+        to = Integer.parseInt(base.substring(base.indexOf('-') + 1));
+      } else if (base.matches("\\d{1,2}")) {
+        from = Integer.parseInt(base);
+        to = slash >= 0 ? max : from;
+      } else {
+        // Unreadable rather than absent: treat as reachable so an unparsed field can never be
+        // reported as a dead job. A false PASS here is recoverable; a false "never runs" is a
+        // schedule change made on a misreading.
+        return List.of(WINDOW_START_HOUR);
+      }
+      for (int v = from; v <= Math.min(to, max); v += step) {
+        out.add(v);
+      }
+    }
+    return out;
+  }
+
+  /** Whether a Spring day-of-week field admits any of MON–FRI (names or 1–5; 0 and 7 are Sunday). */
+  private static boolean weekdayPossible(String dow) {
+    String d = dow.toUpperCase(Locale.ROOT);
+    if (d.contains("*") || d.contains("?")) {
+      return true;
+    }
+    for (String name : List.of("MON", "TUE", "WED", "THU", "FRI")) {
+      if (d.contains(name)) {
+        return true;
+      }
+    }
+    for (int v : looseExpand(d.replaceAll("[A-Z]", "9"), 7)) {
+      if (v >= 1 && v <= 5) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Walks up to the repo root. FAILS rather than skipping if absent. */

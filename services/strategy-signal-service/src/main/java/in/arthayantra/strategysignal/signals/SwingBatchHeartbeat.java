@@ -83,8 +83,10 @@ import org.springframework.stereotype.Component;
  *
  * <p>Dormant until armed: it loads only when {@code artha.heartbeat.url} is set (paste the monitor's
  * ping URL into {@code .env} as {@code ARTHA_HEARTBEAT_URL}, then redeploy). Configure the external
- * check to EXPECT a ping on the matching schedule (cron {@code 15 20 * * 1-5}, TZ Asia/Kolkata) with a
- * grace window, so a missed 20:15 ping raises the alert. Fail-soft: a ping failure is logged, never
+ * check to EXPECT a ping on the matching schedule (cron {@code 54 18 * * 1-5}, TZ Asia/Kolkata) with a
+ * grace window, so a missed 18:54 ping raises the alert. ⚠️ <b>That external monitor is configured
+ * OUTSIDE this repo — moving the cron here does not move it, so the schedule change must be applied on
+ * the monitor at the same deploy or it pages every night for a ping that now arrives 81 minutes early.</b> Fail-soft: a ping failure is logged, never
  * thrown, and neither is a marker-read failure — the batch is unaffected (this observes it, never gates
  * it).
  *

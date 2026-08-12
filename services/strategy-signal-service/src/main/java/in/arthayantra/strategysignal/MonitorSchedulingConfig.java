@@ -28,6 +28,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  * reasoning as the fifth, applied to a different risk class — see that method's javadoc, including
  * why the prunes are NOT folded onto the eval-outcome pool.
  *
+ * <p>An EIGHTH, {@link #preOpenTaskScheduler()}, carries the two PRE-OPEN paper jobs that moved to
+ * morning on 2026-08-12 — see that method for why they are NOT on the catch-up's lane.
+ *
  * <p>A SEVENTH, {@link #telegramTaskScheduler()}, carries the live-armed Telegram command poller —
  * the only default-pool job that makes an outbound call to a THIRD PARTY. See that method's javadoc.
  */
@@ -107,36 +110,11 @@ public class MonitorSchedulingConfig {
   }
 
   /**
-   * A single daemon thread carrying the PRE-OPEN serial chain, in cron order:
-   * {@code SwingBatchCatchUp.catchUp} (08:35), {@code PaperReconciliationScheduler.run} (08:50) and
-   * {@code PaperScheduler.pastExpiryRecovery} (08:52). The catch-up is a synchronous multi-session DB +
-   * market-data HTTP sweep that can run for several minutes, and it can emit real paper entries/exits.
-   * Leaving it on the DEFAULT pool would let it park {@code PaperScheduler.bracketEvaluation}, the
-   * 15-second stop-loss/target sweep, along with every other default scheduled job.
-   *
-   * <p><b>Why the two paper jobs joined it when they moved to morning (2026-08-12).</b> Pool size 1 is
-   * doing real work here — it is the ORDERING guarantee, not just isolation. Reconciliation reads what
-   * the catch-up writes, and a cron minute is not a dependency: 08:50 only means "start at 08:50", so
-   * on the default pool it could read a catch-up that is still mid-run. Sharing one thread makes it
-   * queue behind, which is the dependency the contract always claimed. Past-expiry recovery is here for
-   * the other reason: it does sequential per-position REST reads with 30-second timeouts, and on the
-   * default pool an overrun past 09:15 would stall the bracket sweep at exactly the wrong moment.
-   *
-   * <p><b>The cost, stated, and it is worse than the first version of this comment claimed.</b> A
-   * catch-up that hangs now blocks both queued jobs. That paragraph originally justified the trade by
-   * saying a hung catch-up "is already a paged condition via the missed-batch detector" — <b>which is
-   * false, and cross-vendor review caught it.</b> {@code SwingBatchCanary} fires at <b>08:30</b>, five
-   * minutes BEFORE the catch-up starts, and its predicate is {@code runs.hasRun(batch, session)} —
-   * a marker the <b>16:00 exit pass has already written</b>. The entry pass deliberately requires the
-   * stricter {@code hasRunWithEntries}. So a hung entry pass satisfies the detector, pages nobody, and
-   * silently holds reconciliation and past-expiry recovery behind it.
-   *
-   * <p>The isolation this pool buys is still real and still worth it: the bracket sweep on the default
-   * pool keeps running, so stop-losses are unaffected, and ordering after the catch-up is exactly what
-   * the reconciler's contract needs. What is NOT true is that anything currently detects the hang. A
-   * post-08:35 watchdog keyed to entry completion, plus independent missed-run alerts for both paper
-   * jobs, is the missing piece — deliberately not built here, and recorded in the ledger rather than
-   * papered over with a sentence that reads like coverage.
+   * A single daemon thread owned solely by {@code SwingBatchCatchUp.catchUp}. The catch-up is a
+   * synchronous multi-session DB + market-data HTTP sweep that can run for several minutes, and it
+   * can emit real paper entries/exits. Leaving it on the DEFAULT pool would let it park
+   * {@code PaperScheduler.bracketEvaluation}, the 15-second stop-loss/target sweep, along with every
+   * other default scheduled job.
    *
    * <p><b>Why not {@code monitorTaskScheduler}.</b> That pool is fenced for pure liveness DETECTORS.
    * The catch-up has money effects and blocking I/O; putting it there could starve
@@ -144,6 +122,23 @@ public class MonitorSchedulingConfig {
    * when the recovery path is slow. <b>Why not {@code swingDetectorTaskScheduler}.</b> Same fence
    * from the other side: a multi-minute replay parked on the detector thread would suppress the
    * next-morning missed-batch page — the detector must keep firing precisely while recovery runs.
+   *
+   * <p>⚠️ <b>And why the two morning paper jobs are NOT here, though an earlier revision of the
+   * 2026-08-12 schedule move put them here.</b> Sharing this thread would have bought a real thing —
+   * a cron minute is not a dependency, so 08:50 on another pool can read a catch-up that is still
+   * mid-run, while queueing behind it cannot. It was still the wrong trade. It widened a hung
+   * catch-up's blast radius from "no swing entries" to "no swing entries AND no reconciliation AND
+   * no past-expiry recovery", and NOTHING detects that hang: {@code SwingBatchCanary} fires at 08:30,
+   * before the pass starts, on {@code hasRun} — a marker the 16:00 exit pass has already written —
+   * while the entry pass needs {@code hasRunWithEntries}.
+   *
+   * <p>Weighed both ways: the cost of NOT queueing is that a read-only reporter may observe torn
+   * mid-catch-up state and report a discrepancy that is not real. The cost of queueing is two money
+   * jobs silently not running at all. A noisy read-only report is the lesser harm, and the overlap
+   * needs a catch-up lasting the full 15 minutes between 08:35 and 08:50 — measured at 81 s for both
+   * families on 2026-08-12 — which is the hang case that the shared lane made worse rather than
+   * better. A watchdog keyed to entry completion is still worth building; it is a change of its own,
+   * not a rider, and this arrangement does not depend on it.
    *
    * <p>The per-family {@code SwingRunMutex} remains the run-serialization guard. This pool only removes
    * scheduler starvation; it does not replace the mutex or provide durable idempotency.
@@ -153,6 +148,31 @@ public class MonitorSchedulingConfig {
     ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
     scheduler.setPoolSize(1);
     scheduler.setThreadNamePrefix("swing-catchup-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
+
+  /**
+   * An EIGHTH pool: one daemon thread for the two PRE-OPEN paper jobs —
+   * {@code PaperReconciliationScheduler.run} (08:50) and {@code PaperScheduler.pastExpiryRecovery}
+   * (08:52), both moved to morning on 2026-08-12 because the machine is off by 19:00 and their
+   * 21:15/21:20 evening slots therefore never ran.
+   *
+   * <p>Past-expiry recovery is the reason this exists rather than leaving them on the default pool:
+   * it does sequential per-position REST reads with 30-second timeouts, and on the default pool an
+   * overrun past 09:15 would stall {@code PaperScheduler.bracketEvaluation}, the 15-second
+   * stop-loss/target sweep, at exactly the wrong moment of the day.
+   *
+   * <p>Pool size 1 so the two serialize against each other — past-expiry's own javadoc places it
+   * "just after" the reconciler, and one thread makes that true rather than merely scheduled. The
+   * blast radius of a hang is these two only, which is strictly narrower than the default pool they
+   * came from, where a hang took the bracket sweep with it.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler preOpenTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("pre-open-sched-");
     scheduler.setDaemon(true);
     return scheduler;
   }

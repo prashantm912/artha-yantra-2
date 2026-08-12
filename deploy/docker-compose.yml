@@ -665,11 +665,6 @@ services:
       # every copy of a schedule agrees was false for exactly them. Cross-vendor review caught it.
       ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON: "${ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON:-0 56 18 * * MON-FRI}"
       ARTHA_INSIGHTS_SELL_DECISION_CRON: "${ARTHA_INSIGHTS_SELL_DECISION_CRON:-0 57 18 * * MON-FRI}"
-      # Pre-open ENTRY watchdog. The 08:30 canary above checks hasRun, which the 16:00 exit pass
-      # already satisfies, so it is structurally blind to a hung 08:35 ENTRY pass — which since the
-      # 2026-08-12 schedule move also blocks the 08:50 reconciler and 08:52 past-expiry recovery on
-      # the shared single-thread lane. This one checks hasRunWithEntries, ten minutes before the open.
-      ARTHA_SWING_ENTRY_WATCHDOG_CRON: "${ARTHA_SWING_ENTRY_WATCHDOG_CRON:-0 5 9 * * MON-FRI}"
       ARTHA_SWING_CANARY_CRON: "${ARTHA_SWING_CANARY_CRON:-0 30 8 * * MON-FRI}"
       # Swing-batch CATCH-UP (2026-07-17 incident): re-runs a batch the stack was down for, pinned to
       # the missed session's daily bar. Runs in the post-close/pre-open window (08:35, after the 08:30

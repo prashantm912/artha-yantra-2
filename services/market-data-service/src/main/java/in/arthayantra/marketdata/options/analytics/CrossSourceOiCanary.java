@@ -108,7 +108,11 @@ public class CrossSourceOiCanary {
   }
 
   /** Weekly sweep (Sunday 07:00 IST). Live-only; the audited sources are only populated live. */
-  @Scheduled(cron = "${artha.oi-cross-source.cron:0 0 7 * * SUN}", zone = "Asia/Kolkata")
+  // Weekly, MONDAY 18:15 IST. It ran Sunday 07:00 until 2026-08-12, which was never — the owner's
+  // machine is weekday-only and started after 08:00, so both halves of that cron were outside the
+  // operating window. Monday evening is the nearest weekday equivalent of "start of the week", and
+  // it sits post-close so a weekly cross-source sweep never competes with a live session.
+  @Scheduled(cron = "${artha.oi-cross-source.cron:0 15 18 * * MON}", zone = "Asia/Kolkata")
   public void sweep() {
     if (!live || !enabled) {
       return;

@@ -77,7 +77,7 @@ public class PaperScheduler {
   @Scheduled(
       cron = "${artha.paper.past-expiry-recon.cron:0 52 8 * * MON-FRI}",
       zone = "Asia/Kolkata",
-      scheduler = "swingCatchUpTaskScheduler")
+      scheduler = "preOpenTaskScheduler")
   public void pastExpiryRecovery() {
     int settled = expiry.settlePastExpiries();
     if (settled > 0) {

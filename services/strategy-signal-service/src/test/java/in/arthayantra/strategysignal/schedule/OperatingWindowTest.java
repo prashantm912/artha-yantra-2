@@ -73,13 +73,9 @@ class OperatingWindowTest {
     // against the shutdown boundary. They must follow the 08:35 entry pass; see the ordering test.
     JOBS.put("artha.paper.reconciliation.cron", SS + "paper/PaperReconciliationScheduler.java");
     JOBS.put("artha.paper.past-expiry-recon.cron", SS + "paper/PaperScheduler.java");
-    // The detector those two now depend on: the shared pre-open lane means a hung 08:35 entry pass
-    // holds them both, and the 08:30 canary is structurally blind to it (hasRun, not
-    // hasRunWithEntries). Catalogued like any other cron so it cannot itself drift out of the window.
-    JOBS.put("artha.swing.entry-watchdog-cron", SS + "swing/SwingBatchCanary.java");
   }
 
-  private static final int EXPECTED_JOB_COUNT = 17;
+  private static final int EXPECTED_JOB_COUNT = 16;
 
   @Test
   @DisplayName("the catalogue is not silently shrunk")
@@ -90,26 +86,19 @@ class OperatingWindowTest {
   }
 
   /**
-   * Jobs that CANNOT fire inside the window, each with the reason it is allowed to stay that way.
-   * Keyed {@code SimpleClassName#cron} so any edit to either side surfaces here rather than passing.
+   * Jobs allowed to sit outside the window, each with the reason. <b>Deliberately EMPTY.</b>
    *
-   * <p>Both entries are the same open question and neither is a judgement call this test may make:
-   * <b>is the machine up at all on a Saturday or a Sunday?</b> Everything known says only that it is
-   * shut at 19:00 and started after 08:00 on weekdays. If the answer is no, both of these are dead
-   * jobs and need weekday slots; if it is yes, both are fine as they are. They are listed rather
-   * than moved because guessing would silently retime a weekly canary.
+   * <p>It briefly held the two weekend jobs — {@code CrossSourceOiCanary} (Sunday 07:00) and the
+   * {@code InsightSweeper} quality report (Saturday 08:00) — parked on a question this test may not
+   * answer by guessing: is the machine up at a weekend? The owner answered on 2026-08-12:
+   * <b>weekday-only</b>. So both had never run at all, and both moved into weekday evening slots
+   * (Monday 18:15 and Friday 18:12) rather than staying excused.
+   *
+   * <p>The map stays because an empty allowlist is the assertion — every scheduled job in either
+   * service can now fire inside the window, and adding an entry here has to be a deliberate act with
+   * a written reason rather than a quiet edit to a threshold.
    */
   private static final Map<String, String> EXCUSED_FROM_THE_WINDOW = new LinkedHashMap<>();
-
-  static {
-    EXCUSED_FROM_THE_WINDOW.put(
-        "CrossSourceOiCanary#0 0 7 * * SUN",
-        "weekly cross-source OI canary, Sunday 07:00 — before 08:00 AND on a weekend");
-    EXCUSED_FROM_THE_WINDOW.put(
-        "InsightSweeper#0 0 8 * * SAT",
-        "weekly insight quality report, Saturday 08:00 — exactly at the boundary, and the owner"
-            + " sometimes starts as late as 09:00");
-  }
 
   @Test
   @DisplayName("no scheduled job anywhere in either service is invisible to this guard")

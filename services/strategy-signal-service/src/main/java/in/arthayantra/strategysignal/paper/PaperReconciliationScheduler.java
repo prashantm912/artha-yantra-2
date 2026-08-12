@@ -13,11 +13,13 @@ import org.springframework.stereotype.Component;
  * PRE-OPEN window — AFTER the 08:35 swing entry pass, 25 minutes before the 09:15 open. It moved out of
  * the 21:15 evening slot because the machine is off by 19:00, so an evening run simply never happened.
  *
- * <p>Two things had to move with it, and neither is cosmetic. It runs on
- * {@code swingCatchUpTaskScheduler} so it QUEUES BEHIND the 08:35 catch-up rather than merely starting
- * after it — a cron minute is not a dependency. And {@link PaperReconciliationService#reconcile()}
- * anchors its window to the previous trading SESSION, because the old {@code today 00:00 → now}
+ * <p>{@link PaperReconciliationService#reconcile()} had to move with it, and that is not cosmetic:
+ * it anchors its window to the previous trading SESSION, because the old {@code today 00:00 → now}
  * expression covers nothing at 08:50 and would have reported a clean reconciliation of an empty set.
+ *
+ * <p>It runs on {@code preOpenTaskScheduler}, a lane of its own. An earlier revision of this change
+ * put it on the CATCH-UP's lane so it would queue behind the 08:35 pass — see that bean for why that
+ * was the wrong trade.
  *
  * <p>Weekdays only (no paper trading over the weekend). Cron is property-overridable; a missed cron
  * NEVER fires later (Spring {@code @Scheduled} has no catch-up) — the next evening's pass simply widens
@@ -44,7 +46,7 @@ public class PaperReconciliationScheduler {
   @Scheduled(
       cron = "${artha.paper.reconciliation.cron:0 50 8 * * MON-FRI}",
       zone = "Asia/Kolkata",
-      scheduler = "swingCatchUpTaskScheduler")
+      scheduler = "preOpenTaskScheduler")
   public void run() {
     try {
       ReconciliationResult r = reconciliation.reconcile();

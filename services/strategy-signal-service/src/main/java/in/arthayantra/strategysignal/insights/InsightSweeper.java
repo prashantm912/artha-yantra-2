@@ -85,8 +85,12 @@ public class InsightSweeper {
     }
   }
 
-  /** Weekly Saturday quality-report job — QUALITY_REPORT (§10.2). */
-  @Scheduled(cron = "${artha.insights.quality-cron:0 0 8 * * SAT}", zone = "Asia/Kolkata")
+  /**
+   * Weekly quality report — QUALITY_REPORT (§10.2). FRIDAY 18:12 IST since 2026-08-12: it ran
+   * Saturday 08:00, and the owner's machine is weekday-only, so it had never run. Friday evening
+   * keeps the "end of the week" intent inside the operating window.
+   */
+  @Scheduled(cron = "${artha.insights.quality-cron:0 12 18 * * FRI}", zone = "Asia/Kolkata")
   public void qualityReport() {
     try {
       engine.runQualityReport();

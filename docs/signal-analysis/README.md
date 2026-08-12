@@ -757,7 +757,31 @@ Run in order; each answers one question. Canned SQL in §6.
     the future may be recorded, labelled PROXY, but must not enter G11's chop-day count), and
     never evidence for or against any tuning row. The in-stack canaries cannot see this class —
     they were down too; only an off-stack heartbeat (the unbuilt batch-liveness third layer) can.
-36. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+36. **Reconcile `fired` eval-outcomes against emitted signals — the difference is a RISK-GATE-SUPPRESSED
+    class with no rejection row, no signal row and no shadow position** (added 2026-08-12, the first
+    `daily_profit_target` trip day) — `RiskService.entryVeto` sits DOWNSTREAM of the confluence gate, so
+    a fired eval that the risk gate suppresses increments `outcome='fired'` but persists NOTHING else:
+    on 2026-08-12, 24 fired evals = 7 emitted signals + **17 suppressions** (`risk cap
+    scalper/daily_profit_target tripped — ENTRY emission paused for 2026-08-12`, then one
+    `ENTRY suppressed by scalper risk gate (daily_profit_target): <slug> <contract>` line each). Three
+    consequences: (a) **the fired count in `signal_eval_outcomes` is NOT the signal count** — reconcile
+    them every session and attribute the difference to logged suppressions before suspecting a defect;
+    (b) the suppressed fires are a **counterfactual class the shadow book structurally skips** (like
+    §3.27's strike-pick class): no `wouldBeLeg` exists, so reconstruct legs from the suppression log
+    lines + picker-consistent strikes (nearby shadow rows pin what the picker was choosing) and price
+    via §4.2 — the LOG LINES ARE THE ONLY RECORD and die with the container, so grep them the same day;
+    (c) the pause is entry-only — open positions run to their own exits (measured: pos 63 ran to its
+    TIME_STOP +₹4,454.56 eighteen minutes after the trip). Distinguish from the §3.31 discipline
+    freeze: the risk gate is upstream of the §12.7 discipline check, so a risk-gate pause leaves
+    `discipline-paused` at 0 while suppressing everything — the two shutdowns are separable in
+    telemetry. Trip mechanics: `dayPnl = realizedOn(today) + unrealizedTotal` (`PaperAccountService`),
+    i.e. the target can trip on MARK-TO-MARKET while realized is negative (measured 11:01 IST:
+    realized −₹1,338.42, target ₹2,250 = 1.5% of the ₹150k book).
+    ```bash
+    docker logs ay-strategy-signal-service --since <open-UTC> 2>&1 \
+      | grep -E "risk cap .* tripped|ENTRY suppressed by scalper risk gate" | head -30
+    ```
+37. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

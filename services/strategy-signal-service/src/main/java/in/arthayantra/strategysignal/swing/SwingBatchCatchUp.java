@@ -371,12 +371,26 @@ public class SwingBatchCatchUp {
       String reason = "ATTEMPT_BUDGET_EXHAUSTED after " + maxAttempts + " attempts";
       state.markAbandoned(batch, session, reason);
       log.error("swing catch-up: {} exhausted {} attempts for {} — abandoning", batch, maxAttempts, session);
+      // ⚠️ CAUSE-NEUTRAL, deliberately. This message used to assert one cause ("a held position's
+      // daily bar is still missing") and recommend POST /run. Both were safe only while the budget
+      // had exactly one way to run out. It now has a second: a session whose SCREEN never landed
+      // stays retryable and burns the budget with its exits fully evaluated and nothing wrong with
+      // any bar — so the stated cause would be flatly wrong half the time.
+      //
+      // The remediation was worse than the diagnosis. `/run` is UNPINNED: it calls
+      // runAndRecord(doctrine) with no session, so it enters off the LATEST funnel
+      // (ManasAroraSwingController / MinerviniSwingController). For a screen-mismatch abandonment
+      // that is precisely the wrong thing — it cannot restore the missing historical entries, and
+      // it would take a different day's names while appearing to fix the problem.
       alert(
           doctrine, "catch-up ABANDONED for " + session,
-          "Could not complete the " + session + " batch after " + maxAttempts + " attempts (a held"
-              + " position's daily bar is still missing). Giving up — its stop for that session is"
-              + " UNRECOVERABLE. Investigate the daily-candle gap, then POST /api/v1/signals/"
-              + batch + "-swing/run if still needed.");
+          "Could not complete the " + session + " batch after " + maxAttempts + " attempts. Giving"
+              + " up — whatever that session still owed is now UNRECOVERABLE by the catch-up."
+              + " Check swing_catchup_runs for this session's last reason before acting: a missing"
+              + " daily bar and a screen that never landed need different fixes."
+              + " ⚠️ Do NOT reach for POST /api/v1/signals/" + batch + "-swing/run to repair this."
+              + " That endpoint is UNPINNED — it runs against TODAY's funnel, so it cannot recover"
+              + " a past session's entries and may take an entirely different set of names.");
       return;
     }
     if (marketOpenDeadlinePassed()) {

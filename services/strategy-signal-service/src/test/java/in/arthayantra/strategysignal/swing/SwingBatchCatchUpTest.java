@@ -549,6 +549,26 @@ class SwingBatchCatchUpTest {
     verify(recorder, never())
         .runAndRecord(eq(manas), eq(FRIDAY), org.mockito.ArgumentMatchers.anyBoolean(), any());
     assertThat(alerts()).anyMatch(a -> a.title().contains("ABANDONED"));
+
+    // ⚠️ The remediation matters more than the diagnosis here, and both were wrong once the budget
+    // gained a second way to run out (cross-vendor review Critical). The message must not assert a
+    // single cause — a screen that never landed exhausts the budget with every bar present and every
+    // exit evaluated — and it must not send the owner to POST /run, which is UNPINNED: it runs
+    // against TODAY's funnel, so it cannot restore a past session's entries and may take an entirely
+    // different set of names.
+    String abandoned =
+        alerts().stream()
+            .filter(a -> a.title().contains("ABANDONED"))
+            .map(SwingBatchAlert::message)
+            .findFirst()
+            .orElseThrow();
+    assertThat(abandoned)
+        .as("the alert must not claim one cause when the budget now has two")
+        .doesNotContain("daily bar is still missing");
+    assertThat(abandoned)
+        .as("and must warn against the unpinned endpoint rather than recommending it")
+        .contains("Do NOT")
+        .contains("UNPINNED");
   }
 
   @Test

@@ -88,6 +88,68 @@ class SwingBatchRecorderTest {
             anyInt(), anyInt(), anyBoolean(), any(), anyBoolean());
   }
 
+  /**
+   * ⚠️ An entries-disabled run finished its EXITS, not the batch — and saying otherwise contradicts
+   * the coordinator.
+   *
+   * <p>Cross-vendor review Major. Every successful entries-disabled run published "<family> batch
+   * done"; moments later {@code SwingBatchCatchUp} publishes EXITS ONLY and leaves the session
+   * retryable, precisely because it is NOT done. Two alerts, opposite claims, same run — and the
+   * operator believes the first one they read.
+   *
+   * <p>It was invisible to the coordinator's own tests because those MOCK this recorder, so the
+   * contradiction only existed in production. That is the gap this test closes, and it is why the
+   * assertion lives here rather than there.
+   */
+  @Test
+  void anEntriesDisabledRunAnnouncesAnExitsPassNotACompletedBatch() {
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    runOnce(events, false);
+
+    ArgumentCaptor<SwingBatchAlert> captor = ArgumentCaptor.forClass(SwingBatchAlert.class);
+    verify(events).publishEvent(captor.capture());
+    assertThat(captor.getValue().title())
+        .as("the 16:00 settle and a screen-mismatched catch-up both run exits only")
+        .contains("exits pass complete")
+        .doesNotContain("batch done");
+  }
+
+  /** The other half: a real both-passes run must still say what it always said. */
+  @Test
+  void anEntriesEnabledRunStillAnnouncesTheBatchDone() {
+    // ⚠️ Without this the fix could have relabelled EVERY run and the test above would still pass.
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    runOnce(events, true);
+
+    ArgumentCaptor<SwingBatchAlert> captor = ArgumentCaptor.forClass(SwingBatchAlert.class);
+    verify(events).publishEvent(captor.capture());
+    assertThat(captor.getValue().title()).contains("batch done");
+  }
+
+  /** A clean run — no refusals, no skipped exits — with entries on or off. */
+  private static void runOnce(ApplicationEventPublisher events, boolean entriesEnabled) {
+    SwingBatchEngine engine = mock(SwingBatchEngine.class);
+    SwingDoctrine doctrine = manasDoctrine();
+    when(engine.runDaily(eq(doctrine), any(), anyBoolean(), any(), anyBoolean()))
+        .thenReturn(
+            new SwingBatchEngine.SwingRun(
+                1, 0, entriesEnabled ? 1 : 0, 2, 0, SwingBatchEngine.AdmissionProbe.empty()));
+    new SwingBatchRecorder(
+            engine,
+            mock(SwingBatchRunRepository.class),
+            mock(SwingSellDecisionService.class),
+            mock(FlagSnapshotService.class),
+            new SwingRunMutex(),
+            events,
+            Clock.systemUTC())
+        .runAndRecord(
+            doctrine,
+            LocalDate.of(2026, 7, 17),
+            entriesEnabled,
+            SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
+            Optional.of(new SwingDoctrine.CandidateSnapshot(LocalDate.of(2026, 7, 17), List.of())));
+  }
+
   @Test
   void runScheduledPublishesAFailedAlertWhenTheBatchThrows() {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);

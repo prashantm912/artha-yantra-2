@@ -415,6 +415,44 @@ class SwingBatchCatchUpTest {
     assertThat(alerts()).anyMatch(a -> a.message().contains("ENTRIES are also still owed"));
   }
 
+  /**
+   * ⚠️ The ABANDONED alert tells the operator to read {@code swing_catchup_runs.last_reason}, so
+   * that column has to be the LAST failure — not whichever one happened to be recorded first.
+   *
+   * <p>Cross-vendor review Major, and it was a defect my own previous fix introduced. Replacing the
+   * alert's single asserted cause with "go and read the reason" is only an improvement if the reason
+   * is current. Three retryable paths called the REASONLESS {@code markPending} overload, which
+   * leaves the existing value untouched ({@code SwingCatchUpStateRepository}: the UPDATE sets only
+   * status and updated_at), and abandonment deliberately preserves it. So a session that failed once
+   * on a screen mismatch and then repeatedly on a missing bar would still read
+   * SCREEN_NOT_AS_OF_SESSION, and the operator would go looking for the wrong thing.
+   *
+   * <p>This drives that exact transition: mismatched screen first, then a correct screen with a
+   * held stop whose bar is missing.
+   */
+  @Test
+  void theRecordedReasonTracksTheLatestFailureNotTheFirst() {
+    SwingDoctrine mismatched = doctrine(true, THURSDAY); // funnel is not FRIDAY's screen
+    armedFamilyOnlyFridayMissed();
+    when(recorder.runAndRecord(
+            eq(mismatched), eq(FRIDAY), eq(false), eq(SwingBatchRecorder.MarkerPolicy.ON_COMPLETE)))
+        .thenReturn(run(0, 1, 0));
+    catchUp(MONDAY_0835, true, mismatched).catchUp();
+    verify(state).markPending("manas-arora", FRIDAY, "SCREEN_NOT_AS_OF_SESSION");
+
+    // Next sweep: the screen has landed, but a held anchor's daily bar has not.
+    SwingDoctrine matched = doctrine(true, FRIDAY);
+    armedFamilyOnlyFridayMissed();
+    when(recorder.runAndRecord(
+            eq(matched), eq(FRIDAY), eq(true), eq(SwingBatchRecorder.MarkerPolicy.ON_COMPLETE)))
+        .thenReturn(run(0, 0, 1));
+    catchUp(MONDAY_0835, true, matched).catchUp();
+
+    verify(state)
+        .markPending("manas-arora", FRIDAY, "DAILY_BAR_MISSING");
+    verify(state, never()).markDone("manas-arora", FRIDAY);
+  }
+
   @Test
   void aPartialRunIsLeftRetryableNotRecordedDone() {
     // Critical 1: a held anchor's daily bar was missing (exitSkipped>0). The run must NOT be marked
@@ -427,7 +465,7 @@ class SwingBatchCatchUpTest {
 
     catchUp(MONDAY_0835, true, manas).catchUp();
 
-    verify(state).markPending("manas-arora", FRIDAY);
+    verify(state).markPending("manas-arora", FRIDAY, "DAILY_BAR_MISSING");
     verify(state, never()).markDone(any(), any());
     assertThat(alerts()).anyMatch(a -> a.title().contains("INCOMPLETE"));
   }
@@ -483,7 +521,7 @@ class SwingBatchCatchUpTest {
 
     catchUp(MONDAY_0835, true, manas).catchUp();
 
-    verify(state).markPending("manas-arora", FRIDAY);
+    verify(state).markPending("manas-arora", FRIDAY, "RUN_MARKER_WRITE_FAILED");
     verify(state, never()).markDone(any(), any());
     assertThat(alerts()).anyMatch(a -> a.title().contains("marker WRITE FAILED"));
   }
@@ -668,7 +706,7 @@ class SwingBatchCatchUpTest {
     catchUp(MONDAY_0835, true, manas).catchUp();
     catchUp(tuesday0835, true, manas).catchUp();
 
-    verify(state).markPending("manas-arora", oldest);
+    verify(state).markPending("manas-arora", oldest, "DAILY_BAR_MISSING");
     verify(state).markDone("manas-arora", oldest);
     verify(recorder, org.mockito.Mockito.times(2))
         .runAndRecord(eq(manas), eq(oldest), anyBoolean(), any(), any());

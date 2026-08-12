@@ -386,8 +386,10 @@ public class SwingBatchCatchUp {
           doctrine, "catch-up ABANDONED for " + session,
           "Could not complete the " + session + " batch after " + maxAttempts + " attempts. Giving"
               + " up — whatever that session still owed is now UNRECOVERABLE by the catch-up."
-              + " Check swing_catchup_runs for this session's last reason before acting: a missing"
-              + " daily bar and a screen that never landed need different fixes."
+              + " Check swing_catchup_runs.last_reason for this session before acting: a missing"
+              + " daily bar, an unreadable funnel and a screen that never landed need different"
+              + " fixes. Every retryable path records its own reason, so that column is the LAST"
+              + " failure and not merely the first."
               + " ⚠️ Do NOT reach for POST /api/v1/signals/" + batch + "-swing/run to repair this."
               + " That endpoint is UNPINNED — it runs against TODAY's funnel, so it cannot recover"
               + " a past session's entries and may take an entirely different set of names.");
@@ -457,7 +459,7 @@ public class SwingBatchCatchUp {
     // DONE claim here would strand the session forever (hasRun false → looks un-run, claim DONE → never
     // re-claimed). Keeping it PENDING lets the next sweep retry it (2026-07-17 review, Major).
     if (candidateSnapshot.isEmpty()) {
-      state.markPending(batch, session);
+      state.markPending(batch, session, "INPUTS_UNAVAILABLE");
       log.error(
           "swing catch-up: {} funnel snapshot failed for {} â€” exits may run, but the session stays"
               + " retryable and cannot be marked complete",
@@ -541,7 +543,7 @@ public class SwingBatchCatchUp {
               + ".");
     } else if (run.exitSkipped() == 0) {
       // Exits fully evaluated but the marker write FAILED — repairable, not terminal.
-      state.markPending(batch, session);
+      state.markPending(batch, session, "RUN_MARKER_WRITE_FAILED");
       log.error(
           "swing catch-up: {} evaluated every stop for {} but the run-marker write FAILED — left"
               + " retryable so the next sweep repairs it",
@@ -556,7 +558,7 @@ public class SwingBatchCatchUp {
                       + " later sweep needs its screen, not just the marker."));
     } else {
       // A held anchor's daily bar is missing — the marker was NOT recorded; retry next session.
-      state.markPending(batch, session);
+      state.markPending(batch, session, "DAILY_BAR_MISSING");
       log.warn(
           "swing catch-up: {} PARTIAL for {} — {} stop(s) not evaluated, will retry", batch, session,
           run.exitSkipped());

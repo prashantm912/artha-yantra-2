@@ -660,6 +660,11 @@ services:
       ARTHA_PAPER_RECONCILIATION_CRON: "${ARTHA_PAPER_RECONCILIATION_CRON:-0 50 8 * * MON-FRI}"
       # past-expiry recovery
       ARTHA_PAPER_PAST_EXPIRY_RECON_CRON: "${ARTHA_PAPER_PAST_EXPIRY_RECON_CRON:-0 52 8 * * MON-FRI}"
+      # Insight sweeps. Added 2026-08-12: these two were the ONLY window-relevant crons with no
+      # passthrough at all, so OperatingWindowTest's claim that CronPassthroughParityTest proves
+      # every copy of a schedule agrees was false for exactly them. Cross-vendor review caught it.
+      ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON: "${ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON:-0 56 18 * * MON-FRI}"
+      ARTHA_INSIGHTS_SELL_DECISION_CRON: "${ARTHA_INSIGHTS_SELL_DECISION_CRON:-0 57 18 * * MON-FRI}"
       ARTHA_SWING_CANARY_CRON: "${ARTHA_SWING_CANARY_CRON:-0 30 8 * * MON-FRI}"
       # Swing-batch CATCH-UP (2026-07-17 incident): re-runs a batch the stack was down for, pinned to
       # the missed session's daily bar. Runs in the post-close/pre-open window (08:35, after the 08:30

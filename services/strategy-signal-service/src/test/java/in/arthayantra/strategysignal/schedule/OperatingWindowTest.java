@@ -26,13 +26,17 @@ import org.springframework.scheduling.support.CronExpression;
  * and started after 08:00, so a job scheduled outside 08:00–19:00 does not run late — it does not
  * run at all, silently, on every day the machine goes off on time.
  *
- * <p>⚠️ Reads the default out of the {@code @Scheduled} ANNOTATION, not out of compose. Two of these
- * sixteen ({@code artha.insights.*}) have no compose passthrough at all — they reach Spring through
- * {@code application.yml} instead — so a compose-driven window check would silently skip 18:56 and
- * 18:57 and report a clean sweep. That is the guard-with-a-blind-spot shape, and enumerating the
- * schedule before writing this test is what surfaced it. {@code CronPassthroughParityTest} already
- * proves the code default, the compose default and the YAML default agree byte for byte, so reading
- * the annotation covers every job uniformly however its override is wired.
+ * <p>⚠️ Reads the default out of the {@code @Scheduled} ANNOTATION, not out of compose. When this
+ * test was written, two of the sixteen ({@code artha.insights.*}) had no compose passthrough at all
+ * — they reached Spring through {@code application.yml} — so a compose-driven window check would
+ * have silently skipped 18:56 and 18:57 and reported a clean sweep. Both passthroughs now exist
+ * (added with the review fixes), so that particular gap is closed; reading the annotation stays the
+ * right choice because it is the ONE copy that is guaranteed to exist for every job, whatever its
+ * override wiring. {@code CronPassthroughParityTest} proves the copies agree byte for byte.
+ *
+ * <p>⚠️ The catalogue below is hand-written and therefore cannot prove its own completeness — see
+ * {@link #everyScheduledJobIsInsideTheWindowOrExplicitlyExcused}, which walks the source instead.
+ * Cross-vendor review found six jobs this list had never mentioned.
  */
 class OperatingWindowTest {
 

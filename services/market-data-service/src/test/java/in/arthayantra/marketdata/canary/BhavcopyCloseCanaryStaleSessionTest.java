@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -78,6 +79,56 @@ class BhavcopyCloseCanaryStaleSessionTest {
     canary(jdbc, ntfy).sweep();
 
     verify(jdbc).query(anyString(), any(org.springframework.jdbc.core.RowMapper.class), any(), any());
+  }
+
+  @Test
+  @DisplayName("the completion listener runs the comparison the late-publish night would have lost")
+  void theCompletionListenerRecoversALatePublish() {
+    // The cron is 18:52 and the bhavcopy submit at 18:45 is ASYNCHRONOUS, so on a 19:31 publish the
+    // cron finds nothing and the guard skips — permanently, because by its next firing that session
+    // is no longer today. This is the entry point that closes it.
+    NtfyClient ntfy = mock(NtfyClient.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.query(anyString(), ArgumentMatchers.<ResultSetExtractor<LocalDate>>any()))
+        .thenReturn(TODAY);
+
+    canary(jdbc, ntfy).onBhavcopyCompleted();
+
+    verify(jdbc).query(anyString(), any(org.springframework.jdbc.core.RowMapper.class), any(), any());
+  }
+
+  @Test
+  @DisplayName("an empty completion is skipped by the same guard, not swept twice")
+  void aCompletionThatLandedNothingIsStillSkipped() {
+    // Completion is published even when both exchanges returned nothing, so the event does NOT
+    // prove the file arrived. The listener must inherit the stale-date guard rather than trust it.
+    NtfyClient ntfy = mock(NtfyClient.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.query(anyString(), ArgumentMatchers.<ResultSetExtractor<LocalDate>>any()))
+        .thenReturn(TODAY.minusDays(1));
+
+    canary(jdbc, ntfy).onBhavcopyCompleted();
+
+    verify(ntfy, never()).send(anyString(), anyString(), anyString());
+    verify(jdbc, never()).query(anyString(), any(org.springframework.jdbc.core.RowMapper.class), any(), any());
+  }
+
+  @Test
+  @DisplayName("cron then event does not compare the same session twice")
+  void theCronAndTheListenerDoNotBothAlert() {
+    // The common case is the file landing BEFORE 18:52, so both entry points fire on the same
+    // session. Without lastSwept that is two comparisons and two possible pages for one night.
+    NtfyClient ntfy = mock(NtfyClient.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.query(anyString(), ArgumentMatchers.<ResultSetExtractor<LocalDate>>any()))
+        .thenReturn(TODAY);
+
+    BhavcopyCloseCanary canary = canary(jdbc, ntfy);
+    canary.sweep();
+    canary.onBhavcopyCompleted();
+
+    verify(jdbc, times(1))
+        .query(anyString(), any(org.springframework.jdbc.core.RowMapper.class), any(), any());
   }
 
   /**

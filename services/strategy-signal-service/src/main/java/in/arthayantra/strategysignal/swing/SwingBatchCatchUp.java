@@ -415,8 +415,11 @@ public class SwingBatchCatchUp {
               + " up — whatever that session still owed is now UNRECOVERABLE by the catch-up."
               + " Check swing_catchup_runs.reason for this session before acting: a missing"
               + " daily bar, an unreadable funnel and a screen that never landed need different"
-              + " fixes. Every retryable path records its own reason, so that column is the LAST"
-              + " failure and not merely the first."
+              + " fixes. That column is the last RECORDED reason. Every path that returns normally"
+              + " records its own, but a JVM or container death cannot — such an attempt is"
+              + " recovered later as a STALE RUNNING claim and leaves the previous reason in place."
+              + " If reason looks inconsistent with the logs, compare claimed_at: a gap there is a"
+              + " crashed attempt whose cause is only in the logs."
               + " ⚠️ Do NOT reach for POST /api/v1/signals/" + batch + "-swing/run to repair this."
               + " That endpoint is UNPINNED — it runs against TODAY's funnel, so it cannot recover"
               + " a past session's entries and may take an entirely different set of names.");

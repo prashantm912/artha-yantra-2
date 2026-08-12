@@ -416,7 +416,7 @@ class SwingBatchCatchUpTest {
   }
 
   /**
-   * ⚠️ The ABANDONED alert tells the operator to read {@code swing_catchup_runs.last_reason}, so
+   * ⚠️ The ABANDONED alert tells the operator to read {@code swing_catchup_runs.reason}, so
    * that column has to be the LAST failure — not whichever one happened to be recorded first.
    *
    * <p>Cross-vendor review Major, and it was a defect my own previous fix introduced. Replacing the
@@ -451,6 +451,38 @@ class SwingBatchCatchUpTest {
     verify(state)
         .markPending("manas-arora", FRIDAY, "DAILY_BAR_MISSING");
     verify(state, never()).markDone("manas-arora", FRIDAY);
+  }
+
+  /**
+   * ⚠️ A throw AFTER the atomic claim must still record WHY, or the ABANDONED alert lies.
+   *
+   * <p>Cross-vendor review Major, and it falsified a sentence I had just added. A runtime failure
+   * past the claim reached only the family-level catch, which logs and moves on without touching
+   * this row's {@code reason}. The row stays RUNNING, becomes retryable once the lease expires, and
+   * if a later attempt exhausts the budget then abandonment preserves whatever reason predated the
+   * failure — while the alert tells the operator that column is the LAST failure.
+   *
+   * <p>The rethrow is part of the contract: the family boundary still logs and the sweep still
+   * moves on. Only the missing reason is added.
+   */
+  @Test
+  void aFailureAfterTheClaimRecordsWhyAndStillPropagates() {
+    SwingDoctrine manas = doctrine(true, FRIDAY);
+    armedFamilyOnlyFridayMissed();
+    when(recorder.runAndRecord(
+            eq(manas), eq(FRIDAY), anyBoolean(), any(), any(), any()))
+        .thenThrow(new IllegalStateException("engine blew up mid-session"));
+    when(recorder.runAndRecord(eq(manas), eq(FRIDAY), anyBoolean(), any(), any()))
+        .thenThrow(new IllegalStateException("engine blew up mid-session"));
+    when(recorder.runAndRecord(eq(manas), eq(FRIDAY), anyBoolean(), any()))
+        .thenThrow(new IllegalStateException("engine blew up mid-session"));
+
+    // catchUp() swallows at the family boundary, so this must not throw out of the sweep...
+    catchUp(MONDAY_0835, true, manas).catchUp();
+
+    // ...but the row must carry the reason, and must not be marked done.
+    verify(state).markPending("manas-arora", FRIDAY, "EXECUTION_FAILED");
+    verify(state, never()).markDone(any(), any());
   }
 
   @Test

@@ -267,7 +267,19 @@ public class SwingBatchCatchUp {
             batch);
         return;
       }
-      catchUpSession(doctrine, session, retryable.contains(session));
+      // ⚠️ A throw AFTER the atomic claim used to reach only the family-level catch, which logs and
+      // moves on WITHOUT touching this row's reason. The row stays RUNNING, becomes retryable once
+      // the lease expires, and if a later attempt then exhausts the budget, abandonment preserves
+      // whatever reason was recorded BEFORE the failure — so the ABANDONED alert, which tells the
+      // operator that column is the LAST failure, would be lying. Cross-vendor review Major, and it
+      // falsified a sentence I had just added. Recording here makes the sentence true instead of
+      // softening it; the rethrow leaves the family boundary's logging and sweep behaviour intact.
+      try {
+        catchUpSession(doctrine, session, retryable.contains(session));
+      } catch (RuntimeException failed) {
+        state.markPending(batch, session, "EXECUTION_FAILED");
+        throw failed;
+      }
     }
   }
 
@@ -386,7 +398,7 @@ public class SwingBatchCatchUp {
           doctrine, "catch-up ABANDONED for " + session,
           "Could not complete the " + session + " batch after " + maxAttempts + " attempts. Giving"
               + " up — whatever that session still owed is now UNRECOVERABLE by the catch-up."
-              + " Check swing_catchup_runs.last_reason for this session before acting: a missing"
+              + " Check swing_catchup_runs.reason for this session before acting: a missing"
               + " daily bar, an unreadable funnel and a screen that never landed need different"
               + " fixes. Every retryable path records its own reason, so that column is the LAST"
               + " failure and not merely the first."

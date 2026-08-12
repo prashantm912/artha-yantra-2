@@ -2,19 +2,16 @@ package in.arthayantra.marketdata.canary;
 
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.alerts.NtfyClient;
-import in.arthayantra.marketdata.ingest.BhavcopyBackfillCompleted;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.Clock;
-import java.time.LocalDate;
-import java.util.concurrent.atomic.AtomicReference;
+import java.time.LocalDate;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.event.EventListener;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -85,19 +82,6 @@ public class BhavcopyCloseCanary {
   private final int redFloor;
   private final int sampleLimit;
 
-  /**
-   * The last trade date CLAIMED for comparison, so a session is compared exactly once however the two
-   * entry points interleave.
-   *
-   * <p>⚠️ An {@code AtomicReference} with a compare-and-set claim, not a {@code volatile} write after
-   * the fact. The first version wrote it at the END of {@code sweep()} and checked it only in the
-   * listener, which suppressed cron-then-event and nothing else — and cross-vendor review pointed out
-   * that production's COMMON order is the opposite: the file usually lands before 18:52, so the event
-   * runs first and the cron then compares the same session again. Two entry points needing
-   * exactly-once means a claim in the shared path, which is what {@link #compareOnce} is.
-   */
-  private final AtomicReference<LocalDate> lastSwept = new AtomicReference<>();
-
   public BhavcopyCloseCanary(
       JdbcTemplate jdbc,
       NtfyClient ntfy,
@@ -129,17 +113,30 @@ public class BhavcopyCloseCanary {
    * has not landed when this fires, and without the guard below the canary silently re-evaluates
    * YESTERDAY's session and alerts on it as if it were tonight's: an operator message naming the
    * wrong day, repeated every late night — and a confidently wrong alert trains the owner to ignore
-   * the channel. The margin is thin even at the current 20:10 against a 19:30 bhavcopy, and it
-   * shrinks to nothing under the pending schedule move.
+   * the channel.
    *
-   * <p>⚠️ A skipped comparison used to be PERMANENTLY missed for that session, not deferred: by the
-   * time the cron next fired, that session was no longer today and the guard skipped it again,
-   * forever. At 20:10 against a 19:30 publish the margin was thin; moving the chain inside the 19:00
-   * machine-off boundary put the cron at 18:52 against an 18:45 ASYNCHRONOUS submit, which would have
-   * made the miss the normal case rather than the exception. {@link #onBhavcopyCompleted} closes it —
-   * see there for why the guard above is what makes the listener safe.
+   * <p>⚠️ A skipped comparison is PERMANENTLY missed for that session, not deferred.
+   * {@code BhavcopyStartupCatchup} starts the backfill on the next boot, so the DATA arrives — but
+   * this canary has no completion listener and only fires on its own cron, and by the time it next
+   * fires that session is no longer today, so the guard below skips it again. Forever. Skipping
+   * still trades a missed check for a WRONG one, which is the right trade; it does not make the
+   * check free, and the loss is a whole session's close comparison rather than a delay.
+   *
+   * <p><b>20:10 → 18:58, and this LOSES coverage. Stated because it is a real cost of moving the
+   * chain inside the 19:00 machine-off boundary, not a wash.</b> Against the four measured publish
+   * times, 20:10 caught all four; 18:58 catches three (17:52, 17:59, 18:47) and misses 19:31. It is
+   * the last free minute before shutdown, so it is the most coverage the window allows — 18:52,
+   * seven minutes after an ASYNCHRONOUS 18:45 submit, would have caught only two.
+   *
+   * <p>The 19:31 case needs a bhavcopy-completion listener, and that was BUILT AND WITHDRAWN from
+   * the schedule PR rather than shipped half-right. Three review rounds found successive defects in
+   * it: routed through the date guard it was meant to bypass, so it recovered nothing; then a
+   * dedupe that covered only the rare trigger order; then — decisively — the watermark is
+   * in-memory, so the daily JVM restart replays the startup catch-up with a null watermark and
+   * re-alerts yesterday's divergence every morning. Doing it properly needs a PERSISTED compared-
+   * session watermark, which is its own change with its own migration.
    */
-  @Scheduled(cron = "${artha.bhavcopy-close.cron:0 52 18 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.bhavcopy-close.cron:0 58 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void sweep() {
     if (!live || !enabled) {
       return;
@@ -159,74 +156,11 @@ public class BhavcopyCloseCanary {
           latest, today);
       return;
     }
-    compareOnce(latest);
-  }
-
-  /**
-   * Second entry point: run the comparison the moment tonight's bhavcopy actually lands.
-   *
-   * <p>The cron alone cannot work here. {@code BhavcopyBackfillService} submits ASYNCHRONOUSLY and
-   * returns immediately, and NSE's publish time was measured at 17:52, 17:59, 18:47 and 19:31 across
-   * four days — so a fixed minute seven minutes after the submit is a coin flip at best. This makes
-   * the trigger the event it was always waiting for.
-   *
-   * <p><b>It is deliberately not a second unconditional run.</b> Completion is published even when
-   * both exchanges returned nothing, so the event does NOT prove today's file arrived — the
-   * {@code latest.isBefore(today)} guard in {@link #sweep} is what makes it safe, and an empty
-   * completion simply skips exactly as the cron would. {@code lastSwept} then stops the pair
-   * double-alerting when the file lands BEFORE the cron minute, which is the common case.
-   *
-   * <p>This also recovers the late-publish night for free: {@code BhavcopyStartupCatchup} replays the
-   * backfill on the next boot, that replay publishes completion, and the canary now hears it.
-   */
-  @EventListener(BhavcopyBackfillCompleted.class)
-  void onBhavcopyCompleted() {
-    if (!live || !enabled) {
-      return;
-    }
-    // ⚠️ Guard FIRST, then wrap everything, and never rethrow. Spring multicasts this event
-    // SYNCHRONOUSLY and BhavcopyBackfillService catches only around the whole multicast, so an
-    // exception escaping this observer can stop Minervini and Manas from ever receiving completion.
-    // A canary must not be able to break the chain it observes.
-    try {
-      LocalDate latest = latestTradeDate();
-      if (latest == null) {
-        return;
-      }
-      // NO today-guard here, and that is the point of this path rather than an oversight. The cron
-      // is blind — it fires at a fixed minute and cannot know whether anything landed, so for IT a
-      // pre-today `latest` means "tonight's file has not arrived" and comparing it would be a
-      // wrong-day verdict. This path only runs BECAUSE a fetch just completed, so a `latest` of
-      // yesterday means the late-published session has now genuinely arrived and is the one to
-      // compare. That is what recovers the 19:31 night: the machine is off before the file lands,
-      // the next morning's BhavcopyStartupCatchup replays it, completion fires, and this compares
-      // the session the cron would have skipped forever. The alert names `report.tradeDate()`, so
-      // reporting a prior session is explicit rather than mislabelled as tonight's.
-      compareOnce(latest);
-    } catch (RuntimeException e) {
-      log.warn("bhavcopy-close canary listener failed (non-fatal to the chain): {}", e.getMessage());
-    }
-  }
-
-  /**
-   * Compare {@code session} at most once across both entry points, then publish.
-   *
-   * <p>The CAS is the exactly-once guarantee: whichever of the cron and the listener claims the
-   * session runs the comparison, and the other returns having done nothing. A failed evaluation
-   * releases the claim so the next trigger can retry rather than the session being silently consumed
-   * by an attempt that produced no verdict.
-   */
-  private void compareOnce(LocalDate session) {
-    LocalDate previous = lastSwept.get();
-    if (session.equals(previous) || !lastSwept.compareAndSet(previous, session)) {
-      return;
-    }
     BhavcopyCloseReport report;
     try {
-      report = evaluate(session);
+      report = evaluate(latest);
     } catch (RuntimeException e) {
-      lastSwept.compareAndSet(session, previous);
-      log.warn("bhavcopy-close canary failed for {}: {}", session, e.getMessage());
+      log.warn("bhavcopy-close canary failed: {}", e.getMessage());
       return;
     }
     publish(report);

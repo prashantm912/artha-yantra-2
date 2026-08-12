@@ -1,6 +1,6 @@
 package in.arthayantra.marketdata.screener.minervini;
 
-import in.arthayantra.marketdata.ingest.BhavcopyBackfillCompleted;
+import in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import java.time.LocalDate;
 import org.slf4j.Logger;
@@ -146,7 +146,7 @@ public class MinerviniScheduler {
       ntfy.send(
           "Minervini screen FAILED", "high",
           "Trigger " + trigger + ": " + e.getMessage()
-              + " — the 20:00 swing batch will read a stale funnel.");
+              + " — the next swing batch will read a stale funnel.");
     }
   }
 

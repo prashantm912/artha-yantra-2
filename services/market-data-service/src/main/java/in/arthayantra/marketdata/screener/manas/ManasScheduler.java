@@ -1,6 +1,6 @@
 package in.arthayantra.marketdata.screener.manas;
 
-import in.arthayantra.marketdata.ingest.BhavcopyBackfillCompleted;
+import in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -103,7 +103,7 @@ public class ManasScheduler {
       ntfy.send(
           "Manas screen FAILED", "high",
           "Trigger " + trigger + ": " + e.getMessage()
-              + " — the 20:05 swing batch will read a stale funnel.");
+              + " — the next swing batch will read a stale funnel.");
     }
   }
 

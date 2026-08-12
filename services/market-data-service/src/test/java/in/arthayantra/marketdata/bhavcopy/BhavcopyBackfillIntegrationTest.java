@@ -15,7 +15,6 @@ import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.candles.EodCorporateActionRepository;
 import in.arthayantra.marketdata.candles.EquitySplitBonusAdjuster;
 import in.arthayantra.marketdata.dividends.DividendRepository;
-import in.arthayantra.marketdata.ingest.BhavcopyBackfillCompleted;
 import in.arthayantra.marketdata.nse.BhavcopyFetcher;
 import in.arthayantra.marketdata.nse.LiveBhavcopyFetcher;
 import in.arthayantra.marketdata.nse.NseCorporateActionFetcher;

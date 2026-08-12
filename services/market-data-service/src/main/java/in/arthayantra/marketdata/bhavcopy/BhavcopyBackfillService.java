@@ -13,7 +13,6 @@ import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.candles.EodCorporateActionRepository;
 import in.arthayantra.marketdata.dividends.DividendRepository;
-import in.arthayantra.marketdata.ingest.BhavcopyBackfillCompleted;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import in.arthayantra.marketdata.lineage.SymbolRenameEventRepository;
 import in.arthayantra.marketdata.nse.BhavcopyFetcher;
@@ -154,7 +153,7 @@ public class BhavcopyBackfillService {
   // ---- run control -------------------------------------------------------------------------
 
   /** Daily after both exchanges publish (NSE ~19:00, BSE ~18:00 IST); default 19:30 IST. */
-  @Scheduled(cron = "${artha.bhavcopy.eod-cron:0 45 18 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.bhavcopy.eod-cron:0 30 19 * * MON-FRI}", zone = "Asia/Kolkata")
   public void scheduledBackfill() {
     runIfFree();
   }

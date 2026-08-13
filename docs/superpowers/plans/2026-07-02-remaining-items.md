@@ -2032,11 +2032,49 @@ refund the ₹8,569 already banked by six positions sized at 1.0%** — the 7th 
 measure the FIX against the real population before shipping it, not just the DEFECT.** Both defects
 were real; the remedy was inert.
 
-**A fourth lever WOULD work immediately and changes no declared parameter: warming
-`ManasGoverningStopCache`.** Open risk drops to ₹4,356 — **2.87% against the 6% cap**, admitting with
-2.1pp to spare. It is inert today only because entries run before exits (`SwingBatchEngine.java:316`
-vs `:321`) and the cache is cold on every boot. Owner's choice among the four; #1368's body carries
-all of them with numbers.
+**A fourth lever LOOKED like it would work immediately and changes no declared parameter: warming
+`ManasGoverningStopCache`.** Open risk drops to ₹4,356 — 2.87% against the 6% cap (⚠️ the
+doc-of-record says **3.05%** for the same ₹4,356; one of the two is wrong and it is unresolved).
+Inert today only because entries run before exits (`SwingBatchEngine.java:316` vs `:321`) and the
+cache is cold on every boot.
+
+⚠️⚠️ **WITHDRAWN 2026-08-13, TWICE OVER — DO NOT BUILD IT. This paragraph recommended it for
+several hours after it had been withdrawn, which is exactly the drift this ledger exists to stop.**
+
+**(a) It is infeasible as specified.** Built once, cross-vendor review found FOUR Criticals, all in
+the exit path; reverted. A feasibility pass then produced two independent impossibility results.
+*Criterion 3 is the negation of the warm's own precondition*: the warm needs the daily series BEFORE
+`entryPass`, the exit pass fetches it AFTER, and exactly two reconciliations exist — a separate fetch
+(built; ≤180 s exit delay, deadline consumption, two samples that can disagree) or sharing
+`seriesCache` (one sample, but the exit then consumes a series sampled at warm time). **There is no
+third option.** The withdrawn attempt avoided the shared cache *deliberately to protect the exit*,
+and that separate fetch is what broke it. *Criterion 4 guarantees the equity mark fails open*: an
+unmarked position falls back to `avgEntryPrice`, erasing its unrealized **in whichever direction it
+sits**, so an unmarked LOSER overstates equity and loosens every `pct`-mode rail. Fail-soft ⇒ partial
+marks ⇒ unbounded-sign error; correct semantics is all-or-nothing, which is not fail-soft.
+**Corollary worth keeping: the two caches must NOT be warmed by one mechanism — stop-cache
+partiality is monotonically conservative, equity-mark partiality is not.**
+
+**(b) It would have been WRONG even if feasible, and this is the part that matters.** The published
+manas trail carries `breakeven_floor: true` with `arm_pct: 9` (**verified**: both
+`manas-arora-breakout` and `manas-arora-vcp`). An ARMED trail therefore sits at or above entry, so
+the warm would collapse counted open risk almost to fill slippage — **the warm does not adjust the
+cap, it very nearly switches it off.** Measured 2026-08-13 on the 4 open manas positions (persisted
+stops total **₹5,708.50**): peak gains **8.08 / 11.97 / 13.84 / 18.01%**, so **3 of 4 armed** and
+roughly **74% of counted risk released**. ⚠️ The feasibility doc claims 4 of 4 and ~99.4%
+(₹5,708.50 → ≤₹32.19) from a 10.25% low-end; KANORICHEM measures **8.08%** here, below the arm
+threshold. Direction agrees, magnitude does not — **unresolved, and worth settling before anyone
+acts on either figure.** Above all: **the warm swaps an ENFORCEABLE stop (`stop_loss`, polled every
+15 s by the bracket sweep) for an UNENFORCEABLE one (the trail, run once daily and explicitly
+exit-neutral) at the one moment it decides money.**
+
+**The cheapest correct fix is a SIDE TABLE written at the existing `cacheGoverningStop` call site** —
+already inside the no-exit branch, already downstream of the mixed-lot refusal, no fetch, no ordering
+change, already inside the fail-soft try. It satisfies all four criteria trivially. ⚠️ **The settled
+rejection may not actually cover it:** that ruling was against writing to `stop_loss` and against a
+new column on `paper_positions`, and a side table is neither. Owner's call. If it stays closed, the
+fallback is the **degraded-mode signal** — the rail's own report says it is running blind rather
+than quietly under-reporting.
 
 ⚠️ **`ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT` DOES NOT DRIVE SIZING.** It feeds exactly one site — the
 advisory `advised_lots` DISPLAY column. Real sizing comes from the published config's

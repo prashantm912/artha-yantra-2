@@ -126,7 +126,10 @@ class ManasRiskCapReplayTest {
 
   // ---- the book being replayed: manas-arora, V021__paper_books.sql -----------------------------
   private static final double STARTING_CAPITAL = 150_000.0; // V021: ('manas-arora', ..., 150000.00)
-  private static final BigDecimal RISK_PCT_EQUITY = new BigDecimal("1.0"); // both YAMLs' risk_pct_equity
+  private static final BigDecimal RISK_PCT_EQUITY = new BigDecimal("0.8"); // both YAMLs' risk_pct_equity
+  // Was 1.0 until 2026-08-13: at 1.0 the 6.0% AGGREGATE_CAP_PCT saturated at 6 positions and MAX_OPEN=7
+  // was unreachable by construction. Keep in lockstep with the two manas YAMLs or this harness replays
+  // a sizing the live book no longer uses.
   private static final int MAX_OPEN = 7; // V021 max_open_paper_positions
   private static final double AGGREGATE_CAP_PCT = 6.0; // doctrine §2.2, the candidate arm's new rail
   /**

@@ -1281,6 +1281,11 @@ export interface components {
             marginPercents: {
                 [key: string]: string;
             };
+            /**
+             * Format: int32
+             * @description Open positions carrying NO mark — neither a live tick nor a captured daily close — and therefore valued at entry cost (zero unrealized) in the figures above. Non-zero means equity is only partially marked.
+             */
+            unmarkedPositions: number;
         };
         JournalBody: {
             /** Format: int64 */

@@ -136,6 +136,31 @@ public interface EmissionGuard {
       BigDecimal newStop) {}
 
   /**
+   * Records a CASH EQUITY's latest daily-bar close so book equity can mark the position to market.
+   * IN MEMORY ONLY on the adapter side — never a database write, never a new column, and never read
+   * by any exit path (mirrors {@link #cacheManasGoverningStop}'s containment, for the same reason).
+   *
+   * <p>The Redis {@code ticks:last} hash the paper ledger marks against is written from the live WS
+   * ticker, whose subscription is the futures/options universe — measured 2026-08-13, all 307 entries
+   * are NFO/BFO contracts and not one is an NSE cash-equity symbol. So every swing position marked at
+   * its own {@code avgEntryPrice} and contributed exactly ZERO unrealized to book equity, hiding
+   * +₹27,213.97 across the two swing books. The swing exit pass already holds the right number — it
+   * settles these positions at {@code bar.close()} precisely because "the equities don't tick" — so
+   * this port captures that same close instead of adding a blocking fetch to a money path that runs
+   * inside a fill transaction and on the thread that drives the 15-second bracket sweep.
+   *
+   * <p>Called for every held symbol whose daily series resolved, BEFORE the exit rules are evaluated
+   * and independently of their outcome, so the capture cannot vary with an exit decision. Fail-soft
+   * at the call site: an accounting failure must never skip a later position's stop evaluation.
+   * Default no-op keeps non-paper and test adapters permissive.
+   *
+   * @param session the trading session the bar closed — recorded for diagnostics, not for freshness
+   *     (the adapter bounds staleness on its own capture instant)
+   */
+  default void cacheEquityMark(
+      String exchange, String tradingsymbol, BigDecimal close, java.time.LocalDate session) {}
+
+  /**
    * §3.7 hero-zero profit-funded sizing — the lot-rounded qty for an expiry-day hero-zero leg sized to
    * "deploy ~10% of accumulated realised PROFIT, never capital" (mode a), with a ₹2-3k minimum deploy
    * when profits are thin (mode b — owner: "a if we have enough profit, else b"). Computed off the

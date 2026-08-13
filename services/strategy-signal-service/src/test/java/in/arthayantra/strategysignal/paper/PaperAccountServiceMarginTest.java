@@ -44,6 +44,7 @@ class PaperAccountServiceMarginTest {
         mock(PaperAccountRepository.class),
         mock(PaperPositionRepository.class),
         mock(LastTickReader.class),
+        new EquityMarkCache(Clock.systemUTC(), 96),
         mock(InstrumentMetaClient.class),
         margin,
         Clock.systemUTC(),

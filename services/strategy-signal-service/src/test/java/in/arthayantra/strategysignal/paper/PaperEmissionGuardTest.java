@@ -138,7 +138,8 @@ class PaperEmissionGuardTest {
         new PaperEmissionGuard(
             mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
             mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class),
-            new ManasGoverningStopCache());
+            new ManasGoverningStopCache(),
+            new EquityMarkCache(java.time.Clock.systemUTC(), 96));
     when(instruments.meta(any(), any()))
         .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
     when(account.realisedProfit("scalper")).thenReturn(bd("150000"));
@@ -170,7 +171,8 @@ class PaperEmissionGuardTest {
         new PaperEmissionGuard(
             mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
             mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class),
-            new ManasGoverningStopCache());
+            new ManasGoverningStopCache(),
+            new EquityMarkCache(java.time.Clock.systemUTC(), 96));
     when(instruments.meta(any(), any()))
         .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
     // ₹150k profit -> ₹15k budget; premium 20 × lot 75 = ₹1,500/lot -> 10 affordable lots.
@@ -199,7 +201,8 @@ class PaperEmissionGuardTest {
         new PaperEmissionGuard(
             mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
             mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class),
-            new ManasGoverningStopCache());
+            new ManasGoverningStopCache(),
+            new EquityMarkCache(java.time.Clock.systemUTC(), 96));
     when(instruments.meta(any(), any()))
         .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
 
@@ -226,7 +229,8 @@ class PaperEmissionGuardTest {
         new PaperEmissionGuard(
             mock(RiskService.class), mock(PaperAccountService.class), instruments,
             mock(ScalperAccountModel.class), mock(PaperPositionRepository.class), rejections,
-            new ManasGoverningStopCache());
+            new ManasGoverningStopCache(),
+            new EquityMarkCache(java.time.Clock.systemUTC(), 96));
     StrategyDefinition.SizingSpec sizing =
         new StrategyDefinition.SizingSpec("premium_budget", Map.of("budget_inr", bd("15000")));
 

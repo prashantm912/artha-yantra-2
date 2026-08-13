@@ -838,6 +838,19 @@ public class SwingBatchEngine {
         skipped++;
         continue;
       }
+      // Capture the daily close as this symbol's mark-to-market price for book equity. Placed HERE —
+      // after the series is resolved, before any exit rule is evaluated — so the capture is
+      // unconditional and cannot vary with the exit outcome; and it reuses the bar this pass already
+      // fetched, so it adds no round-trip. Cash equities never appear in the Redis `ticks:last` hash
+      // (the WS subscription is the futures/options universe), so without this every swing position
+      // marked at its own entry price and contributed ZERO unrealized to equity.
+      // Capture the daily close as this symbol's mark-to-market price for book equity. Placed HERE —
+      // after the series is resolved, before any exit rule is evaluated — so the capture is
+      // unconditional and cannot vary with the exit outcome; and it reuses the bar this pass already
+      // fetched, so it adds no round-trip. Cash equities never appear in the Redis `ticks:last` hash
+      // (the WS subscription is the futures/options universe), so without this every swing position
+      // marked at its own entry price and contributed ZERO unrealized to equity.
+      cacheEquityMark(primary.tradingsymbol(), series.get(series.size() - 1));
       // geometry is irrelevant to the exit rules (percent/ATR stop + trail), so the pivot contexts are
       // seeded neutral (0) — the bank still builds every declared indicator, the exit eval never reads
       // their value.
@@ -926,6 +939,31 @@ public class SwingBatchEngine {
       log.warn(
           "{} swing: governing-stop cache failed for {} (accounting only, exit unaffected): {}",
           doctrine.batchName(), primary.tradingsymbol(), e.getMessage());
+    }
+  }
+
+  /**
+   * Publishes a held cash equity's latest daily close through the {@code EmissionGuard} port so
+   * {@code PaperAccountService} can mark the position to market. Pure accounting, exactly like
+   * {@link #cacheGoverningStop}: nothing here closes a position, changes an exit decision, or writes
+   * to the database — the adapter holds it in memory only, and no exit path reads it.
+   *
+   * <p>Fail-soft for the same reason the governing-stop cache is: this batch is a swing position's
+   * ONLY daily exit evaluator, so an accounting failure must never propagate and cost a LATER
+   * position its stop evaluation this run.
+   */
+  private void cacheEquityMark(String tradingsymbol, EngineCandle bar) {
+    if (emissionGuard.isEmpty() || bar == null) {
+      return;
+    }
+    try {
+      emissionGuard
+          .get()
+          .cacheEquityMark(EX, tradingsymbol, bar.close(), bar.bucketStart().toLocalDate());
+    } catch (RuntimeException e) {
+      log.warn(
+          "swing: equity-mark cache failed for {} (accounting only, exit unaffected): {}",
+          tradingsymbol, e.getMessage());
     }
   }
 

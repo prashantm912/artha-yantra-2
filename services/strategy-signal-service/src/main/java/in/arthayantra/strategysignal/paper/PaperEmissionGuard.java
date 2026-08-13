@@ -35,6 +35,7 @@ public class PaperEmissionGuard implements EmissionGuard {
   private final PaperPositionRepository positions;
   private final PaperOrderRejectionRecorder rejections;
   private final ManasGoverningStopCache governingStopCache;
+  private final EquityMarkCache equityMarks;
 
   /** Wires the risk gate + capital model + the scalper 5-account discipline + the position ledger. */
   public PaperEmissionGuard(
@@ -44,7 +45,8 @@ public class PaperEmissionGuard implements EmissionGuard {
       ScalperAccountModel scalperAccounts,
       PaperPositionRepository positions,
       PaperOrderRejectionRecorder rejections,
-      ManasGoverningStopCache governingStopCache) {
+      ManasGoverningStopCache governingStopCache,
+      EquityMarkCache equityMarks) {
     this.risk = risk;
     this.account = account;
     this.instruments = instruments;
@@ -52,6 +54,7 @@ public class PaperEmissionGuard implements EmissionGuard {
     this.positions = positions;
     this.rejections = rejections;
     this.governingStopCache = governingStopCache;
+    this.equityMarks = equityMarks;
   }
 
   @Override
@@ -244,6 +247,20 @@ public class PaperEmissionGuard implements EmissionGuard {
     positions
         .findOpenIdIfOpenedBy(book, exchange, tradingsymbol, side, openingSignalId)
         .ifPresent(id -> governingStopCache.put(id, side, newStop));
+  }
+
+  /**
+   * Stores the daily-bar close in the {@link EquityMarkCache} so {@link PaperAccountService#equity}
+   * can mark cash equities to market. No position lookup and no {@code openingSignalId} validation
+   * here, unlike {@link #cacheManasGoverningStop}: a mark is a property of the SYMBOL, not of a
+   * position, so there is no identity to mis-attach it to — every book holding that symbol wants the
+   * same number, and a mark for a symbol nobody holds is simply never read (the equity sum iterates
+   * OPEN positions).
+   */
+  @Override
+  public void cacheEquityMark(
+      String exchange, String tradingsymbol, BigDecimal close, java.time.LocalDate session) {
+    equityMarks.put(exchange, tradingsymbol, close, session);
   }
 
   @Override

@@ -216,11 +216,50 @@ class ManasAroraSwingEngineTest {
   }
 
   @Test
+  void theExitPassPublishesTheDailyCloseAsTheEquityMark() throws IOException {
+    // Book equity marks positions through the Redis `ticks:last` hash, which the live WS ticker fills
+    // from the futures/options universe — measured 2026-08-13, 307 entries, not one an NSE cash
+    // equity. So every swing position marked at its own avgEntryPrice and contributed ZERO unrealized
+    // (+₹27,213.97 invisible across the two books). This proves the exit pass — which already holds
+    // the right number, since it settles these positions at bar.close() precisely because equities do
+    // not tick — publishes that close through the EmissionGuard port for the paper adapter to cache.
+    ExitHarness h = new ExitHarness();
+    when(h.candles.fetch(any(), any(), any(), any(), any())).thenReturn(h.series);
+    EmissionGuard guard = mock(EmissionGuard.class);
+
+    SwingBatchEngine.SwingRun run = h.engine(Optional.of(guard)).runDaily(h.doctrine(false));
+
+    ArgumentCaptor<BigDecimal> close = ArgumentCaptor.forClass(BigDecimal.class);
+    verify(guard).cacheEquityMark(eq("NSE"), eq("TESTCO"), close.capture(), any());
+    assertThat(close.getValue())
+        .as("the mark is the LAST bar's close — the same bar the exit rules were evaluated against")
+        .isEqualByComparingTo(h.series.get(h.series.size() - 1).close());
+    assertThat(run.exitSkipped()).as("marking is pure accounting — no position goes unevaluated").isZero();
+  }
+
+  @Test
+  void theEquityMarkIsPublishedEvenWhenThePositionExitsThisRun() throws IOException {
+    // Placement proof: the capture sits BEFORE the exit rules are evaluated, so it cannot vary with
+    // the exit outcome. If it were inside the no-exit branch (where cacheManasGoverningStop lives) a
+    // book whose positions all exited would silently stop being markable.
+    ExitHarness h = new ExitHarness();
+    when(h.candles.fetch(any(), any(), any(), any(), any())).thenReturn(h.series);
+    // The same anchor placement the pyramid-exit test uses, which the declining series does exit.
+    h.stubAnchors(h.anchor(42L, h.series.get(24).bucketStart()));
+    EmissionGuard guard = mock(EmissionGuard.class);
+
+    SwingBatchEngine.SwingRun run = h.engine(Optional.of(guard)).runDaily(h.doctrine(false));
+
+    assertThat(run.exits()).as("this run really does exit the position").isEqualTo(1);
+    verify(guard).cacheEquityMark(eq("NSE"), eq("TESTCO"), any(), any());
+  }
+
+  @Test
   void aFreshEntryAtSixOpenPositionsIsRefusedWhenTheSeventhWouldBreachTheOpenRiskCap() throws IOException {
     // M40 (owner-directed 2026-08-02): 6 open Manas positions already risking exactly 6% of a
-    // ₹1,000,000 book (representative of 6 names each risking risk_pct_equity=1.0, the value both
-    // manas-arora-breakout.yaml and manas-arora-vcp.yaml carry — max_open_paper_positions=7 makes a
-    // 7th reachable at current config since both strategies share one Books.MANAS_ARORA key). NEWCO is
+    // ₹1,000,000 book. The 6% figure is supplied directly by this test, NOT derived from the YAMLs'
+    // risk_pct_equity (0.8 since 2026-08-13, when 1.0 was found to make max_open_paper_positions=7
+    // unreachable — 1.0 × 6 = the 6.0% cap exactly); this test pins the GATE, not the sizing. NEWCO is
     // NOT held (signals.activeEntries() is empty) — this is a FRESH (first) entry, not a pyramid add,
     // and pyramiding is DISABLED (enabled=false) to prove the cap fires independently of that flag.
     FreshResult r = runFreshEntry(new BigDecimal("60000"));
@@ -502,8 +541,12 @@ class ManasAroraSwingEngineTest {
     }
 
     SwingBatchEngine engine() {
+      return engine(Optional.empty());
+    }
+
+    SwingBatchEngine engine(Optional<EmissionGuard> guard) {
       return new SwingBatchEngine(
-          registry, candles, signals, mock(SignalPublisher.class), events, Optional.empty(),
+          registry, candles, signals, mock(SignalPublisher.class), events, guard,
           passthroughTx(), new ObjectMapper(), Clock.systemUTC());
     }
 

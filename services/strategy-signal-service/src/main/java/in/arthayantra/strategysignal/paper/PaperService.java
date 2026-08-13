@@ -1443,7 +1443,9 @@ public class PaperService {
     BigDecimal mark = null;
     BigDecimal unrealized = null;
     if ("OPEN".equals(row.status())) {
-      mark = lastTick.lastPrice(row.exchange(), row.tradingsymbol()).orElse(null);
+      // Same mark resolution as book equity (tick, else the captured daily close) so a swing
+      // position's displayed unrealized agrees with the account header instead of reading null.
+      mark = accountService.markFor(row.exchange(), row.tradingsymbol()).orElse(null);
       if (mark != null) {
         BigDecimal move =
             "BUY".equals(row.side())
@@ -1754,7 +1756,8 @@ public class PaperService {
   }
 
   private PositionDto toPositionDto(PositionRow row) {
-    BigDecimal mark = lastTick.lastPrice(row.exchange(), row.tradingsymbol()).orElse(null);
+    // Same mark resolution as book equity — see positionDetail.
+    BigDecimal mark = accountService.markFor(row.exchange(), row.tradingsymbol()).orElse(null);
     BigDecimal unrealized = null;
     if (mark != null) {
       BigDecimal move =
@@ -1783,8 +1786,10 @@ public class PaperService {
    * #openPositions} (which stay display-only and never touch this method at all).
    */
   private double countMtmBlindPositions() {
-    return positions.listOpen().stream()
-        .filter(p -> lastTick.lastPrice(p.exchange(), p.tradingsymbol()).isEmpty())
-        .count();
+    // Counts positions with NO mark of any kind — tick OR captured daily close. Before the equity-mark
+    // change this read `lastTick` alone, so all 18 cash-equity swing positions counted as blind purely
+    // because equities do not tick; that made the gauge saturate on a permanent structural condition
+    // and useless as an alert. Blind now means genuinely unmarkable, which is what it always claimed.
+    return accountService.unmarkedOpenCount(null);
   }
 }

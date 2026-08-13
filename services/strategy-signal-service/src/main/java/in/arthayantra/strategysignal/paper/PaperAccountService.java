@@ -12,6 +12,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -39,11 +40,18 @@ public class PaperAccountService {
       int openPositions,
       @Schema(type = "string") BigDecimal capitalUsed,
       @Schema(additionalPropertiesSchema = String.class) Map<String, BigDecimal> usageByClass,
-      @Schema(additionalPropertiesSchema = String.class) Map<String, BigDecimal> marginPercents) {}
+      @Schema(additionalPropertiesSchema = String.class) Map<String, BigDecimal> marginPercents,
+      @Schema(
+              description =
+                  "Open positions carrying NO mark — neither a live tick nor a captured daily close"
+                      + " — and therefore valued at entry cost (zero unrealized) in the figures"
+                      + " above. Non-zero means equity is only partially marked.")
+          int unmarkedPositions) {}
 
   private final PaperAccountRepository account;
   private final PaperPositionRepository positions;
   private final LastTickReader lastTick;
+  private final EquityMarkCache equityMarks;
   private final InstrumentMetaClient instruments;
   private final MarginServiceClient margin;
   private final Clock clock;
@@ -55,6 +63,7 @@ public class PaperAccountService {
       PaperAccountRepository account,
       PaperPositionRepository positions,
       LastTickReader lastTick,
+      EquityMarkCache equityMarks,
       InstrumentMetaClient instruments,
       MarginServiceClient margin,
       Clock clock,
@@ -63,6 +72,7 @@ public class PaperAccountService {
     this.account = account;
     this.positions = positions;
     this.lastTick = lastTick;
+    this.equityMarks = equityMarks;
     this.instruments = instruments;
     this.margin = margin;
     this.clock = clock;
@@ -93,12 +103,64 @@ public class PaperAccountService {
   public BigDecimal unrealizedTotal(String book) {
     BigDecimal total = BigDecimal.ZERO;
     for (PositionRow pos : positions.listOpen(book)) {
-      BigDecimal mark = lastTick.lastPrice(pos.exchange(), pos.tradingsymbol()).orElse(pos.avgEntryPrice());
+      BigDecimal mark = mark(pos).orElse(pos.avgEntryPrice());
       BigDecimal move =
           "BUY".equals(pos.side()) ? mark.subtract(pos.avgEntryPrice()) : pos.avgEntryPrice().subtract(mark);
       total = total.add(move.multiply(BigDecimal.valueOf(pos.qty())));
     }
     return total.setScale(2, RoundingMode.HALF_UP);
+  }
+
+  /**
+   * The mark-to-market price for one open position: the live tick when there is one, else the last
+   * captured daily-bar close for a symbol that does not tick.
+   *
+   * <p>The second source is what this method exists for. {@code ticks:last} is written from the live
+   * WS ticker, whose subscription is the futures/options universe — measured 2026-08-13, all 307
+   * entries are NFO/BFO contracts and not one is an NSE cash equity. Every swing position therefore
+   * missed, fell back to its own {@code avgEntryPrice}, and contributed EXACTLY ZERO unrealized, so
+   * book equity was blind to +₹27,213.97 across the two swing books and every equity-denominated
+   * gate — the Manas 6% open-risk cap, {@code max_deployment_pct}, {@code mode: pct} daily limits —
+   * measured against a denominator missing all of it. {@link EquityMarkCache} is populated once a
+   * day by the swing exit pass from the bar it already holds; see that class for why a fetch here is
+   * not an option.
+   *
+   * <p>Tick FIRST, deliberately: for anything that genuinely ticks (every scalper option position)
+   * the cache is permanently empty, so this method is byte-identical to the previous one-liner and
+   * that book's behaviour is untouched. Empty ⇒ no mark of any kind — the caller decides, and every
+   * caller today falls back to {@code avgEntryPrice} exactly as before, which is a ZERO unrealized
+   * contribution, never a fabricated one.
+   *
+   * <p>No staleness gate on the tick (unchanged): this is mark-to-market, not a fill. The fill paths
+   * ({@code PaperService#openOrder}, {@code #doSettle}) keep their own {@code
+   * artha.paper.tick-max-age-seconds} discipline and are not touched here. The CACHE has its own,
+   * separate age bound so a dead swing batch cannot serve a week-old close into book equity.
+   */
+  public Optional<BigDecimal> markFor(String exchange, String tradingsymbol) {
+    Optional<BigDecimal> tick = lastTick.lastPrice(exchange, tradingsymbol);
+    return tick.isPresent() ? tick : equityMarks.price(exchange, tradingsymbol);
+  }
+
+  /** {@link #markFor} for one open position row. */
+  private Optional<BigDecimal> mark(PositionRow pos) {
+    return markFor(pos.exchange(), pos.tradingsymbol());
+  }
+
+  /**
+   * How many of a book's open positions have NO mark at all — neither a live tick nor a captured
+   * daily close — and are therefore being valued at their own entry price (a zero unrealized
+   * contribution) inside {@link #unrealizedTotal}.
+   *
+   * <p>This is the visibility half of the fallback. Marking an unmarkable position at cost is the
+   * SAME arithmetic as before this change and is deliberately kept (a NULL equity would break the
+   * account API, the sizing path and the risk gates; refusing the entry outright would fail closed on
+   * a cache that is empty after every restart, which would lock the books harder rather than
+   * unlocking them). What changes is that it is no longer invisible: this count rides the account
+   * payload and the {@code ay_paper_mtm_blind_positions} gauge, so "equity is fully marked" and
+   * "equity cannot see part of the book" are distinguishable from outside.
+   */
+  public int unmarkedOpenCount(String book) {
+    return (int) positions.listOpen(book).stream().filter(pos -> mark(pos).isEmpty()).count();
   }
 
   /**
@@ -207,7 +269,8 @@ public class PaperAccountService {
         positions.openCount(book),
         capitalUsed(book),
         usageByClass(book),
-        Map.of("future", futureMarginPct, "shortOption", shortOptionMarginPct));
+        Map.of("future", futureMarginPct, "shortOption", shortOptionMarginPct),
+        unmarkedOpenCount(book));
   }
 
   /** Owner edit of a book's starting capital. */

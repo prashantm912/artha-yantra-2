@@ -1973,8 +1973,13 @@ after the passes — all 498 rows ever written are HOLD, so a 100%-HOLD table ca
 Three structural findings, all on the RISK side:
 - **manas sits at 99.91% of cap — ₹7.55 of headroom** (₹8,569.23 vs ₹8,576.78), and it is arithmetic:
   sizing is 1%/trade against a 6% cap, so **1% × 6 = 6% exactly and the 7th declared slot is
-  unreachable by construction.** ⚠️ Growing equity does NOT fix this — both terms are percentages of
-  equity, so the ratio is scale-invariant.
+  unreachable by construction.** ⚠️ **CORRECTION, same day, by the builder sent to fix it:** I wrote
+  here that growing equity cannot help because "both terms are percentages of equity, so the ratio is
+  scale-invariant". **That is wrong.** Already-open risk is ABSOLUTE — banked in rupees at entry —
+  so only the FUTURE lot scales with equity. Restoring the missing ₹27,214 moves headroom
+  ₹7.55 → **₹553**, which is real but still short of a 1% lot. The conclusion (the 7th slot does not
+  open) survives; the reasoning that produced it did not. **A ratio argument is only scale-invariant
+  if BOTH operands actually scale — check that the one you are dividing by is not already banked.**
 - **`openRiskInr` measures `avgEntry − stop`**, so appreciation never releases budget. The one
   release valve (`ManasGoverningStopCache`) was *provably* inert on 2026-08-13: entries run before
   exits (`SwingBatchEngine.java:316` vs `:321`) and the container booted 08:03 before the 08:35 run.
@@ -1986,8 +1991,32 @@ Three structural findings, all on the RISK side:
   **₹0.00**, so the cap binds tighter than designed. Another N44/#14.
 
 **Owner decision 2026-08-13: fix the blind denominator AND the unreachable 7th slot; leave
-`avgEntry − stop` alone for now** (that one is doctrine, not a bug). HOLD tier — built, reviewed, PR
+`avgEntry − stop` alone for now** (that one is doctrine, not a bug). HOLD tier — built as #1368, PR
 left OPEN.
+
+⚠️ **AND THEN THE BUILD MEASURED THE FIX AND FOUND IT CHANGES NOTHING TODAY: 0 of 20 admitted
+before, 0 of 20 after — neither fix, nor both together.** Two independent reasons, both of which the
+investigation above missed. **(1) 16 of the 20 candidates are minervini, which has NO RISK CAP AT
+ALL** (`PyramidPolicy.NONE`) — it is locked purely by its 12/12 slot cap, so no equity or sizing
+change can touch it. The finding above correctly said the 6% cap is manas-only, then failed to carry
+that through to "so fixing the cap cannot help the 16". **(2) Shrinking the NEXT lot to 0.8% does not
+refund the ₹8,569 already banked by six positions sized at 1.0%** — the 7th manas slot opens after
+**four position turnovers**, not on deploy. **The lesson is the one this ledger keeps relearning:
+measure the FIX against the real population before shipping it, not just the DEFECT.** Both defects
+were real; the remedy was inert.
+
+**A fourth lever WOULD work immediately and changes no declared parameter: warming
+`ManasGoverningStopCache`.** Open risk drops to ₹4,356 — **2.87% against the 6% cap**, admitting with
+2.1pp to spare. It is inert today only because entries run before exits (`SwingBatchEngine.java:316`
+vs `:321`) and the cache is cold on every boot. Owner's choice among the four; #1368's body carries
+all of them with numbers.
+
+⚠️ **`ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT` DOES NOT DRIVE SIZING.** It feeds exactly one site — the
+advisory `advised_lots` DISPLAY column. Real sizing comes from the published config's
+`risk_pct_equity`. Both currently read `1.0`, which is precisely why the error was invisible:
+**flipping that env var to retune sizing would have changed nothing but a display field**, and the
+books would have looked mysteriously unmoved. The 2026-08-13 exit-stickiness doc cites it wrongly;
+this is the correction.
 
 **N71 · A COVERAGE BOARD THAT BUCKETS BY WHEN A JOB RAN CANNOT SEE WORK DONE BY CATCH-UP — AND IT
 FAILS IN THE ALARMING DIRECTION.** 2026-08-13, owner-reported: `/api/v1/market/health/ingest` showed

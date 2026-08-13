@@ -1960,6 +1960,33 @@ argument about the current schedule, not containment. A headroom precondition at
 ("refuse to START unless the deadline is more than N minutes away") is the cheap real fix and is not
 built.
 
+**N72 · A ROUTINE POST-CLOSE DEPLOY DESTROYED THE SESSION'S FORENSICS, AND THE OBVIOUS REMEDY IS
+IMPOSSIBLE HERE.** 2026-08-13, and it was MINE. I recreated both strategy-signal and market-data at
+**15:44 IST — fourteen minutes after close and BEFORE the post-market routine ran**. `docker logs`
+follows the container, so the session's logs went with it. Permanently lost for 2026-08-13: the
+§3.17 canary WARN/straddle counts, §3.34 heat-grep, the §3.10 boot line, §3.18 log confirmation, and
+any §3.36 suppression line. Third log-loss this month (07-17 boot line, 08-10 outage) but **the
+first caused by a ROUTINE DEPLOY rather than an incident** — which is why the standing rule did not
+catch it: memory says *"snapshot docker logs BEFORE any post-incident recreate"*, and this was not an
+incident. **Extend it: snapshot before ANY recreate on a session day.**
+⚠️ **The routine's alternative remedy — "deploy after ~19:00 once the post-market run has grepped
+them" — is IMPOSSIBLE on this machine**, because the machine is off at 19:00 and #1358 narrowed the
+safe window to *before 18:05 or after 18:58* (no `already-done-today` guard, so a deploy inside the
+chain double-runs it). That leaves a ~2-minute slot. So the snapshot is not the cheaper option, it is
+**the only one**. Concretely, before `up -d`:
+`docker logs ay-strategy-signal-service > <path>/ss-<date>.log 2>&1` and the same for market-data.
+The general shape: **a deploy is not just a code change, it is a DESTRUCTIVE ACT on whatever
+observability lives in container-local state** — enumerate what dies before recreating, not after.
+
+**⚠️ CORRECTION to the 2026-08-13 session-findings doc (#1371 §6.6):** it records
+*"`risk_audit` wrote exactly 1 row today (08:35, the swing pyramid-cap refusal — **#1370's one-row
+semantics** on its first live morning)"*. **#1370 was not live at 08:35** — it merged 14:47 and
+deployed 15:44. And the direction is backwards: that run made **4** manas cap refusals
+(`swing_batch_runs` 2026-08-12: `would_enter 4, admitted 0, cap_exceedance 4`) and wrote **1** row,
+which is precisely the 4:1 undercount #1370 exists to fix, observed one last time. Read as written it
+would certify the fix from a sighting of the bug. **The real first test is 2026-08-14 08:35, and the
+discriminator is the row COUNT: 1 = still broken, N = fixed.**
+
 **2026-08-13 · THE SWING BOOKS ARE LOCKED, AND IT IS NOT AN EXIT DEFECT.** Owner-triggered
 measurement; full findings in `docs/signal-analysis/2026-08-13-swing-exit-stickiness.md`. 18 open
 positions, 20 would-enter candidates on the 08:35 catch-up, **0 admitted**. Verdict: **HOLD is

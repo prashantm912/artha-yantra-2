@@ -107,8 +107,24 @@ public class CrossSourceOiCanary {
     this.minTotalOi = minTotalOi;
   }
 
-  /** Weekly sweep (Sunday 07:00 IST). Live-only; the audited sources are only populated live. */
-  @Scheduled(cron = "${artha.oi-cross-source.cron:0 0 7 * * SUN}", zone = "Asia/Kolkata")
+  /** Weekly sweep (Friday 18:16 IST). Live-only; the audited sources are only populated live. */
+  // Weekly, FRIDAY 18:16 IST. It ran Sunday 07:00 until 2026-08-12, which was never — the owner's
+  // machine is weekday-only and started after 08:00, so BOTH halves of that cron sat outside the
+  // operating window and this sweep had never executed.
+  //
+  // ⚠️ FRIDAY specifically, not Monday, and the reason is the selection predicate below: this sweeps
+  // expiries STRICTLY BEFORE today, so an expiry falling on the run day itself is excluded and waits
+  // a further week. Weekly expiries are NSE Tuesday and BSE Thursday — but a holiday PREPONES them,
+  // always earlier, so Monday and Wednesday can host one too (the bundled calendar carries exactly
+  // that case: 2026-10-20 Tuesday preponed to Monday 2026-10-19). Friday is the one weekday a
+  // weekly expiry does not normally reach, and it still sweeps the whole week through Thursday.
+  // Cross-vendor review caught the Monday version; a preponed Monday expiry would have been skipped.
+  //
+  // ⚠️ RESIDUAL, not fixed here: `expiry < today` still excludes a same-day expiry whatever day this
+  // runs, so a preponed Friday expiry (possible, just rare) would wait a week. Closing that properly
+  // means including today once BOTH source datasets are complete — a selection change with its own
+  // completeness question, not a cron move.
+  @Scheduled(cron = "${artha.oi-cross-source.cron:0 16 18 * * FRI}", zone = "Asia/Kolkata")
   public void sweep() {
     if (!live || !enabled) {
       return;

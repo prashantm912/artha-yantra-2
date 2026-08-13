@@ -263,7 +263,7 @@ artha:
       expiry-horizon-days: ${ARTHA_OPTIONS_ATM_PINNER_EXPIRY_HORIZON_DAYS:7}
   data-quality:
     # FID P2-4: settled-day per-symbol completeness (chain capture, primary 1m, NSE EQ bhavcopy).
-    eod-cron: "${ARTHA_DATA_QUALITY_EOD_CRON:0 50 19 * * MON-FRI}"
+    eod-cron: "${ARTHA_DATA_QUALITY_EOD_CRON:0 50 18 * * MON-FRI}"
     enabled: true
     chain-expected-passes: 187
     chain-min-coverage-pct: 80
@@ -283,7 +283,7 @@ artha:
   nse:
     base-url: https://www.nseindia.com
     archives-url: https://nsearchives.nseindia.com
-    eod-cron: "${ARTHA_NSE_EOD_CRON:0 0 19 * * MON-FRI}"
+    eod-cron: "${ARTHA_NSE_EOD_CRON:0 46 18 * * MON-FRI}"
     bhavcopy:
       # NSE series projected into candles as 1d source=BHAVCOPY (cash equities). EQ = rolling
       # settlement, BE = trade-to-trade. Non-equity series (GS gilts, etc.) stay raw-only.
@@ -295,7 +295,7 @@ artha:
     # Self-healing EOD universe backfill (Phase A/B). Runs daily after both exchanges publish
     # (NSE ~19:00, BSE ~18:00 IST) and on startup; catches up every missing trading day from the
     # table watermark to today. ca-lookback-days bounds the corporate-action ratio refresh (Phase C).
-    eod-cron: "${ARTHA_BHAVCOPY_EOD_CRON:0 30 19 * * MON-FRI}"
+    eod-cron: "${ARTHA_BHAVCOPY_EOD_CRON:0 45 18 * * MON-FRI}"
     # Deep universe history (~1 year): the first boot backfills a year of daily candles so the
     # split/bonus adjustment reaches old corporate actions, and a long downtime self-heals back that
     # far. The full-window anti-join (reconcile == window) re-scans the whole span each run, skipping

@@ -17,11 +17,16 @@ import in.arthayantra.strategysignal.notifier.NotifierClient;
 import in.arthayantra.strategysignal.paper.PaperReconciliationService.ReconciliationResult;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -1008,6 +1013,37 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
         (rs, rowNum) -> rs.getLong(1),
         detailKey,
         runId);
+  }
+
+  @Test
+  @DisplayName("the pre-open window reaches back to the previous SESSION, not to midnight today")
+  void thePreOpenWindowCoversThePreviousTradingSession() {
+    // The reconciler moved from 21:15 to 08:50 IST (the machine is off by 19:00, so the evening run
+    // simply never happened). At 21:15 the old `today 00:00 -> now` expression covered the whole
+    // session that had just finished; at 08:50 it covers a morning on which nothing has traded, so
+    // every bounded query returns zero rows and the run row records a clean reconciliation of
+    // NOTHING. This pins the fix at the seam that broke.
+    //
+    // Monday is the sharp case, and the reason `minusDays(1)` is not enough: on 2026-08-10 the
+    // session to reconcile is FRIDAY the 7th. Both dates are hardcoded rather than computed from
+    // MarketCalendar — a test that derives its expectation from the same code under test proves
+    // only that the code agrees with itself.
+    Clock mondayPreOpen = Clock.fixed(Instant.parse("2026-08-10T03:20:00Z"), ZoneOffset.UTC);
+    PaperReconciliationService atPreOpen =
+        new PaperReconciliationService(
+            reconciliationRepo, notifier, mapper, mondayPreOpen, new SimpleMeterRegistry(), 1);
+
+    ReconciliationResult result = atPreOpen.reconcile();
+
+    assertThat(result.windowStart())
+        .as(
+            "08:50 Monday must reconcile from FRIDAY's session start — anchoring to midnight today"
+                + " leaves the window covering no trading activity at all, and the pass then reports"
+                + " a clean reconciliation of an empty set")
+        .isEqualTo(OffsetDateTime.parse("2026-08-07T00:00+05:30"));
+    assertThat(result.windowEnd())
+        .as("the upper bound is still simply now")
+        .isEqualTo(OffsetDateTime.parse("2026-08-10T08:50+05:30"));
   }
 
   private int latestRunTotal() {

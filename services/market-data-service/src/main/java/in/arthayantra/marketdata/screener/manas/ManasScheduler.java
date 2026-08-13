@@ -63,7 +63,7 @@ public class ManasScheduler {
   }
 
   /** Fallback cron (bhavcopy backfill failed → no event). 19:55, before the 20:05 swing batch. */
-  @Scheduled(cron = "${artha.manas-arora.cron:0 55 19 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.manas-arora.cron:0 48 18 * * MON-FRI}", zone = "Asia/Kolkata")
   void scheduled() {
     runQuietly("scheduled");
   }
@@ -96,14 +96,14 @@ public class ManasScheduler {
           "manas screen upserted {} rows for {} ({} pass all gates, {} geometry rows) [{}]",
           written, r.screenDate(), passing, geo, trigger);
     } catch (Exception e) {
-      // Audit P0-4/H10: a failed screen leaves the 20:05 swing batch on yesterday's funnel — the
+      // Audit P0-4/H10: a failed screen leaves the NEXT swing batch on yesterday's funnel — the
       // owner must hear about it, not find it in a log next week. NtfyClient never throws.
       ledger.fail(runId, e.getMessage());
       log.warn("manas screen failed ({}) — non-fatal", trigger, e);
       ntfy.send(
           "Manas screen FAILED", "high",
           "Trigger " + trigger + ": " + e.getMessage()
-              + " — the 20:05 swing batch will read a stale funnel.");
+              + " — the next swing batch will read a stale funnel.");
     }
   }
 

@@ -304,10 +304,10 @@ artha:
     context-cron: ${ARTHA_INSIGHTS_CONTEXT_CRON:0 */15 9-15 * * MON-FRI}
     eod-cron: ${ARTHA_INSIGHTS_EOD_CRON:0 5 16 * * MON-FRI}
     expiry-cron: ${ARTHA_INSIGHTS_EXPIRY_CRON:0 30 15 * * MON-FRI}
-    quality-cron: ${ARTHA_INSIGHTS_QUALITY_CRON:0 0 8 * * SAT}
+    quality-cron: ${ARTHA_INSIGHTS_QUALITY_CRON:0 12 18 * * FRI}
     # I3 sweep crons (IST) — post the 21:00 graduation eval + the 20:05 swing batch.
-    strategy-evidence-cron: ${ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON:0 10 21 * * MON-FRI}
-    sell-decision-cron: ${ARTHA_INSIGHTS_SELL_DECISION_CRON:0 15 21 * * MON-FRI}
+    strategy-evidence-cron: ${ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON:0 56 18 * * MON-FRI}
+    sell-decision-cron: ${ARTHA_INSIGHTS_SELL_DECISION_CRON:0 57 18 * * MON-FRI}
 
 management:
   endpoints:

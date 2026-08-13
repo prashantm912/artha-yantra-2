@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
  * table is append-only (V042) with a low row rate — a row lands only when a paper book is AT a
  * governor limit AND a would-be entry fires, so most sessions write zero and the worst case is
  * ~2-3k rows/day. Retention is deliberately GENEROUS (180 days) — this is forward insurance, not a
- * space emergency. Every day at 02:30 IST (off-market) a plain row-wise {@code DELETE} removes rows
+ * space emergency. Every day at 18:09 IST (post-close) a plain row-wise {@code DELETE} removes rows
  * past the horizon. This is a PLAIN OLTP table, NOT a hypertable, so it uses {@code DELETE} — never
  * TimescaleDB {@code drop_chunks} (the A10 {@code OptionsSnapshotPruneJob} template drops chunks
  * because {@code options_chain_snapshots} is a ~1.12B-row compressed hypertable; here the volume is
@@ -24,7 +24,7 @@ import org.springframework.stereotype.Component;
  * a SINGLE thread ({@code application.yml} sizes Hikari, never the scheduler) that a live thread
  * census shows carrying {@code PaperStaleTickAlerter}, {@code SignalEngine} reconcile and
  * {@code PaperScheduler.bracketEvaluation} — the 15-second stop-loss/target sweep. A DELETE blocking
- * on a lock at 02:30 parked that thread, and the next session's stop-loss evaluation would simply
+ * on a lock at 18:09 parked that thread, and the next session's stop-loss evaluation would simply
  * never fire. Still NOT the {@code monitorTaskScheduler} (audit BEJ-01 / #919 reserves that for the
  * pure liveness detectors) and not the eval-outcome pool either — see
  * {@code MonitorSchedulingConfig.maintenanceTaskScheduler}. The DELETE itself is additionally
@@ -69,7 +69,8 @@ public class RiskSuppressionPruneJob {
   }
 
   /**
-   * The daily retention tick (02:30 IST). Six-field Spring cron with the explicit Asia/Kolkata zone
+   * The daily retention tick (18:09 IST — The 02:30/03:30 slot was retired on 2026-08-12: the machine is shut down at 19:00 IST and started after 08:00, so an overnight tick never fired at all — the retention this job exists to enforce was simply not happening. Six-field Spring cron with the explicit
+   * Asia/Kolkata zone
    * (the sibling scheduler convention); runs every calendar day since retention has no trading-day
    * dependence. Cron is property-overridable like every sibling scheduler. Live-only.
    *
@@ -78,7 +79,7 @@ public class RiskSuppressionPruneJob {
    * back onto the shared default pool that carries paper stop-loss evaluation.
    */
   @Scheduled(
-      cron = "${artha.signals.risk-suppression-prune.cron:0 30 2 * * *}",
+      cron = "${artha.signals.risk-suppression-prune.cron:0 9 18 * * *}",
       zone = "Asia/Kolkata",
       scheduler = "maintenanceTaskScheduler")
   public void scheduledPrune() {

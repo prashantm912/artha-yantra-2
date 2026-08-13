@@ -65,16 +65,19 @@ public class PaperScheduler {
   }
 
   /**
-   * 21:20 IST durable recovery of positions STRANDED past their expiry (audit AY-SL-04 follow-through):
+   * 08:52 IST durable recovery of positions STRANDED past their expiry (audit AY-SL-04 follow-through):
    * an expiry-day settle that refused because the spot never ticked live would otherwise stay OPEN
-   * forever ({@link PaperExpiryService#settleExpiries} acts only on the expiry date). Runs each evening
-   * (just after the 21:15 reconciler), re-attempting settlement at the EXPIRY-SESSION close from
+   * forever ({@link PaperExpiryService#settleExpiries} acts only on the expiry date). Runs pre-open
+   * (just after the 08:50 reconciler, on the same size-1 pool so it queues rather than races),
+   * re-attempting settlement at the EXPIRY-SESSION close from
    * history — never today's spot — and re-alerting anything still un-settleable. Property-overridable
    * cron like every sibling; a missed cron never fires later (no {@code @Scheduled} catch-up), but the
    * next evening's pass picks the strand up again.
    */
   @Scheduled(
-      cron = "${artha.paper.past-expiry-recon.cron:0 20 21 * * MON-FRI}", zone = "Asia/Kolkata")
+      cron = "${artha.paper.past-expiry-recon.cron:0 52 8 * * MON-FRI}",
+      zone = "Asia/Kolkata",
+      scheduler = "preOpenTaskScheduler")
   public void pastExpiryRecovery() {
     int settled = expiry.settlePastExpiries();
     if (settled > 0) {

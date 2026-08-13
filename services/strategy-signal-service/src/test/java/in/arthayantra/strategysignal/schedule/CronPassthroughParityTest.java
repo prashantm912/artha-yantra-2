@@ -51,7 +51,7 @@ class CronPassthroughParityTest {
    * the whole file execute zero assertions and pass — the guard-that-checks-nothing shape. Lowering
    * this number is a deliberate act that must be justified in the PR that does it.
    */
-  private static final int EXPECTED_JOB_COUNT = 4;
+  private static final int EXPECTED_JOB_COUNT = 6;
 
   private static final List<Job> JOBS =
       List.of(
@@ -71,7 +71,20 @@ class CronPassthroughParityTest {
           new Job(
               "artha.paper.past-expiry-recon.cron",
               "ARTHA_PAPER_PAST_EXPIRY_RECON_CRON",
-              SRC + "paper/PaperScheduler.java"));
+              SRC + "paper/PaperScheduler.java"),
+          // Added 2026-08-12. These two reached Spring through application.yml with NO compose
+          // passthrough, which made them the one gap in OperatingWindowTest's stated premise that
+          // parity covers every schedule. Both sides now exist, so the premise is true rather than
+          // nearly true. Note both @Scheduled sites live in the SAME file — the parity assertions
+          // key on the PROPERTY, not the file, so that is fine.
+          new Job(
+              "artha.insights.strategy-evidence-cron",
+              "ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON",
+              SRC + "insights/InsightSweeper.java"),
+          new Job(
+              "artha.insights.sell-decision-cron",
+              "ARTHA_INSIGHTS_SELL_DECISION_CRON",
+              SRC + "insights/InsightSweeper.java"));
 
   @Test
   @DisplayName("the catalogue still covers every job it claims to")
@@ -129,25 +142,44 @@ class CronPassthroughParityTest {
   }
 
   @Test
-  @DisplayName("application.yml declares none of these, so compose cannot shadow a literal")
+  @DisplayName("where application.yml declares one it defers to the env var, with the same default")
   void applicationYmlDefersToTheEnvVar() throws IOException {
-    // ⚠️ Expected to check ZERO items, and that is asserted rather than left implicit. On
-    // market-data the same test found three properties carrying LITERAL cron values that the new
-    // compose entries then shadowed — #653 in reverse, invisible because the values matched. If one
-    // of these four is ever added here, it must read ${ENV:default} and this expectation must be
-    // updated deliberately.
+    // ⚠️ On market-data the same test found three properties carrying LITERAL cron values that the
+    // new compose entries then shadowed — #653 in reverse, invisible because the values matched.
+    //
+    // It used to demand the yml declare NONE of these, which was true only while no job here had a
+    // yml line. The two insight crons do, in the CORRECT deferring form, so the blanket rule failed
+    // them for being right. Emptiness was never the invariant — "compose cannot shadow a literal"
+    // is, and a ${ENV:default} line cannot be shadowed. What it CAN do is carry a third copy of the
+    // default that drifts, so that is what is asserted instead.
     List<String> yml = Files.readAllLines(repoRoot().resolve(YML), StandardCharsets.UTF_8);
-    List<String> declared = new ArrayList<>();
+    List<String> literals = new ArrayList<>();
+    int deferring = 0;
     for (Job job : JOBS) {
-      if (valueAtPath(yml, job.property()) != null) {
-        declared.add(job.property());
+      String declared = valueAtPath(yml, job.property());
+      if (declared == null) {
+        continue;
       }
+      String expected = "${" + job.envName() + ":" + codeDefault(job) + "}";
+      if (!declared.startsWith("${")) {
+        literals.add(job.property() + " = " + declared);
+        continue;
+      }
+      deferring++;
+      assertThat(declared)
+          .as(
+              "%s's application.yml line is a THIRD copy of this schedule (code, compose, yml). It"
+                  + " must name the same env var and carry the same default, or the copy nobody"
+                  + " reads becomes the one that is wrong",
+              job.property())
+          .isEqualTo(expected);
     }
-    assertThat(declared)
-        .as(
-            "these are now declared in application.yml. Not automatically wrong, but a LITERAL there"
-                + " is shadowed by compose — convert to ${ENV:default} and update this test")
+    assertThat(literals)
+        .as("a LITERAL cron in application.yml is silently shadowed by compose — use ${ENV:default}")
         .isEmpty();
+    assertThat(deferring)
+        .as("this test asserted nothing — no catalogued job has an application.yml line any more")
+        .isEqualTo(2);
   }
 
   @Test
@@ -253,14 +285,24 @@ class CronPassthroughParityTest {
    * above an active new one silently becomes the value compose is compared against.
    */
   private static List<String> activeCronSites(Job job) throws IOException {
+    // ⚠️ Searches the JOINED uncommented source, not line by line. Several of these annotations wrap
+    // across lines — PaperReconciliationScheduler and PaperScheduler put `zone` and `scheduler` on
+    // the lines AFTER `cron` — and a per-line slice ends before `zone`, so the IST assertion below
+    // fails on a job that is correctly zoned. Found 2026-08-12 by adding the two insight jobs; the
+    // identical bug had already been found and fixed in OperatingWindowTest, which is the tell that
+    // it is the shape of the extraction rather than any one call site.
+    String source =
+        String.join(
+            System.lineSeparator(),
+            uncommentedLines(
+                Files.readString(repoRoot().resolve(job.sourceFile()), StandardCharsets.UTF_8)));
     String needle = "cron = \"${" + job.property() + ":";
     List<String> sites = new ArrayList<>();
-    for (String line :
-        uncommentedLines(
-            Files.readString(repoRoot().resolve(job.sourceFile()), StandardCharsets.UTF_8))) {
-      if (line.contains(needle)) {
-        sites.add(line.trim());
-      }
+    int at = source.indexOf(needle);
+    while (at >= 0) {
+      int close = source.indexOf(')', at);
+      sites.add(source.substring(at, close < 0 ? source.length() : close + 1).trim());
+      at = source.indexOf(needle, at + needle.length());
     }
     return sites;
   }

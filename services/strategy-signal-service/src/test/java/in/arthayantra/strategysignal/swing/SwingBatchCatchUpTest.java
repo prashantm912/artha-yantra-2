@@ -554,10 +554,27 @@ class SwingBatchCatchUpTest {
         .runAndRecord(any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any());
   }
 
+  /**
+   * The catch-up flag being OFF suppresses the ENTIRE sweep — no seed, no intent read, no DISARMED
+   * bookkeeping. {@code SwingBatchCatchUp.catchUp} says so directly: {@code if (!enabled) continue;
+   * // recovery feature is off; leave all ledger rows for a later enabled sweep}.
+   *
+   * <p>⚠️ This test was named {@code disarmedBookkeepingRunsEvenWhenTheCatchUpFeatureFlagIsOff} and
+   * carried a comment asserting the exact OPPOSITE of its own assertion — a leftover from a review
+   * round whose design did keep writing DISARMED with the flag off. It shipped that way in #1036 and
+   * never matched the code it guards. The assertion is the correct half; the name and comment were
+   * the stale half, so they were made to agree with it.
+   *
+   * <p>The fear the old comment recorded — arming the feature AFTER a disarm period replays the
+   * un-recorded backlog — is answered elsewhere, and not by writing rows while the flag is off. A
+   * later enabled sweep seeds only {@code max-attempts + 2} trading days, and each of those is
+   * checked against the schedule-time arming ledger ({@code swing_batch_schedule_intents}), which is
+   * written by the settle regardless of this flag. A session the family was disarmed for reads
+   * SETTLED-false there and is recorded DISARMED then; anything older simply falls outside the window
+   * and is never seeded at all.
+   */
   @Test
-  void disarmedBookkeepingRunsEvenWhenTheCatchUpFeatureFlagIsOff() {
-    // The DISARMED record must be written independent of the catch-up flag — else arming the feature
-    // AFTER a disarm period (during which the flag was off) would replay the un-recorded backlog.
+  void nothingIsWrittenAtAllWhenTheCatchUpFeatureFlagIsOff() {
     SwingDoctrine manas = doctrine(false, FRIDAY);
     when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(false);
     when(intents.findIntent(eq("manas-arora"), any()))

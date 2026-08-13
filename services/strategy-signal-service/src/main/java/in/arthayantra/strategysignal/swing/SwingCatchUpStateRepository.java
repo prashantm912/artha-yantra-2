@@ -192,21 +192,61 @@ public class SwingCatchUpStateRepository {
    * Records a terminal DISARMED marker for a session the family was intentionally OFF for — so a later
    * re-arm cannot replay it as a phantom outage (a disabled scheduled run writes NO {@code
    * swing_batch_runs} marker, so without this the missing marker is indistinguishable from an outage).
-   * INSERT-if-absent: it never overwrites an existing claim/partial/terminal row (a session that was
-   * genuinely worked stays as it was); {@link #claim} already excludes DISARMED (only PENDING or a
-   * stale RUNNING wins), so a DISARMED session is never recovered.
+   * It never overwrites a row some caller has actually engaged with (a session that was genuinely
+   * worked stays as it was); {@link #claim} already excludes DISARMED (only PENDING or a stale RUNNING
+   * wins), so a DISARMED session is never recovered.
+   *
+   * <p>⚠️ It must TAKE OVER an untouched seed placeholder, and a plain {@code ON CONFLICT DO NOTHING}
+   * did not — which made this status UNREACHABLE for every session the sweep can actually reach.
+   * {@code SwingBatchCatchUp.catchUp} calls {@code seedWindow} BEFORE {@code catchUpFamily}, and the
+   * only sessions {@code catchUpFamily} iterates are the ones {@link #retryableSessions} returns — so
+   * by the time the disarm branch runs, a PENDING placeholder for that session always exists and the
+   * insert was silently swallowed, every time. Measured on the live ledger 2026-08-13: zero DISARMED
+   * rows have ever been written. The row stayed PENDING, was re-scanned by every later sweep, and
+   * would eventually be ABANDONED with {@code NO_SCHEDULE_INTENT} if its intent row ever aged out.
    */
   public void recordDisarmed(String batch, LocalDate session) {
     recordDisarmed(batch, session, "DISARMED_AT_SCHEDULE_TIME");
   }
 
-  /** Records the historical reason for an intentional schedule-time disarm. */
+  /**
+   * Records the historical reason for an intentional schedule-time disarm.
+   *
+   * <p>The {@code WHERE} is what separates an untouched placeholder from a row a worker has engaged
+   * with, and all three clauses are load-bearing:
+   *
+   * <ul>
+   *   <li>{@code status = 'PENDING'} — {@link #markAbandoned} also creates rows with
+   *       {@code attempts = 0} and {@code claimed_at} unset (two such live rows exist, both
+   *       {@code NO_SCHEDULE_INTENT} for 2026-07-17), and a terminal row must never be relabelled.
+   *   <li>{@code claimed_at IS NULL} — {@link #claim} sets it in the same atomic statement that flips
+   *       the row to RUNNING, so this is exactly "no claim has ever succeeded here". It also makes the
+   *       two writers serialize on the row: if the disarm lands first the claim's own {@code WHERE}
+   *       fails and the caller simply does not run (correct — the settled intent says the family was
+   *       off); if the claim lands first this {@code WHERE} fails and no live work is stomped.
+   *   <li>{@code attempts = 0} — implied by the clause above (attempts only moves inside {@link
+   *       #claim}), kept as a cheap independent witness that nothing has worked this row.
+   * </ul>
+   *
+   * <p>Deliberately NOT covered: a STALE RUNNING row, which {@link #retryableSessions} also returns.
+   * It keeps its status and stays retryable rather than being stomped mid-flight. That combination is
+   * unreachable today — the 16:00 settle writes the SETTLED intent this branch reads before the 08:35
+   * sweep first sees the session, so a session that reaches here has never been claimed — and
+   * widening the predicate to cover it would trade a bookkeeping gap for the risk of terminating a
+   * live claim.
+   */
   public void recordDisarmed(String batch, LocalDate session, String reason) {
     jdbc.update(
         """
         INSERT INTO swing_catchup_runs (batch, session_date, status, attempts, reason, updated_at)
         VALUES (?, ?, 'DISARMED', 0, ?, now())
-        ON CONFLICT (batch, session_date) DO NOTHING
+        ON CONFLICT (batch, session_date) DO UPDATE
+          SET status = 'DISARMED',
+              reason = COALESCE(swing_catchup_runs.reason, EXCLUDED.reason),
+              updated_at = now()
+          WHERE swing_catchup_runs.status = 'PENDING'
+            AND swing_catchup_runs.attempts = 0
+            AND swing_catchup_runs.claimed_at IS NULL
         """,
         batch, java.sql.Date.valueOf(session), reason);
   }

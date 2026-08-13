@@ -227,16 +227,62 @@ class SwingCatchUpStateRepositoryIntegrationTest extends StrategySignalIntegrati
     assertThat(state.claim(batch, SESSION, 30)).as("a DISARMED session is never caught up").isEmpty();
   }
 
+  /**
+   * The production ordering, and the reason DISARMED had never once been written. {@code
+   * SwingBatchCatchUp.catchUp} seeds the window BEFORE it sweeps, and the sweep only iterates what
+   * {@code retryableSessions} returns — so every session that reaches the disarm branch already has a
+   * PENDING placeholder, and the old {@code ON CONFLICT DO NOTHING} was swallowed 100% of the time.
+   * Live ledger, 2026-08-13: zero DISARMED rows, ever.
+   *
+   * <p>⚠️ Seeded with {@link SwingCatchUpStateRepository#seedMissing}, deliberately — NOT with {@code
+   * claim} + {@code markPending}. Seeding it that second way is how the defect stayed invisible: it
+   * builds a row with {@code attempts = 1} and {@code claimed_at} set, which is a genuinely-worked
+   * row and the one starting state in which the bug cannot occur. The sibling test below is that
+   * shape on purpose, and it is the guard, not the proof.
+   */
+  @Test
+  void recordDisarmedTakesOverAnUntouchedSeedPlaceholder() {
+    String batch = "cu-it-disarmed-seeded-" + System.nanoTime();
+    state.seedMissing(batch, java.util.List.of(SESSION)); // the real placeholder path
+
+    state.recordDisarmed(batch, SESSION);
+
+    assertThat(statusOf(batch))
+        .as("a seeded PENDING placeholder must be taken over, not silently left PENDING forever")
+        .isEqualTo("DISARMED");
+    assertThat(reasonOf(batch)).isEqualTo("DISARMED_AT_SCHEDULE_TIME");
+    assertThat(state.claim(batch, SESSION, 30))
+        .as("and the takeover is terminal — a disarmed session is never caught up")
+        .isEmpty();
+    assertThat(state.retryableSessions(batch, 30))
+        .as("nor re-scanned by every later sweep")
+        .isEmpty();
+  }
+
   @Test
   void recordDisarmedNeverOverwritesAnExistingRow() {
-    // INSERT-if-absent: a session already being worked (e.g. a PENDING partial) is not clobbered to DISARMED.
+    // A session already being worked (e.g. a PENDING partial after a real claim) is not clobbered to
+    // DISARMED — claimed_at is set and attempts spent, so the takeover above refuses it.
     String batch = "cu-it-disarmed-noclobber-" + System.nanoTime();
     assertThat(state.claim(batch, SESSION, 30)).isPresent();
     state.markPending(batch, SESSION);
 
-    state.recordDisarmed(batch, SESSION); // must be a no-op — a real PENDING row exists
+    state.recordDisarmed(batch, SESSION); // must be a no-op — a real, worked PENDING row exists
 
+    assertThat(statusOf(batch)).as("the worked row keeps its own status").isEqualTo("PENDING");
     assertThat(state.claim(batch, SESSION, 30)).as("the PENDING survives, still retryable").isPresent();
+  }
+
+  private String statusOf(String batch) {
+    return jdbc.queryForObject(
+        "SELECT status FROM swing_catchup_runs WHERE batch = ? AND session_date = ?",
+        String.class, batch, java.sql.Date.valueOf(SESSION));
+  }
+
+  private String reasonOf(String batch) {
+    return jdbc.queryForObject(
+        "SELECT reason FROM swing_catchup_runs WHERE batch = ? AND session_date = ?",
+        String.class, batch, java.sql.Date.valueOf(SESSION));
   }
 
   @Test

@@ -1960,6 +1960,44 @@ argument about the current schedule, not containment. A headroom precondition at
 ("refuse to START unless the deadline is more than N minutes away") is the cheap real fix and is not
 built.
 
+**2026-08-13 EVENING DEPLOY — ELEVEN PRs, AND THE FIRST TIME THE EVENING CHAIN EVER RAN INSIDE THE
+WINDOW.** Deployed 15:44 IST from the real checkout on `main`. market-data + strategy-signal; **no
+migrations anywhere in the wave**, so no flyway force-recreate. Merged: #1075 · #1362 · #1364 · #1361
+· **#1358** · #1365 · #1363 · #1366 · #1367 · #1370 · #1369.
+
+Verified on the artifact, not on exit codes: all eleven SHAs ancestors of HEAD · six source
+fingerprints present · jar carried **60 YAMLs at `budget_inr: 25000`, 0 at 15000** while the running
+container still read 15000 (clean before/after) · engine reload 216→218 **38 loaded / 0 unresolved /
+0 load_errors** · **0 ERROR lines** in either service · the new reaper logged `no stranded RUNNING
+rows at boot` · 36 scalpers republished (0 failures), hero-zero pair correctly left at ₹2,000 ·
+0 pending republish afterwards.
+
+**The measure of what #1358 was worth, taken from the pre-deploy container env: TEN jobs were
+scheduled past the 19:00 shutdown and therefore were not running at all** — Upstox canary 19:30,
+bhavcopy 19:30, NSE 19:00, Minervini 19:50, Manas 19:55, close canary 20:10, swing heartbeat 20:15,
+graduation 21:00, paper reconciliation 21:15, past-expiry 21:20. All ten moved and were confirmed
+changed in the running containers, and `ARTHA_BHAVCOPY_CLOSE_MIN_COMPARED` appeared where it had been
+absent. ⚠️ **This was also the first deploy on which that check could ever have failed meaningfully**:
+every pre-existing cron passthrough carried a value byte-identical to its code default, so a broken
+placeholder name was indistinguishable from a working one. Ten values now differ from their defaults,
+which proves the wiring end to end.
+
+⚠️ **TOMORROW MORNING (2026-08-14) — THREE FIRST-EVER LIVE TESTS. Verify at ~09:00 IST, after the
+pre-open window closes and before the open. This list is written here because the machine is off
+overnight and the session that shipped these will not exist to remember them.**
+1. **#1370's audit grain — the discriminator is the ROW COUNT.** `SELECT count(*) FROM
+   strategy.risk_audit WHERE action='TRIP' AND created_at >= timestamptz '2026-08-14T00:00:00+05:30'`
+   against the refusals in `strategy.swing_batch_runs` for the pinned session. **1 row = still
+   broken; N rows matching N refusals = fixed.** Today's run made 4 refusals and wrote 1 — the bug,
+   seen one last time, since #1370 only deployed at 15:44.
+2. **₹25,000 sizing, first live day.** Today still ran ₹15,000 (republish was post-close). Expect
+   SENSEX legs up to 3 lots at ~₹410 premium; NIFTY 1 lot to ₹384 or 2 lots to ₹192.30. Check
+   `paper_positions.qty` against premium on any fresh scalper entry.
+3. **The reconcilers at 08:50 / 08:52 — these have NEVER run.** They sat at 21:15/21:20, past
+   shutdown. Confirm both executed and that the reconciliation's window anchored to the PREVIOUS
+   TRADING SESSION rather than an empty morning (the #1358 Critical 1 shape: every bounded query
+   returns zero rows and the run row records a clean reconciliation of an empty set).
+
 **N72 · A ROUTINE POST-CLOSE DEPLOY DESTROYED THE SESSION'S FORENSICS, AND THE OBVIOUS REMEDY IS
 IMPOSSIBLE HERE.** 2026-08-13, and it was MINE. I recreated both strategy-signal and market-data at
 **15:44 IST — fourteen minutes after close and BEFORE the post-market routine ran**. `docker logs`

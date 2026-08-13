@@ -107,7 +107,7 @@ public class CrossSourceOiCanary {
     this.minTotalOi = minTotalOi;
   }
 
-  /** Weekly sweep (Sunday 07:00 IST). Live-only; the audited sources are only populated live. */
+  /** Weekly sweep (Friday 18:16 IST). Live-only; the audited sources are only populated live. */
   // Weekly, FRIDAY 18:16 IST. It ran Sunday 07:00 until 2026-08-12, which was never — the owner's
   // machine is weekday-only and started after 08:00, so BOTH halves of that cron sat outside the
   // operating window and this sweep had never executed.

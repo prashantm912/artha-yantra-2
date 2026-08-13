@@ -92,7 +92,9 @@ class OperatingWindowTest {
    * {@code InsightSweeper} quality report (Saturday 08:00) — parked on a question this test may not
    * answer by guessing: is the machine up at a weekend? The owner answered on 2026-08-12:
    * <b>weekday-only</b>. So both had never run at all, and both moved into weekday evening slots
-   * (Monday 18:15 and Friday 18:12) rather than staying excused.
+   * (Friday 18:16 and Friday 18:12) rather than staying excused. The OI canary is on FRIDAY, not
+   * Monday: it selects {@code expiry < today}, and holiday preponement moves a weekly expiry
+   * EARLIER, so a Monday can itself be an expiry and would be excluded from its own sweep.
    *
    * <p>The map stays because an empty allowlist is the assertion — every scheduled job in either
    * service can now fire inside the window, and adding an entry here has to be a deliberate act with

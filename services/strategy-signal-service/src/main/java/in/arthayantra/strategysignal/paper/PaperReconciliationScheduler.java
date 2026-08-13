@@ -10,8 +10,11 @@ import org.springframework.stereotype.Component;
 
 /**
  * Fires the paper-ledger reconciliation (audit §8, V5 + V16) once per trading day at 08:50 IST, in the
- * PRE-OPEN window — AFTER the 08:35 swing entry pass, 25 minutes before the 09:15 open. It moved out of
- * the 21:15 evening slot because the machine is off by 19:00, so an evening run simply never happened.
+ * PRE-OPEN window — fifteen minutes after the 08:35 swing entry pass STARTS, 25 minutes before the
+ * 09:15 open. Deliberately not "after the entry pass finishes": they run on separate lanes and
+ * nothing enforces completion. See the {@link #run()} note for why that trade was made and what it
+ * costs. It moved out of the 21:15 evening slot because the machine is off by 19:00, so an evening
+ * run simply never happened.
  *
  * <p>{@link PaperReconciliationService#reconcile()} had to move with it, and that is not cosmetic:
  * it anchors its window to the previous trading SESSION, because the old {@code today 00:00 → now}

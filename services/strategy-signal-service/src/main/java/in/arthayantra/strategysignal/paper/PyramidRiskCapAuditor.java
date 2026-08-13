@@ -47,11 +47,22 @@ public class PyramidRiskCapAuditor {
     this.notifier = notifier;
   }
 
-  /** Writes the {@code risk_audit} TRIP row and pushes an ntfy alert, in a fresh transaction. */
+  /**
+   * Writes the {@code risk_audit} TRIP row and, when {@code alert} is set, pushes an ntfy alert — in
+   * a fresh transaction.
+   *
+   * <p>{@code alert} is false for the 2nd..Nth refusal of an IST day (2026-08-13): the ROW is written
+   * for EVERY distinct refused symbol because it is the measurement substrate the owner tunes the cap
+   * from, while the push stays deduped per book per day so a 16-refusal run cannot become 16 ntfy
+   * notifications. {@link RiskService#recordPyramidRiskCapBreach} owns both dedup decisions and its
+   * javadoc carries the measured 4:1 undercount that motivated the split; this bean only obeys.
+   */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public void record(String book, String key, String detail) {
+  public void record(String book, String key, String detail, boolean alert) {
     settings.audit(book, key, "TRIP", detail);
-    pushAlert("ArthaYantra Risk — pyramid open-risk cap (" + book + ")", detail);
+    if (alert) {
+      pushAlert("ArthaYantra Risk — pyramid open-risk cap (" + book + ")", detail);
+    }
   }
 
   private void pushAlert(String title, String message) {

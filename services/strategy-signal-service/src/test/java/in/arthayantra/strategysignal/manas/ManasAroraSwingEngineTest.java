@@ -408,6 +408,62 @@ class ManasAroraSwingEngineTest {
   }
 
   @Test
+  void theWarmDoesNotPublishAGoverningStopForAMixedPrePostSessionLotSet() throws IOException {
+    // The exit pass refuses a mixed pre/post-session lot set outright rather than evaluate an
+    // approximate position. The pre-entry warm must refuse the same way, and the reason is sharper:
+    // the stop is cached against the OLDEST lot's id and the paper adapter attaches it by
+    // opening_signal_id, which an averaging add RETAINS — so a trail derived from the pre-session
+    // subset would attach to the live position that ALSO holds the post-session lots, i.e. a
+    // differently composed one at a different average entry. That error runs in the LOOSENING
+    // direction: a trail above the old lot's entry zeroes the whole position's contribution to the
+    // open-risk cap.
+    //
+    // FIXTURE NOTE (a broken red-proof caught this): craftDecline() cannot test this at all — its
+    // trail never ARMS, so governingStop is null and NOTHING is published with or without the guard.
+    // craftArmedTrail() + a pin at day 34 (+11.1% off entry, past the +9% arm) is the only shape
+    // where removing the guard actually publishes.
+    UUID strategyId = UUID.randomUUID();
+    UUID publishedVersion = UUID.randomUUID();
+    StrategyRepository registry = mock(StrategyRepository.class);
+    when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
+    when(registry.findVersionById(publishedVersion))
+        .thenReturn(Optional.of(version(publishedVersion, strategyId, breakoutConfig())));
+
+    List<EngineCandle> series = craftArmedTrail(); // days 0..35 from 2026-06-01
+    SignalRepository signals = mock(SignalRepository.class);
+    when(signals.activeEntries())
+        .thenReturn(
+            List.of(
+                anchor(42L, publishedVersion, new BigDecimal("152"), series.get(0).bucketStart()),
+                anchor(43L, publishedVersion, new BigDecimal("152"), series.get(35).bucketStart())));
+    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    when(candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(series);
+    ManasFunnelClient funnel = mock(ManasFunnelClient.class);
+    when(funnel.buyableAndOnDeck()).thenReturn(List.of());
+
+    EmissionGuard guard = mock(EmissionGuard.class);
+    when(guard.entryAllowed(any())).thenReturn(true);
+    SwingBatchEngine engine =
+        new SwingBatchEngine(
+            registry, candles, signals, mock(SignalPublisher.class),
+            mock(ApplicationEventPublisher.class), Optional.of(guard), passthroughTx(),
+            new ObjectMapper(), Clock.systemUTC());
+    ManasDoctrine doctrine =
+        new ManasDoctrine(
+            funnel, signals,
+            new ManasPyramidPolicy(false, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
+            new ObjectMapper(), true, 520, 10, 1440);
+
+    // Pin 2026-07-05 = day 34: lot 42 (06-01) is kept, lot 43 (07-06) is dropped -> MIXED.
+    engine.runDaily(doctrine, LocalDate.of(2026, 7, 5), false);
+
+    verify(guard, never()).cacheManasGoverningStop(any(), any(), any(), any(), anyLong(), any());
+    // The MARK is still published: a close is a property of the SYMBOL, not of the lot composition.
+    verify(guard, org.mockito.Mockito.atLeastOnce())
+        .cacheEquityMark(eq("NSE"), eq("TESTCO"), any(), any());
+  }
+
+  @Test
   void aLotOpenedAfterThePinnedSessionIsNotEvaluated() throws IOException {
     ExitHarness h = new ExitHarness();
     h.stubAnchors(h.anchor(42L, h.series.get(25).bucketStart())); // 2026-06-26, after the pin

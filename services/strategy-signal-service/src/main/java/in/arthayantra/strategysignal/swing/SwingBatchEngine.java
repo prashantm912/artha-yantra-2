@@ -999,9 +999,25 @@ public class SwingBatchEngine {
         if (series.isEmpty()) {
           continue;
         }
-        // (a) the mark-to-market close, for book equity.
+        // (a) the mark-to-market close, for book equity. Unconditional: a close is a property of the
+        // SYMBOL, so it is valid whatever the lot composition happens to be.
         cacheEquityMark(e.getKey(), series.get(series.size() - 1));
-        // (b) the governing (trailed) stop, for the aggregate open-risk cap.
+        // (b) the governing (trailed) stop, for the aggregate open-risk cap. UNLIKE the mark, this is
+        // a property of a PARTICULAR position, so it inherits the exit pass's mixed-lot refusal.
+        //
+        // With a session pinned, `lotsAsOf` drops lots opened after it. When that drops SOME but not
+        // all, the exit pass refuses the symbol outright rather than evaluate an approximate position
+        // (:807-822). The warm must refuse too, and the reason is sharper here than there: the stop
+        // is cached against `primary.id()` and the paper adapter attaches it by `opening_signal_id`,
+        // which an averaging add RETAINS — so a trail computed from the pre-session subset would
+        // attach to the live position that also contains the post-session lots, i.e. a differently
+        // composed one at a different average entry. That error runs in the LOOSENING direction: a
+        // trail above the old lot's entry zeroes the whole position's contribution to the risk cap.
+        // Skip silently — `recordMixedLotRefusal` is the exit pass's durable record and writing it
+        // twice would double-count a single condition.
+        if (requiredBarDate != null && lots.size() != e.getValue().size()) {
+          continue;
+        }
         SignalRepository.SignalRow primary = oldestLot(lots);
         SwingStrategy strat = resolution.resolve(primary.strategyVersionId()).orElse(null);
         if (strat == null) {

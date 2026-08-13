@@ -781,7 +781,24 @@ Run in order; each answers one question. Canned SQL in §6.
     docker logs ay-strategy-signal-service --since <open-UTC> 2>&1 \
       | grep -E "risk cap .* tripped|ENTRY suppressed by scalper risk gate" | head -30
     ```
-37. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+37. **Log-dependent checks DIE with the container — inventory the DB fallbacks before reading a
+    recreated stack, and snapshot logs BEFORE any post-close recreate** (added 2026-08-13) — a
+    ROUTINE post-close deploy at 15:44 IST (14 minutes after close, before the EOD forensics run)
+    recreated both strategy-signal and market-data and permanently destroyed every log-derived
+    check for that session. The log-dependent set, with its DB substitute where one exists:
+    | check | log form | DB fallback |
+    |---|---|---|
+    | §3.10 boot line | `loaded N published` | `strategy.engine_reloads` (loaded/unresolved/load_errors — the honest signal `unresolved==0` survives) |
+    | §3.18 contract | `NFO:<contract>` rail lines | `strategy.signals.tradingsymbol` on any fired day; the §3.18 range test otherwise |
+    | §3.17 canary WARNs/straddles | `canary:`/`shortfall` grep | **NONE — unknowable for that session; report it as such, never as "0 WARNs"** |
+    | §3.34 heat-grep | `heat call failed|heat unassessable` | `paper_positions.margin_snapshot`/`margin_pct` populated on the funded rows = weak evaluability proxy (unpriced-path column semantics unverified) |
+    | §3.36 suppression lines | `ENTRY suppressed by scalper risk gate` | **NONE — the legs are unreconstructable; only the fired-vs-emitted COUNT survives** (`signal_eval_outcomes` vs `signals`) |
+    Process rule (proposal NEW-4, 2026-08-13): snapshot `docker logs` of both services to a file
+    BEFORE any post-close recreate — the standing incident rule (memory `live-mode-findings`)
+    extended to routine deploys — or hold the deploy until after ~19:00 when the post-market run
+    has grepped them. A findings file written after a log-loss must carry the caveat prominently:
+    absence of log evidence is not evidence of a quiet session.
+38. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

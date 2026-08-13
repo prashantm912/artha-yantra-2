@@ -3,7 +3,7 @@ package in.arthayantra.strategysignal.paper;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategysignal.paper.PaperReconciliationService.ReconciliationResult;
 import in.arthayantra.strategysignal.signals.SwingBatchAlert;
-import in.arthayantra.strategysignal.swing.SwingRunMutex;
+import in.arthayantra.strategysignal.swing.SwingRunActivity;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
@@ -45,7 +45,7 @@ public class PaperReconciliationScheduler {
 
   private final PaperReconciliationService reconciliation;
   private final ApplicationEventPublisher events;
-  private final SwingRunMutex swingRuns;
+  private final SwingRunActivity swingRuns;
   private final Clock clock;
   private final int deadlineReserveMinutes;
   private final long pollMillis;
@@ -55,7 +55,7 @@ public class PaperReconciliationScheduler {
   public PaperReconciliationScheduler(
       PaperReconciliationService reconciliation,
       ApplicationEventPublisher events,
-      SwingRunMutex swingRuns,
+      SwingRunActivity swingRuns,
       Clock clock,
       MeterRegistry meterRegistry,
       @Value("${artha.paper.reconciliation.catchup-deadline-reserve-minutes:15}")
@@ -135,10 +135,13 @@ public class PaperReconciliationScheduler {
    * it. This buys the same ordering guarantee WITHOUT that failure mode, because the wait is bounded
    * and its expiry is loud — a hung catch-up costs a paged decline, not silence.
    *
-   * <p><b>Why the lock and not {@code swing_catchup_runs}.</b> See {@link SwingRunMutex#anyRunInFlight()}:
-   * the durable ledger has no RUNNING row between claimed sessions, so it would report "idle" in the
-   * middle of a live sweep. {@code isLocked()} is an observation, never an acquisition, so this never
-   * queues behind the run it is watching.
+   * <p><b>What counts as "in flight".</b> See {@link SwingRunActivity}: the catch-up POOL being active
+   * bounds a whole {@code catchUp()} invocation (all families AND the windows between them), and the
+   * per-family LOCKS cover a manual {@code POST /run} that never touches that pool. Both are pure
+   * observations, never acquisitions, so this never queues behind the run it is watching. Neither
+   * signal alone is sufficient, and the durable {@code swing_catchup_runs} ledger is sufficient for
+   * neither half — it carries no RUNNING row between claimed sessions, and its {@code PENDING} is a
+   * normal END state rather than an in-progress one.
    *
    * <p><b>The deadline</b> is anchored to {@link MarketCalendar#SESSION_OPEN} — the same 09:15 the
    * catch-up's own {@code marketOpenDeadlinePassed()} uses, not a second notion of "too late" — minus
@@ -162,7 +165,7 @@ public class PaperReconciliationScheduler {
         ZonedDateTime.now(clock.withZone(IST)).toLocalDate().atTime(deadlineTime()).atZone(IST);
     log.warn("paper reconciliation: a swing batch run is in flight — waiting until {}", deadline);
     while (swingRuns.anyRunInFlight()) {
-      if (!ZonedDateTime.now(clock.withZone(IST)).isBefore(deadline)) {
+      if (deadlinePassed(deadline)) {
         return false;
       }
       try {
@@ -173,7 +176,17 @@ public class PaperReconciliationScheduler {
         return false;
       }
     }
-    return true;
+    // ⚠️ The loop tests the RUN before the CLOCK, so a run that finishes during the final sleep exits
+    // it without any deadline check having happened since before that sleep — up to one poll interval
+    // (5 s by default) past the cutoff. Re-check: having waited at all, the deadline governs. This is
+    // deliberately NOT hoisted into the fast path above — a book that was quiet from the start needs
+    // no deadline, and applying one there would refuse to reconcile a perfectly clean book whenever
+    // the cron is overridden outside the pre-open window.
+    return !deadlinePassed(deadline);
+  }
+
+  private boolean deadlinePassed(ZonedDateTime deadline) {
+    return !ZonedDateTime.now(clock.withZone(IST)).isBefore(deadline);
   }
 
   /**

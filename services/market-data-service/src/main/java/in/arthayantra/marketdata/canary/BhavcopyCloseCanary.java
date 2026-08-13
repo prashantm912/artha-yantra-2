@@ -1,12 +1,17 @@
 package in.arthayantra.marketdata.canary;
 
 import in.arthayantra.common.web.time.Ist;
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
+import in.arthayantra.marketdata.constituents.StaticIndexConstituents;
+import in.arthayantra.marketdata.kite.GapBackfiller;
+import in.arthayantra.marketdata.kite.InstrumentKey;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import org.slf4j.Logger;
@@ -31,29 +36,45 @@ import org.springframework.stereotype.Component;
  * source='KITE'} and matched on the IST calendar date of the bucket. Live-only sweep + fail-soft
  * alerting; {@link #evaluate(LocalDate)} is side-effect-free so a GET / a test can call it any time.
  *
- * <p><b>⚠️ The comparison population is BORROWED, and it collapsed once already.</b> This canary
- * never fetched its own Kite bars — it compares whatever {@code source='KITE'} 1d rows some other
- * job happened to leave in {@code candles}, and until 2026-08-10 that was the swing batch fetching
- * bars for the names it was screening at 20:00 ({@code MinerviniSwingScheduler}'s javadoc documents
- * the same dependency from the other side). #1333 moved that batch to a 16:00 EXITS-ONLY settle, so
- * it now fetches only the symbols the book HOLDS. Measured: symbols compared went
- * 171 / 159 / 160 / 164 on 08-05..08-10 and then <b>14 / 14</b> on 08-11 / 08-12 — against an EQ
- * bhavcopy universe of ~2 450. On 2026-08-11 this canary reported <b>GREEN on 14 symbols</b>.
+ * <p><b>The comparison population is this canary's OWN, and it used to be BORROWED.</b> Until
+ * 2026-08-13 this canary never fetched a Kite bar — it compared whatever {@code source='KITE'} 1d
+ * rows some other job happened to leave in {@code candles}, which was the swing batch fetching bars
+ * for the names it screened at 20:00 ({@code MinerviniSwingScheduler}'s javadoc documents the same
+ * dependency from the other side). #1333 moved that batch to a 16:00 EXITS-ONLY settle, so it began
+ * fetching only the symbols the book HOLDS. Measured: symbols compared went 171 / 159 / 160 / 164 on
+ * 08-05..08-10 and then <b>14 / 14</b> on 08-11 / 08-12 — against an EQ bhavcopy universe of ~2 450.
+ * On 2026-08-11 this canary reported <b>GREEN on 14 symbols</b>: catalogue trap #14, an armed gate
+ * whose operand is structurally near-zero, reporting success.
  *
- * <p>That is catalogue trap #14: an armed gate whose operand is structurally near-zero, reporting
- * success. Severity was keyed ONLY on the divergent count against {@link #redFloor}, so a
- * population of one symbol that happened to agree read exactly like a clean universe. Worse, the
- * arithmetic made the top severity unreachable: with 14 comparable symbols, {@code divergent} can
- * never reach a {@code redFloor} of 20, so RED was not merely unlikely but impossible.
+ * <p>#1367 added {@code artha.bhavcopy-close.min-compared} so that could not recur silently — below
+ * the floor the verdict is never GREEN. That was the ALARM. {@link #prefetchPopulation()} is the
+ * CURE: a 16:05 IST pass that fetches the 1d bar for a fixed reference list, so the population is
+ * one this canary controls rather than another job's leftovers. The floor stays, and now measures
+ * something that can actually satisfy it.
  *
- * <p>{@code artha.bhavcopy-close.min-compared} is the alarm for that: below it the verdict can
- * never be GREEN. It is an ABSOLUTE count on purpose — expressing it as a fraction of the bhavcopy
- * population would make the floor itself collapse whenever the bhavcopy ingest is the thing that
- * failed (0 of 0 is trivially 100% covered), which rebuilds the same trap one level up. The floor
- * only ESCALATES: it can turn GREEN into YELLOW, never soften a divergence verdict.
+ * <p><b>⚠️ What this canary certifies, and what it does NOT.</b> The population is a SAMPLE — the
+ * {@code NIFTY 200} reference list, 202 large-cap NSE names — not the ~2 450-name EQ bhavcopy
+ * universe. That is a real limit and naming it is the whole point of the coverage work: a partial
+ * check that reads as complete is how this gate got into trouble in the first place.
  *
- * <p><b>The floor is the alarm, not the cure.</b> Making this canary fetch its own population is
- * the real fix and is deliberately NOT in this change — see the note on {@link #minCompared}.
+ * <ul>
+ *   <li><b>Caught:</b> SYSTEMIC divergence between the two close feeds — a session-date off-by-one,
+ *       a feed-wide price-scale or currency error, a global split/bonus adjustment regression, a
+ *       bhavcopy parse fault, a stale Kite session serving yesterday's closes. Those show
+ *       identically on 202 names as on 2 450, so the sample costs nothing against them.
+ *   <li><b>MISSED:</b> IDIOSYNCRATIC divergence in the ~2 250 names outside the sample — a bad Kite
+ *       print, an unadjusted corporate action, a symbol-rename/lineage mismatch on one stock. This
+ *       is not a small residue: corporate actions and thin-book bad prints are MORE frequent per
+ *       name among small/mid caps, so the sample is biased AWAY from where per-symbol corruption
+ *       actually lives. Anything correlated with market cap, series, or listing segment (an SME or
+ *       BE-series mapping break, say) is invisible here by construction.
+ * </ul>
+ *
+ * <p>So: this certifies that the two close feeds AGREE AS FEEDS. It does not, and with a sample
+ * cannot, certify per-symbol correctness across the EQ universe. A full sweep would — and is not
+ * affordable: 2 450 symbols at the {@code kite-historical} 3 req/s limiter is ~14 min (measured
+ * 2.84 calls/s over 40 sequential calls, 2026-08-13), which does not fit the 18:45→18:58 evening
+ * window at all, let alone before the 19:00 machine-off. 202 symbols is ~71 s.
  */
 @Component
 public class BhavcopyCloseCanary {
@@ -116,6 +137,9 @@ public class BhavcopyCloseCanary {
   private final JdbcTemplate jdbc;
   private final NtfyClient ntfy;
   private final Clock clock;
+  private final StaticIndexConstituents constituents;
+  private final GapBackfiller backfiller;
+  private final MarketCalendar calendar;
   private final Counter divergenceCounter;
   private final boolean live;
   private final boolean enabled;
@@ -123,6 +147,7 @@ public class BhavcopyCloseCanary {
   private final BigDecimal threshold;
   private final int redFloor;
   private final int sampleLimit;
+  private final String populationIndex;
 
   /**
    * The smallest comparison population this canary will certify. Below it the verdict is never
@@ -135,18 +160,14 @@ public class BhavcopyCloseCanary {
    * populations are an order of magnitude apart, so anything from ~30 to ~150 separates them
    * identically, and 100 is simply the round middle of that range.
    *
-   * <p><b>⚠️ This fires YELLOW every session until the borrowed population is fixed, and that is
-   * the intent, not an oversight.</b> Sizing the floor to pass today's 14 would be choosing the
-   * threshold to fit the broken state — the trap this property exists to close.
-   *
-   * <p><b>Why not fetch our own bars instead.</b> That is the real fix and it is out of scope here,
-   * stated rather than quietly skipped. A full-universe Kite 1d fetch is ~2 450 symbols against a
-   * 3 req/s historical limit — ~14 minutes of sustained calls on the limiter the live feed shares,
-   * daily, to serve a canary. A fixed representative sample (say the NIFTY 200, ~67 s) is the
-   * plausible middle and is a genuinely better design, but it is a new fetch path with its own
-   * scheduling, rate-limiter contention and failure modes — a larger change that deserves its own
-   * PR and its own review. Shipping the floor first means the next session cannot pass silently
-   * while that is decided, which is the property actually worth having today.
+   * <p><b>It is deliberately NOT re-sized to the owned population.</b> {@link
+   * #prefetchPopulation()} now supplies 202 symbols, so 100 leaves ~102 names of erosion headroom
+   * before the alarm fires — generous, and that generosity is the trade: a SLOW erosion (index
+   * rebalances retiring names from the static list over years) stays invisible until it has halved
+   * the population. Raising the deployed {@code ARTHA_BHAVCOPY_CLOSE_MIN_COMPARED} to ~150 once
+   * this has run a few sessions would tighten that, and it is a one-line env change; it is not made
+   * here because the floor's own defect class is being set TOO HIGH on a bad night, and this change
+   * has no live evidence yet for what the owned population's normal floor looks like.
    *
    * <p><b>⚠️ EFFECTIVE, not configured — this field is CLAMPED at construction.</b> The configured
    * value is raised to at least {@code max(1, redFloor)}, because a floor below {@code redFloor}
@@ -184,6 +205,9 @@ public class BhavcopyCloseCanary {
       JdbcTemplate jdbc,
       NtfyClient ntfy,
       Clock clock,
+      StaticIndexConstituents constituents,
+      GapBackfiller backfiller,
+      MarketCalendar calendar,
       MeterRegistry meterRegistry,
       Environment environment,
       @Value("${artha.bhavcopy-close.enabled:true}") boolean enabled,
@@ -191,10 +215,15 @@ public class BhavcopyCloseCanary {
       @Value("${artha.bhavcopy-close.threshold:0.01}") BigDecimal threshold,
       @Value("${artha.bhavcopy-close.red-floor:20}") int redFloor,
       @Value("${artha.bhavcopy-close.sample-limit:25}") int sampleLimit,
-      @Value("${artha.bhavcopy-close.min-compared:100}") int minCompared) {
+      @Value("${artha.bhavcopy-close.min-compared:100}") int minCompared,
+      @Value("${artha.bhavcopy-close.population-index:NIFTY 200}") String populationIndex) {
     this.jdbc = jdbc;
     this.ntfy = ntfy;
     this.clock = clock;
+    this.constituents = constituents;
+    this.backfiller = backfiller;
+    this.calendar = calendar;
+    this.populationIndex = populationIndex;
     this.divergenceCounter = meterRegistry.counter("ay_bhavcopy_close_divergence_total");
     this.live = environment.matchesProfiles("live");
     this.enabled = enabled;
@@ -213,6 +242,134 @@ public class BhavcopyCloseCanary {
               + " arithmetically unreachable (red-floor={}); raised to {}. To silence this canary"
               + " use artha.bhavcopy-close.enabled=false, not a low floor.",
           minCompared, redFloor, this.minCompared);
+    }
+  }
+
+  /**
+   * Fetches this canary's OWN comparison population — the 1d Kite bar for every symbol in the
+   * {@code populationIndex} reference list — at 16:05 IST. Live-only, trading-days-only.
+   *
+   * <p><b>⚠️ Why 16:05 and not "just before the 18:45 ingest".</b> {@code source} is NOT part of
+   * the {@code candles} PK, so a BHAVCOPY 1d row and a KITE 1d row collide on the same bucket.
+   * Whichever lands FIRST decides what the canary can see:
+   *
+   * <ul>
+   *   <li><b>KITE first</b> — bhavcopy's projection uses {@code insertIgnoreAll} (ON CONFLICT DO
+   *       NOTHING), so the Kite bar is safe forever. This is the state we want, and it is
+   *       PERMANENT once achieved.
+   *   <li><b>BHAVCOPY first</b> — our later {@code upsertAuthoritativeAll} keeps the EXISTING
+   *       source whenever every OHLCV field matches. So the bars that agree PERFECTLY are exactly
+   *       the ones that stay {@code source='BHAVCOPY'} and fall out of the population, while
+   *       bars that differ in any field flip to KITE and stay in. The leak is small — measured
+   *       2026-08-05..08-12, bhavcopy close equals Kite close exactly in 22 of 682 dual-sourced
+   *       rows (3.2%), and requiring open/high/low/volume to match too makes it rarer still — but
+   *       it is biased precisely AGAINST agreement: it removes the cleanest bars from the sample
+   *       used to judge cleanliness.
+   * </ul>
+   *
+   * <p>Five minutes before the 18:45 cron would not buy that ordering, which is the actual reason
+   * for 16:05. The bhavcopy ingest does not only run on its cron — {@code BhavcopyStartupCatchup}
+   * fires on every boot, and {@code marketdata.ingest_runs} records BHAVCOPY runs at 00:55, 03:24,
+   * 06:26, 07:54, 08:03, 12:50, 15:45, 16:37, 17:59, 18:00, 18:47, 19:30 and 23:45 IST across a
+   * single week. A restart at 18:10 on a night NSE published at 17:52 puts the projection first. It
+   * cannot, however, publish before it publishes: the earliest measured NSE bhavcopy is 17:52, so a
+   * 16:05 pass is ahead of ANY same-day write rather than ahead of one particular cron.
+   *
+   * <p><b>The 16:05 bar is already final</b> — this was measured, not assumed, because fetching a
+   * partial bar would manufacture divergence out of nothing. Three symbols' 1d bars captured at
+   * 16:00 IST on 2026-08-13 were byte-identical in close AND volume when re-fetched at 17:43, and
+   * the write kept {@code source='KITE'}, which is the same value-identical branch of the
+   * provenance rule described above.
+   *
+   * <p><b>Timing and margin.</b> 202 symbols, one Kite call each (the B-4 recency rule makes
+   * today's in-progress 1d bucket always re-fetch, so exactly one page per symbol), paced by the
+   * {@code kite-historical} limiter at 3 req/s. Measured 2.84 calls/s over 40 sequential calls
+   * against the live gateway on 2026-08-13 → <b>~71 s</b>, i.e. done by ~16:06 against a 17:52
+   * earliest-publish and a 18:58 evaluation.
+   *
+   * <p><b>Why this cannot starve the live feed.</b> The pass is strictly SEQUENTIAL, so it holds at
+   * most ONE of the limiter's 3 permits/s at any instant — a competing caller waits ~333 ms, far
+   * inside the limiter's 5 s queue, and never sees {@code RATE_LIMIT_LOCAL}. It also runs 35 min
+   * after the close, so the live WS ticker (which consumes no REST HISTORICAL permits in any case)
+   * is idle, and the neighbouring {@code kite-historical} consumers are done: the 15:45
+   * {@code EodBackfillJob} and the 16:00–16:02 swing settle both precede it, and the 16:30
+   * corporate-action job follows. The market being shut weakens the concern but does not remove it
+   * — an owner browsing charts shares this limiter — which is why the sequential property, not the
+   * hour, is the actual guarantee.
+   *
+   * <p>Per-symbol failures are counted and stepped over, never re-raised: a Kite outage or one
+   * delisted name should SHRINK the population, not abort the pass, because a short population is
+   * precisely what the coverage floor is built to report. This pass is therefore self-checking — if
+   * it quietly achieves nothing, {@link #sweep()} says so 18 minutes later.
+   */
+  // ⚠️ `cron` and `zone` stay on ONE line: CronPassthroughParityTest matches the @Scheduled site by
+  // a single-line `cron = "${...:` needle and then asserts THAT line carries the IST zone. Split
+  // across lines, the site is still found and the zone assertion fails on a correct annotation.
+  @Scheduled(cron = "${artha.bhavcopy-close.prefetch-cron:0 5 16 * * MON-FRI}", zone = "Asia/Kolkata",
+      scheduler = "closeCanaryTaskScheduler")
+  public void prefetchPopulation() {
+    if (!live || !enabled) {
+      return;
+    }
+    LocalDate today = LocalDate.now(clock.withZone(Ist.ZONE));
+    if (!isTradingDaySafe(today)) {
+      return;
+    }
+    prefetchNow(today);
+  }
+
+  /**
+   * One synchronous population pass for {@code tradeDate}; returns the symbols attempted. Callable
+   * from tests and by hand — the guards live in {@link #prefetchPopulation()}, so this always runs.
+   */
+  public int prefetchNow(LocalDate tradeDate) {
+    List<String> symbols = constituents.symbols(populationIndex);
+    if (symbols.isEmpty()) {
+      log.warn(
+          "bhavcopy-close population index '{}' has no constituents — the comparison population"
+              + " will be whatever other jobs leave behind, and the coverage floor will say so",
+          populationIndex);
+      return 0;
+    }
+    // Today only: one 1d bucket per symbol, so one Kite page each. A wider window would re-fetch
+    // closed bars the cache already owns (GapDetector's 10-min recency rule only ever forces the
+    // in-progress bucket), multiplying the cost for nothing the canary reads.
+    Instant from = tradeDate.atStartOfDay(Ist.ZONE).toInstant();
+    Instant to = clock.instant();
+    long startedAt = System.currentTimeMillis();
+    int failed = 0;
+    for (String symbol : symbols) {
+      try {
+        backfiller.prefetch(new InstrumentKey("NSE", symbol), "1d", from, to);
+      } catch (RuntimeException e) {
+        // Defence in depth, and it is NOT redundant with GapBackfillService's own catch. That is one
+        // implementation of the GapBackfiller PORT; the port promises nothing about swallowing, so
+        // relying on it makes a whole session's population hostage to a collaborator's internals.
+        // The failure direction matters: unhandled, one delisted or renamed symbol early in an
+        // alphabetical list would abort the pass and leave the canary short every night, looking
+        // exactly like the borrowed-population collapse this change exists to end.
+        failed++;
+        log.debug("bhavcopy-close population fetch failed for {}: {}", symbol, e.toString());
+      }
+    }
+    // "attempted", not "fetched": GapBackfillService swallows its own fetch failures, so a symbol
+    // that raised nothing here may still have stored no bar. Claiming a fetch count this cannot
+    // know would make this line read like the coverage evidence it is not — the sweep's `compared`
+    // is the only honest measure of what actually landed.
+    log.info(
+        "bhavcopy-close population pass: {} '{}' symbols attempted for {} in {} ms ({} raised);"
+            + " the sweep's compared count is the authority on what landed",
+        symbols.size(), populationIndex, tradeDate,
+        System.currentTimeMillis() - startedAt, failed);
+    return symbols.size();
+  }
+
+  /** Trading-day check that treats a year outside the bundled calendar as a non-trading day. */
+  private boolean isTradingDaySafe(LocalDate day) {
+    try {
+      return calendar.isTradingDay(day);
+    } catch (IllegalArgumentException uncoveredYear) {
+      return false;
     }
   }
 
@@ -346,9 +503,13 @@ public class BhavcopyCloseCanary {
 
   private void publish(BhavcopyCloseReport report) {
     if (GREEN.equals(report.status())) {
+      // Names the population on purpose. "202 symbols compared, none diverge" invites the reader to
+      // hear "the close feed is clean" — but this is a large-cap SAMPLE, and an idiosyncratic bad
+      // print outside it is exactly what a GREEN here cannot speak to (see the class javadoc).
       log.info(
-          "bhavcopy-close canary GREEN for {} — {} symbols compared, none diverge > {}%",
-          report.tradeDate(), report.compared(), report.thresholdPct());
+          "bhavcopy-close canary GREEN for {} — {} of the '{}' sample compared, none diverge > {}%"
+              + " (systemic agreement only; per-symbol correctness outside the sample is unchecked)",
+          report.tradeDate(), report.compared(), populationIndex, report.thresholdPct());
       return;
     }
     divergenceCounter.increment(report.divergent());

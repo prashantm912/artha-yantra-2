@@ -52,7 +52,7 @@ class CronPassthroughParityTest {
    * the whole file execute zero assertions and pass — the guard-that-checks-nothing shape. Lowering
    * this number is a deliberate act that must be justified in the PR that does it.
    */
-  private static final int EXPECTED_JOB_COUNT = 10;
+  private static final int EXPECTED_JOB_COUNT = 11;
 
   private static final List<Job> JOBS =
       List.of(
@@ -64,6 +64,10 @@ class CronPassthroughParityTest {
           new Job(
               "artha.bhavcopy-close.cron",
               "ARTHA_BHAVCOPY_CLOSE_CRON",
+              SRC + "canary/BhavcopyCloseCanary.java"),
+          new Job(
+              "artha.bhavcopy-close.prefetch-cron",
+              "ARTHA_BHAVCOPY_CLOSE_PREFETCH_CRON",
               SRC + "canary/BhavcopyCloseCanary.java"),
           new Job(
               "artha.upstox.canary-cron",

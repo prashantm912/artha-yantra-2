@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.paper;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategysignal.notifier.NotifierClient;
 import in.arthayantra.strategysignal.paper.PaperReconciliationRepository.ClosedPositionRecon;
 import io.micrometer.core.instrument.Counter;
@@ -72,6 +73,9 @@ public class PaperReconciliationService {
   private final Counter v16DiscrepanciesTotal;
   private final AtomicInteger strandedCarryGauge;
   private final AtomicInteger deadAnchorOrphanGauge;
+
+  /** NSE sessions, for the previous-session window floor. Same bundled list PortfolioReader uses. */
+  private final MarketCalendar calendar = MarketCalendar.nse();
 
   /** Wires the reconciliation repo, notifier, JSON mapper, clock, meters + the lookback window. */
   public PaperReconciliationService(
@@ -144,15 +148,29 @@ public class PaperReconciliationService {
     }
   }
 
-  /** The nightly entry point: reconcile over the default lookback window (IST-day bounded). */
+  /**
+   * The scheduled entry point: reconcile from the start of the previous trading session through now.
+   *
+   * <p>⚠️ <b>The window must be session-anchored, not calendar-day-anchored, because this job now runs
+   * BEFORE the market opens.</b> It used to run at 21:15 IST, where {@code today 00:00 → now} covered
+   * the whole session that had just finished. Moved to 08:50 that same expression covers 00:00–08:50 of
+   * a day on which nothing has traded yet: every bounded query returns zero rows, every check passes,
+   * and the run row records a clean reconciliation of nothing. That is the worst failure shape we have
+   * — a detector reporting success because it enumerated an empty set — so the fix is part of the move
+   * that caused it, not a follow-up.
+   *
+   * <p>{@code previousTradingDay} rather than {@code minusDays(1)}: on a Monday the session to
+   * reconcile is Friday's, and an NSE holiday shifts it again. {@code lookbackDays} still means
+   * calendar days and still widens the window when configured larger — the session floor only stops it
+   * being narrower than one session, so no existing configuration reconciles LESS than it did before.
+   */
   public ReconciliationResult reconcile() {
     OffsetDateTime windowEnd = OffsetDateTime.ofInstant(clock.instant(), IST);
-    OffsetDateTime windowStart =
-        LocalDate.ofInstant(clock.instant(), IST)
-            .minusDays(lookbackDays - 1L)
-            .atStartOfDay(IST)
-            .toOffsetDateTime();
-    return reconcile(windowStart, windowEnd);
+    LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
+    LocalDate byLookback = today.minusDays(lookbackDays - 1L);
+    LocalDate previousSession = calendar.previousTradingDay(today);
+    LocalDate windowStartDay = byLookback.isBefore(previousSession) ? byLookback : previousSession;
+    return reconcile(windowStartDay.atStartOfDay(IST).toOffsetDateTime(), windowEnd);
   }
 
   /**

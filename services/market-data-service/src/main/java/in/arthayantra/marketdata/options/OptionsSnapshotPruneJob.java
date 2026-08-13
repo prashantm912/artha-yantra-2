@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Scheduled retention for {@code marketdata.options_chain_snapshots} (ledger A10, owner decision
- * 2026-07-12). Every day at 03:30 IST (off-market) it drops whole 1-day chunks older than the
+ * 2026-07-12). Every day at 18:05 IST (post-close) it drops whole 1-day chunks older than the
  * {@code artha.market.snapshot-retention-days} horizon (default 365) via TimescaleDB
  * {@code drop_chunks} — chunk-wise and compression-safe. It NEVER row-wise {@code DELETE}s: the
  * table is a ~1.12B-row-class compressed hypertable and a naive delete re-OOMs the DB (the CA-purge
@@ -81,12 +81,13 @@ public class OptionsSnapshotPruneJob {
   }
 
   /**
-   * The daily retention tick (03:30 IST). Six-field Spring cron with the explicit Asia/Kolkata zone
+   * The daily retention tick (18:05 IST — The 02:30/03:30 slot was retired on 2026-08-12: the machine is shut down at 19:00 IST and started after 08:00, so an overnight tick never fired at all — the retention this job exists to enforce was simply not happening. Six-field Spring cron with the explicit
+   * Asia/Kolkata zone
    * (B-9 convention, machine-checked by {@code CronConventionsTest}); runs every calendar day since
    * retention has no trading-day dependence. Live-only: the mock/CI database is ephemeral
    * ({@code artha_mock}, wiped by {@code ay reset-db}), so there is nothing to retain there.
    */
-  @Scheduled(cron = "0 30 3 * * *", zone = "Asia/Kolkata")
+  @Scheduled(cron = "0 5 18 * * *", zone = "Asia/Kolkata")
   public void scheduledPrune() {
     if (!live) {
       return;

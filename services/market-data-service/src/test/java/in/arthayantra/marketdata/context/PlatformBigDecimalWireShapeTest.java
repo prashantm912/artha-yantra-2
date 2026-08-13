@@ -125,7 +125,7 @@ class PlatformBigDecimalWireShapeTest {
 
   @Test
   void bhavcopyCloseReportDecimalsAreTextual() throws Exception {
-    var instance = new BhavcopyCloseCanary.BhavcopyCloseReport(null, null, 1, 1, D, null);
+    var instance = new BhavcopyCloseCanary.BhavcopyCloseReport(null, null, 1, 1, 1, D, null);
     assertTextual(json(instance), "thresholdPct");
   }
 

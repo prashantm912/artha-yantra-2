@@ -103,6 +103,49 @@ class IngestRunReaperIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   @Test
+  void aRunOurOwnStartupBeginsSurvivesTheBootReap() {
+    // ⚠️ THE STARTUP-ORDERING CASE, and the only test here that goes through the real entry point.
+    // BhavcopyStartupCatchup listens to the SAME ApplicationReadyEvent as the reaper, and listener
+    // order is unspecified; its async backfill inserts a RUNNING row. Sample the boundary inside the
+    // handler and that row — ours, alive, milliseconds old — satisfies `started_at < bootedAt` and
+    // gets reaped by the process that just started it. Sampling at construction is what prevents it.
+    //
+    // The other four tests hand reap() a boundary of their own choosing, so none of them can see
+    // this: the bug lives entirely in WHICH timestamp reapOnBoot() picks, which those never exercise.
+    OffsetDateTime now = OffsetDateTime.now();
+    assertThat(reaper.bootBoundary())
+        .as("precondition: the bean was constructed before this method ran, or the test proves nothing")
+        .isBefore(now);
+
+    long ours = insertRunning(uniqueSource(), now);
+
+    reaper.reapOnBoot(); // the real listener body, against the bean's own construction-time boundary
+
+    assertThat(statusOf(ours))
+        .as("a row our own startup inserted is live work, not a corpse from a dead process")
+        .isEqualTo("RUNNING");
+  }
+
+  @Test
+  void aSuccessClearsAFalselyReapedMarker() {
+    // Defence in depth behind the boundary fix: if a row ever were reaped and then finished anyway,
+    // succeed() must not leave REAPED_ON_BOOT behind. A SUCCESS row carrying reaper error text reads
+    // as a killed run to every audit that comes after, permanently — the reap would outlive itself.
+    String source = uniqueSource();
+    OffsetDateTime boot = OffsetDateTime.now();
+    long id = insertRunning(source, boot.minusMinutes(5));
+    reaper.reap(boot);
+    assertThat(statusOf(id)).as("arrange: the row must actually be reaped first").isEqualTo("FAILURE");
+
+    new IngestRunLedger(jdbc).succeed(id, 42L);
+
+    assertThat(statusOf(id)).isEqualTo("SUCCESS");
+    assertThat(jdbc.queryForObject("SELECT error FROM ingest_runs WHERE id = ?", String.class, id))
+        .as("a run that succeeded is not a reaped run, whatever happened to it earlier")
+        .isNull();
+  }
+
+  @Test
   void aCleanBootReapsNothingAndSaysSo() {
     // The normal case, asserted rather than assumed: with nothing stranded the reaper is a no-op. A
     // reaper that always reports work done is indistinguishable from one silently reaping live rows.

@@ -30,6 +30,21 @@ import org.springframework.stereotype.Component;
  * out from under itself. That is a stronger rule than an age threshold, which would have to guess how
  * long is too long and would race a legitimately long backfill.
  *
+ * <p>⚠️ <b>The boundary is sampled at BEAN CONSTRUCTION, not when the event fires — that difference
+ * is the whole correctness of the predicate.</b> {@code BhavcopyStartupCatchup} listens to the SAME
+ * {@link ApplicationReadyEvent}, and listener order is unspecified. If it runs first, its async
+ * backfill inserts a {@code RUNNING} row of OUR OWN making; had we sampled "now" inside the handler,
+ * that row would satisfy {@code started_at < bootedAt} and be reaped by the very process that
+ * started it. Construction strictly precedes every {@code ApplicationReadyEvent} listener, so a row
+ * this process creates can never predate the boundary. It also precedes scheduler start-up, which
+ * fails in the same safe direction: a {@code @Scheduled} job firing during startup lands AFTER the
+ * boundary and is left alone.
+ *
+ * <p>That ordering bug would have left damage outliving the reap, which is why the safe direction
+ * matters more than the odds: a falsely-reaped row that later SUCCEEDED would have kept
+ * {@code REAPED_ON_BOOT} in its {@code error}, reading as a killed run to every audit afterwards.
+ * {@link IngestRunLedger#succeed} now clears {@code error} for that reason — belt to this braces.
+ *
  * <p>⚠️ <b>{@code finished_at} is set to now(), and that timestamp is a lie either way — the honest
  * one.</b> The true finish time is unknowable: the process died without recording it. Stamping
  * {@code started_at} would fabricate a plausible zero-duration run; stamping {@code now()} yields an
@@ -49,21 +64,38 @@ public class IngestRunReaper {
   public static final String REAPED_MARKER = "REAPED_ON_BOOT";
 
   private final JdbcTemplate jdbc;
-  private final Clock clock;
+
+  /**
+   * The boundary, sampled at BEAN CONSTRUCTION — deliberately not at {@link ApplicationReadyEvent}
+   * time. See the class note on ordering: our own startup work can insert its {@code RUNNING} row
+   * before this listener runs, and sampling here is what keeps that row on the safe side of the
+   * predicate.
+   */
+  private final OffsetDateTime bootBoundary;
 
   public IngestRunReaper(JdbcTemplate jdbc, Clock clock) {
     this.jdbc = jdbc;
-    this.clock = clock;
+    this.bootBoundary = OffsetDateTime.now(clock);
   }
 
   /**
-   * Reap on startup, once. Bound to {@link ApplicationReadyEvent} rather than a cron because the
-   * condition it repairs is created by a restart and can only be created by one — a periodic sweep
-   * would add a way to reap a live run for no extra coverage.
+   * Reap on startup, once, against the construction-time boundary. Bound to
+   * {@link ApplicationReadyEvent} rather than a cron because the condition it repairs is created by a
+   * restart and can only be created by one — a periodic sweep would add a way to reap a live run for
+   * no extra coverage.
    */
   @EventListener(ApplicationReadyEvent.class)
   public void reapOnBoot() {
-    reap(OffsetDateTime.now(clock));
+    reap(bootBoundary);
+  }
+
+  /**
+   * The construction-time boundary. Package-visible so the IT can assert it genuinely precedes the
+   * rows it writes — without that check a fixed test clock would make the startup-path test vacuous
+   * (it would pass whether or not the boundary moved to event time).
+   */
+  OffsetDateTime bootBoundary() {
+    return bootBoundary;
   }
 
   /**

@@ -28,6 +28,8 @@ class DataQualityCanaryIntegrationTest extends MarketDataIntegrationTestBase {
 
   private static final LocalDate DQ = LocalDate.of(2019, 3, 4);
   private static final List<String> SYMS = List.of("BCQDIV", "BCQOK", "BCQNONE", "BCQBHAV");
+  /** Own symbols + own date, so the shared no-cleanup IT database cannot cross-contaminate. */
+  private static final List<String> THIN_SYMS = List.of("BCQTHIN1", "BCQTHIN2");
 
   @Autowired JdbcTemplate jdbc;
   @Autowired BhavcopyCloseCanary bhavcopyClose;
@@ -76,8 +78,56 @@ class DataQualityCanaryIntegrationTest extends MarketDataIntegrationTestBase {
   @Test
   void v8LatestTradeDateResolves() {
     assertThat(bhavcopyClose.latestTradeDate()).isNotNull();
-    // a null date evaluates to a GREEN empty report (no 422)
-    assertThat(bhavcopyClose.evaluate(null).status()).isEqualTo("GREEN");
+    // A null date still evaluates without a 422 — but it is no longer GREEN. An empty comparison
+    // set is the smallest population there is, so the coverage floor withholds certification:
+    // "nothing to compare" is not "the feeds agree".
+    assertThat(bhavcopyClose.evaluate(null).status()).isEqualTo("YELLOW");
+  }
+
+  /**
+   * ⚠️ The realistic small-population case, end-to-end through the real SQL and schema.
+   *
+   * <p>This is the 2026-08-11 shape: every comparable symbol agrees perfectly, and there are far too
+   * few of them to mean anything. Before the coverage floor this reported GREEN — the canary's whole
+   * purpose is catching a bad close feed, and at that population it would miss a universe-wide
+   * corruption while certifying the feed as clean.
+   *
+   * <p>Its own date + symbols, never shared with {@link #seed()}, because the IT database is a
+   * singleton with no per-method cleanup.
+   */
+  @Test
+  void v8ThinPopulationIsNotCertifiedGreen() {
+    LocalDate thin = LocalDate.of(2019, 3, 5);
+    for (String s : THIN_SYMS) {
+      jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE symbol = ?", s);
+      jdbc.update("DELETE FROM candles WHERE tradingsymbol = ?", s);
+      jdbc.update(
+          "INSERT INTO nse_eod_bhavcopy (trade_date, symbol, series, prev_close, close_price) "
+              + "VALUES (?,?, 'EQ', 100::numeric, 100::numeric) ON CONFLICT DO NOTHING",
+          java.sql.Date.valueOf(thin), s);
+      jdbc.update(
+          "INSERT INTO candles(exchange,tradingsymbol,interval,bucket,open,high,low,close,volume,"
+              + "source) VALUES('NSE', ?, '1d', '2019-03-05 00:00:00+05:30'::timestamptz, "
+              + " 100,100,100,100, 0, 'KITE') ON CONFLICT DO NOTHING",
+          s);
+    }
+    try {
+      BhavcopyCloseCanary.BhavcopyCloseReport report = bhavcopyClose.evaluate(thin);
+
+      assertThat(report.compared()).isEqualTo(THIN_SYMS.size());
+      assertThat(report.divergent()).as("both closes are exactly 100 — nothing diverges").isZero();
+      assertThat(report.compared())
+          .as("the fixture must actually be below the floor or this test proves nothing")
+          .isLessThan(report.minCompared());
+      assertThat(report.status())
+          .as("zero divergence over a population this thin must not certify the close feed")
+          .isEqualTo("YELLOW");
+    } finally {
+      for (String s : THIN_SYMS) {
+        jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE symbol = ?", s);
+        jdbc.update("DELETE FROM candles WHERE tradingsymbol = ?", s);
+      }
+    }
   }
 
   @Test

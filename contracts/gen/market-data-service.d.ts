@@ -3972,6 +3972,8 @@ export interface components {
             compared: number;
             /** Format: int32 */
             divergent: number;
+            /** Format: int32 */
+            minCompared: number;
             thresholdPct: string;
             offenders: components["schemas"]["CloseMismatch"][];
         };

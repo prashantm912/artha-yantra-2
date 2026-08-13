@@ -406,6 +406,14 @@ services:
       ARTHA_BREADTH_MATERIALIZE_CRON: "${ARTHA_BREADTH_MATERIALIZE_CRON:-0 51 18 * * MON-FRI}"
       # bhavcopy-vs-Kite close reconciliation
       ARTHA_BHAVCOPY_CLOSE_CRON: "${ARTHA_BHAVCOPY_CLOSE_CRON:-0 58 18 * * MON-FRI}"
+      # Coverage floor for that canary: below this many comparable symbols it never reports GREEN.
+      # VALUE IS THE CODE DEFAULT, BYTE FOR BYTE — this line changes nothing about live behaviour,
+      # it only makes the knob reachable from .env (#653). The canary CLAMPS it up to red-floor, so
+      # a low value cannot be used as an off-switch; use ARTHA_BHAVCOPY_CLOSE_ENABLED for that.
+      # ⚠️ The sibling knobs (enabled / alerts-enabled / threshold / red-floor / sample-limit) still
+      # have NO passthrough and are pinned to their @Value defaults — pre-existing, not introduced
+      # here, and deliberately left for a separate change rather than widened into this one.
+      ARTHA_BHAVCOPY_CLOSE_MIN_COMPARED: "${ARTHA_BHAVCOPY_CLOSE_MIN_COMPARED:-100}"
       # buyable alerts (bean is @ConditionalOnProperty-disabled today, so inert)
       ARTHA_MINERVINI_BUYABLE_ALERTS_CRON: "${ARTHA_MINERVINI_BUYABLE_ALERTS_CRON:-0 53 18 * * MON-FRI}"
       ARTHA_MD_SOURCE_OPTIONANALYTICS: ${ARTHA_MD_SOURCE_OPTIONANALYTICS:-native}

@@ -102,7 +102,8 @@ class BhavcopyCloseCanaryStaleSessionTest {
         true,
         new BigDecimal("0.01"),
         20,
-        25);
+        25,
+        100);
   }
 
   private static BhavcopyCloseCanary canary(JdbcTemplate jdbc, NtfyClient ntfy) {

@@ -313,6 +313,13 @@ public class SwingBatchEngine {
             : List.of();
     java.util.Set<String> heldBefore =
         new java.util.HashSet<>(openLotsBySymbol(resolution).keySet());
+    // HYDRATE book equity BEFORE the entry pass (cross-vendor review Critical 2, 2026-08-13).
+    // The exit pass captures each held symbol's close, but it runs AFTER entries, so on a fresh boot
+    // the mark cache is empty for the whole entry pass — equity would silently value every held
+    // position at cost and the admission rails would size and admit against a denominator that
+    // cannot see existing losses. Warming here makes "equity is fully marked" the normal state, which
+    // is what lets RiskService refuse the abnormal one instead of failing open.
+    warmEquityMarks(doctrine, heldBefore, requiredBarDate);
     EntryResult entry =
         entriesEnabled
             ? entryPass(
@@ -943,6 +950,40 @@ public class SwingBatchEngine {
   }
 
   /**
+   * Pre-warms the equity marks for every symbol held at the START of the run, so book equity is
+   * fully marked before the entry pass reads it.
+   *
+   * <p><b>Deliberately does NOT share {@code seriesCache} with the exit pass.</b> Reusing the warm
+   * series would be cheaper, but the exit pass would then evaluate a bar sampled at THIS instant
+   * instead of its own — on the 16:00 run the daily bucket is still forming, so that could change an
+   * exit decision. This change is required to leave exits byte-identical, so the warm pays for its
+   * own fetch and the exit pass keeps fetching exactly as it does today.
+   *
+   * <p>Fail-soft per symbol and as a whole: a warm failure must never cost a position its stop
+   * evaluation later in the run. An unwarmed symbol is not silent — it leaves the book partially
+   * marked, which {@code RiskService}'s {@code equity_unmarked} rail turns into a refused ENTRY
+   * (never a refused exit).
+   */
+  private void warmEquityMarks(
+      SwingDoctrine doctrine, java.util.Set<String> heldSymbols, LocalDate requiredBarDate) {
+    if (emissionGuard.isEmpty() || heldSymbols.isEmpty()) {
+      return;
+    }
+    for (String symbol : heldSymbols) {
+      try {
+        List<EngineCandle> series = fetchSeries(doctrine, symbol, requiredBarDate);
+        if (!series.isEmpty()) {
+          cacheEquityMark(symbol, series.get(series.size() - 1));
+        }
+      } catch (RuntimeException e) {
+        log.warn(
+            "{} swing: equity-mark warm failed for {} (accounting only, exit unaffected): {}",
+            doctrine.batchName(), symbol, e.getMessage());
+      }
+    }
+  }
+
+  /**
    * Publishes a held cash equity's latest daily close through the {@code EmissionGuard} port so
    * {@code PaperAccountService} can mark the position to market. Pure accounting, exactly like
    * {@link #cacheGoverningStop}: nothing here closes a position, changes an exit decision, or writes
@@ -959,7 +1000,14 @@ public class SwingBatchEngine {
     try {
       emissionGuard
           .get()
-          .cacheEquityMark(EX, tradingsymbol, bar.close(), bar.bucketStart().toLocalDate());
+          .cacheEquityMark(
+              EX,
+              tradingsymbol,
+              bar.close(),
+              // IST, never the raw offset: daily buckets arrive as 18:30+00, so a bare toLocalDate()
+              // yields the PREVIOUS calendar day and the mark would claim a session it is not from.
+              // Same conversion every other bar->session site in this class uses (e.g. :1054).
+              bar.bucketStart().withOffsetSameInstant(IST).toLocalDate());
     } catch (RuntimeException e) {
       log.warn(
           "swing: equity-mark cache failed for {} (accounting only, exit unaffected): {}",
@@ -1179,14 +1227,21 @@ public class SwingBatchEngine {
   private List<EngineCandle> series(
       SwingDoctrine doctrine, String symbol, Map<String, List<EngineCandle>> cache,
       LocalDate requiredBarDate) {
-    return cache.computeIfAbsent(
-        symbol,
-        s -> {
-          OffsetDateTime now = OffsetDateTime.now(clock).withOffsetSameInstant(IST);
-          return truncateToSession(
-              candles.fetch(EX, s, IV, now.minusDays(doctrine.warmupDays()), now), s,
-              requiredBarDate);
-        });
+    return cache.computeIfAbsent(symbol, s -> fetchSeries(doctrine, s, requiredBarDate));
+  }
+
+  /**
+   * One uncached daily-series fetch, session-truncated like every other read in this class. Extracted
+   * so {@link #warmEquityMarks} can fetch WITHOUT populating {@code seriesCache} — sharing that cache
+   * with the exit pass would move which instant the still-forming daily bar is sampled at, and exits
+   * must stay byte-identical.
+   */
+  private List<EngineCandle> fetchSeries(
+      SwingDoctrine doctrine, String symbol, LocalDate requiredBarDate) {
+    OffsetDateTime now = OffsetDateTime.now(clock).withOffsetSameInstant(IST);
+    return truncateToSession(
+        candles.fetch(EX, symbol, IV, now.minusDays(doctrine.warmupDays()), now), symbol,
+        requiredBarDate);
   }
 
   private List<SwingStrategy> loadPublishedSwingStrategies(SwingDoctrine doctrine) {

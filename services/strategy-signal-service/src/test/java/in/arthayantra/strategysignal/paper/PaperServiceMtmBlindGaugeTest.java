@@ -16,12 +16,16 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
- * M4 (#128 batch scoping): "swing book MTM blind — non-ticking equities mark at cost." Confirmed
- * still true against {@code PaperService.positionDetail}/{@code toPositionDto}: an OPEN position
- * with no live tick (structurally every swing/funnel equity — the live feed is index/options only)
- * leaves {@code mark}/{@code unrealized} {@code null} for its ENTIRE holding period, with nothing
- * anywhere surfacing that condition. {@code mark}/{@code unrealized} stay exactly {@code null} as
- * before (asserted below) — this is CHARACTERIZATION + VISIBILITY, not a fix.
+ * M4 (#128 batch scoping): "swing book MTM blind — non-ticking equities mark at cost."
+ *
+ * <p><b>Scope narrowed 2026-08-13.</b> This originally characterized a permanent condition: a
+ * no-tick equity left {@code mark}/{@code unrealized} {@code null} for its ENTIRE holding period.
+ * That is no longer true in general — {@link EquityMarkCache} supplies a daily close for cash
+ * equities, so a held swing position is normally MARKED and its unrealized is real. What these tests
+ * now characterize is the residual EMPTY-CACHE case: no tick AND no captured close (a fresh boot
+ * before the first swing exit pass, or a symbol the batch never reached). Every harness below wires
+ * an empty cache deliberately, so the assertions still describe genuinely unmarkable positions —
+ * which is exactly what the gauge counts.
  *
  * <p><b>Design history (two review rounds, both against the SAME metric):</b>
  * <ul>
@@ -108,7 +112,7 @@ class PaperServiceMtmBlindGaugeTest {
     PaperAccountService accountService =
         new PaperAccountService(
             accounts, positions, lastTick,
-            new EquityMarkCache(java.time.Clock.systemUTC(), 96), instruments,
+            new EquityMarkCache(java.time.Clock.systemUTC(), 5), instruments,
             mock(MarginServiceClient.class), java.time.Clock.systemUTC(),
             new BigDecimal("0.15"), new BigDecimal("0.12"));
 

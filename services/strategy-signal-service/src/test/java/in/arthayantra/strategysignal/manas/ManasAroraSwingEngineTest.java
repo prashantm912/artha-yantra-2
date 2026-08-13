@@ -230,11 +230,68 @@ class ManasAroraSwingEngineTest {
     SwingBatchEngine.SwingRun run = h.engine(Optional.of(guard)).runDaily(h.doctrine(false));
 
     ArgumentCaptor<BigDecimal> close = ArgumentCaptor.forClass(BigDecimal.class);
-    verify(guard).cacheEquityMark(eq("NSE"), eq("TESTCO"), close.capture(), any());
+    // Twice per run by design: once by the pre-entry warm, once by the exit pass.
+    verify(guard, org.mockito.Mockito.atLeastOnce())
+        .cacheEquityMark(eq("NSE"), eq("TESTCO"), close.capture(), any());
     assertThat(close.getValue())
         .as("the mark is the LAST bar's close — the same bar the exit rules were evaluated against")
         .isEqualByComparingTo(h.series.get(h.series.size() - 1).close());
     assertThat(run.exitSkipped()).as("marking is pure accounting — no position goes unevaluated").isZero();
+  }
+
+  @Test
+  void theCapturedMarkSessionIsTheISTDateNotTheRawOffsetDate() throws IOException {
+    // Daily buckets reach this code as 18:30+00 (measured: marketdata.candles stores session
+    // 2026-08-12 as `2026-08-11 18:30:00+00`), so a bare bucketStart().toLocalDate() yields the
+    // PREVIOUS calendar day and the mark claims a session it is not from. Once freshness is judged on
+    // the session, that off-by-one is a real one-day error in the staleness bound, not cosmetic.
+    // NOTE: the shared fixture builds bars at IST offset, where both readings agree — so this test
+    // re-expresses the SAME instants at UTC offset, which is the only shape that discriminates.
+    ExitHarness h = new ExitHarness();
+    List<EngineCandle> utcSeries =
+        h.series.stream()
+            .map(
+                b ->
+                    new EngineCandle(
+                        b.bucketStart().withOffsetSameInstant(java.time.ZoneOffset.UTC),
+                        b.open(), b.high(), b.low(), b.close(), b.volume(), null))
+            .toList();
+    when(h.candles.fetch(any(), any(), any(), any(), any())).thenReturn(utcSeries);
+    EmissionGuard guard = mock(EmissionGuard.class);
+
+    h.engine(Optional.of(guard)).runDaily(h.doctrine(false));
+
+    EngineCandle last = utcSeries.get(utcSeries.size() - 1);
+    ArgumentCaptor<java.time.LocalDate> session = ArgumentCaptor.forClass(java.time.LocalDate.class);
+    verify(guard, org.mockito.Mockito.atLeastOnce())
+        .cacheEquityMark(eq("NSE"), eq("TESTCO"), any(), session.capture());
+    assertThat(session.getValue())
+        .as(
+            "the IST session date (%s), not the raw-offset date (%s) the UTC-stamped bucket reads as",
+            last.bucketStart().withOffsetSameInstant(IST).toLocalDate(),
+            last.bucketStart().toLocalDate())
+        .isEqualTo(last.bucketStart().withOffsetSameInstant(IST).toLocalDate());
+  }
+
+  @Test
+  void equityMarksAreHydratedBeforeTheEntryPassConsultsTheGovernor() throws IOException {
+    // Cross-vendor review Critical 2. The exit pass captures marks, but it runs AFTER entries — so on
+    // a fresh boot the whole entry pass would read an equity that values every held position at cost,
+    // hiding existing losses from the sizing and admission rails. Hydrating first is what makes
+    // "fully marked" the normal state, and therefore what makes the EQUITY_UNMARKED rail safe to arm
+    // rather than an every-restart outage.
+    ExitHarness h = new ExitHarness();
+    when(h.candles.fetch(any(), any(), any(), any(), any())).thenReturn(h.series);
+    EmissionGuard guard = mock(EmissionGuard.class);
+    when(guard.entryAllowed(any())).thenReturn(true);
+
+    h.engine(Optional.of(guard)).runDaily(h.doctrine(false));
+
+    org.mockito.InOrder order = org.mockito.Mockito.inOrder(guard);
+    order.verify(guard).cacheEquityMark(eq("NSE"), eq("TESTCO"), any(), any());
+    order
+        .verify(guard, org.mockito.Mockito.atLeastOnce())
+        .entryAllowed(eq(Books.MANAS_ARORA));
   }
 
   @Test
@@ -251,7 +308,8 @@ class ManasAroraSwingEngineTest {
     SwingBatchEngine.SwingRun run = h.engine(Optional.of(guard)).runDaily(h.doctrine(false));
 
     assertThat(run.exits()).as("this run really does exit the position").isEqualTo(1);
-    verify(guard).cacheEquityMark(eq("NSE"), eq("TESTCO"), any(), any());
+    verify(guard, org.mockito.Mockito.atLeastOnce())
+        .cacheEquityMark(eq("NSE"), eq("TESTCO"), any(), any());
   }
 
   @Test

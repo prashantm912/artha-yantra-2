@@ -139,7 +139,7 @@ class PaperEmissionGuardTest {
             mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
             mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class),
             new ManasGoverningStopCache(),
-            new EquityMarkCache(java.time.Clock.systemUTC(), 96));
+            new EquityMarkCache(java.time.Clock.systemUTC(), 5), "");
     when(instruments.meta(any(), any()))
         .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
     when(account.realisedProfit("scalper")).thenReturn(bd("150000"));
@@ -172,7 +172,7 @@ class PaperEmissionGuardTest {
             mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
             mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class),
             new ManasGoverningStopCache(),
-            new EquityMarkCache(java.time.Clock.systemUTC(), 96));
+            new EquityMarkCache(java.time.Clock.systemUTC(), 5), "");
     when(instruments.meta(any(), any()))
         .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
     // ₹150k profit -> ₹15k budget; premium 20 × lot 75 = ₹1,500/lot -> 10 affordable lots.
@@ -202,7 +202,7 @@ class PaperEmissionGuardTest {
             mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
             mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class),
             new ManasGoverningStopCache(),
-            new EquityMarkCache(java.time.Clock.systemUTC(), 96));
+            new EquityMarkCache(java.time.Clock.systemUTC(), 5), "");
     when(instruments.meta(any(), any()))
         .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
 
@@ -230,7 +230,7 @@ class PaperEmissionGuardTest {
             mock(RiskService.class), mock(PaperAccountService.class), instruments,
             mock(ScalperAccountModel.class), mock(PaperPositionRepository.class), rejections,
             new ManasGoverningStopCache(),
-            new EquityMarkCache(java.time.Clock.systemUTC(), 96));
+            new EquityMarkCache(java.time.Clock.systemUTC(), 5), "");
     StrategyDefinition.SizingSpec sizing =
         new StrategyDefinition.SizingSpec("premium_budget", Map.of("budget_inr", bd("15000")));
 
@@ -253,5 +253,68 @@ class PaperEmissionGuardTest {
         .contains("lot=20")
         .contains("budget_inr=15000")
         .contains("computed_lots=0");
+  }
+
+  // ---- EQUITY_UNMARKED rail (cross-vendor review Critical 2) ------------------------------------
+
+  private static PaperEmissionGuard guardWith(
+      RiskService risk, PaperAccountService account, String enforcedBooks) {
+    return new PaperEmissionGuard(
+        risk, account, mock(InstrumentMetaClient.class), mock(ScalperAccountModel.class),
+        mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class),
+        new ManasGoverningStopCache(), new EquityMarkCache(java.time.Clock.systemUTC(), 5),
+        enforcedBooks);
+  }
+
+  /**
+   * Equity is the denominator of every rail RiskService evaluates, and an unmarked position is valued
+   * at its own entry cost — which erases its unrealized LOSS and inflates equity, loosening the very
+   * gates meant to bound it. So a partially-marked book refuses automated entry rather than sizing
+   * against a number it cannot compute.
+   */
+  @Test
+  void anUnmarkedPositionOnAnEnforcedBookVetoesAutomatedEntry() {
+    RiskService risk = mock(RiskService.class);
+    PaperAccountService account = mock(PaperAccountService.class);
+    when(risk.entryVeto(any())).thenReturn(java.util.Optional.empty());
+    when(account.unmarkedOpenCount("manas-arora")).thenReturn(2);
+
+    PaperEmissionGuard guard = guardWith(risk, account, "minervini,manas-arora");
+
+    assertThat(guard.entryVeto("manas-arora")).contains(RiskService.EQUITY_UNMARKED);
+    assertThat(guard.entryAllowed("manas-arora"))
+        .as("entryAllowed must stay the isEmpty() view of entryVeto (PF-03 parity)")
+        .isFalse();
+  }
+
+  @Test
+  void aFullyMarkedEnforcedBookIsNotVetoedAndStillDefersToTheRiskGovernor() {
+    RiskService risk = mock(RiskService.class);
+    PaperAccountService account = mock(PaperAccountService.class);
+    when(account.unmarkedOpenCount("manas-arora")).thenReturn(0);
+    when(risk.entryVeto("manas-arora")).thenReturn(java.util.Optional.of(RiskService.MAX_OPEN));
+
+    PaperEmissionGuard guard = guardWith(risk, account, "minervini,manas-arora");
+
+    assertThat(guard.entryVeto("manas-arora"))
+        .as("the real governor rail still surfaces — this rail does not mask the others")
+        .contains(RiskService.MAX_OPEN);
+  }
+
+  /**
+   * The scoping that stops a safety rail becoming a permanent outage: a book nobody warms (the
+   * scalper book, the `manual` book) must never be vetoed for want of a mark it will never receive.
+   */
+  @Test
+  void anUnmarkedPositionOnAnUnenforcedBookIsNotVetoed() {
+    RiskService risk = mock(RiskService.class);
+    PaperAccountService account = mock(PaperAccountService.class);
+    when(risk.entryVeto(any())).thenReturn(java.util.Optional.empty());
+    when(account.unmarkedOpenCount(any())).thenReturn(5);
+
+    PaperEmissionGuard guard = guardWith(risk, account, "minervini,manas-arora");
+
+    assertThat(guard.entryVeto("scalper")).isEmpty();
+    assertThat(guard.entryVeto("manual")).isEmpty();
   }
 }

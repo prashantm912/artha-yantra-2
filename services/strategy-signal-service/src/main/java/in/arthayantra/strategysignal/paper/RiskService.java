@@ -32,6 +32,20 @@ public class RiskService {
   public static final String DAILY_LOSS = "daily_loss_limit";
   public static final String DAILY_PROFIT_TARGET = "daily_profit_target";
   public static final String MAX_DEPLOYMENT_PCT = "max_deployment_pct";
+  /**
+   * Governor rail (2026-08-13): the book holds at least one open position with NO mark — neither a
+   * live tick nor a captured daily close — so its equity, and every percentage-of-equity limit below,
+   * cannot be computed correctly. NOT a {@code risk_settings} row: it is a data-completeness state,
+   * not an owner-editable limit, so it exists only as a veto label (like {@link #PYRAMID_RISK_CAP}).
+   *
+   * <p>Enforced by {@link PaperEmissionGuard#entryVeto}, NOT here, and that placement is deliberate:
+   * this rail must bind the ENGINE's automated admission (which sizes itself off equity) while
+   * leaving a MANUAL order alone. {@code PaperService}'s manual path calls {@link #entryVeto}
+   * directly and carries an owner-supplied quantity, so a data-completeness veto there would block
+   * the owner from acting during exactly the degraded state they most need to act in — without
+   * preventing any automated mis-sizing, because none is happening on that path.
+   */
+  public static final String EQUITY_UNMARKED = "equity_unmarked";
   /** F9 portfolio heat cap: max total SPAN margin-at-risk as % of book equity (options books). */
   public static final String HEAT_CAP_PCT = "heat_cap_pct";
   /** When ON, an emitted ENTRY auto-opens a paper position at the suggested qty (no manual take). */
@@ -68,6 +82,7 @@ public class RiskService {
   private final PaperMarginClient marginClient;
   private final NotifierClient notifier;
   private final Clock clock;
+
   private final ManasGoverningStopCache governingStopCache;
   private final PyramidRiskCapAuditor pyramidRiskCapAuditor;
 

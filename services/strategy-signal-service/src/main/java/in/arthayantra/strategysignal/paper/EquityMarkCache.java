@@ -2,9 +2,10 @@ package in.arthayantra.strategysignal.paper;
 
 import java.math.BigDecimal;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,25 +38,28 @@ import org.springframework.stereotype.Component;
  * this change is required not to touch. Capturing the close the exit pass is already holding costs
  * one map write and zero round-trips.
  *
- * <p><b>Freshness.</b> Entries carry the session they belong to and the wall-clock instant they were
- * captured; {@link #price} treats anything older than {@code artha.paper.equity-mark.max-age-hours}
- * (default 96h — a long weekend plus a holiday) as ABSENT rather than serving a stale price into a
- * money figure. A mark is therefore at most one batch old: the exit pass that writes it runs after
- * the entry pass in the same run, so book equity during an entry pass reflects the PREVIOUS session's
- * close. That one-session lag is deliberate and is the whole reason this is not written earlier in
- * the run — moving the fetch ahead of the exit pass would re-sample the in-progress daily bar at a
- * different instant and could change an exit decision. A one-session-old close is wrong by one
- * session's move; the status quo it replaces is wrong by the entire holding period (up to +59% on a
- * 37-day hold, measured).
+ * <p><b>Freshness.</b> Entries carry the session they belong to and the instant they were captured;
+ * {@link #price} judges age on the SESSION (default 5 calendar days,
+ * {@code artha.paper.equity-mark.max-session-age-days}) and treats anything older as ABSENT rather
+ * than serving a stale price into a money figure. Capture time is kept for diagnostics only — see
+ * {@link #price} for why it is the wrong clock to gate on.
  *
- * <p><b>A miss is NOT fatal and NOT silent.</b> Callers fall back to {@code avgEntryPrice} exactly as
- * before — no NULL propagation into equity, no refused batch, no changed exit — but the position is
- * counted as unmarked and surfaced: {@code AccountDto.unmarkedPositions}, the
- * {@code ay_paper_mtm_blind_positions} gauge, and a WARN. Failing the ENTRY gate CLOSED on a miss was
- * considered and rejected: this cache is cold on every boot by construction, entries run before exits
- * within a run, and a fail-closed gate keyed on it would refuse EVERY manas entry on any restart day
- * — strictly worse than today and the exact opposite of what this change is for. See the PR body's
- * OPEN DOUBTS for the owner call.
+ * <p><b>Hydration and the entry pass.</b> {@code SwingBatchEngine} warms every held symbol's mark at
+ * the START of a run, BEFORE the entry pass, then the exit pass refreshes it from the bar it already
+ * holds. The warm exists because entries run before exits: without it the whole entry pass would read
+ * an equity that values every held position at cost, hiding existing losses from the sizing and
+ * admission rails on every restart. The warm deliberately does not share the exit pass's series cache
+ * — re-sampling a still-forming daily bar at a different instant could change an exit, and exits must
+ * stay byte-identical.
+ *
+ * <p><b>A miss is visible AND blocking, on the books that are warmed.</b> Callers still fall back to
+ * {@code avgEntryPrice} for DISPLAY and for the equity arithmetic itself (no NULL propagation into
+ * the account API, no refused batch, no changed exit), and the condition is surfaced —
+ * {@code AccountDto.unmarkedPositions}, the {@code ay_paper_mtm_blind_positions} gauge, a WARN. But
+ * because that fallback erases a position's unrealized LOSS and therefore INFLATES equity,
+ * {@link PaperEmissionGuard#entryVeto} refuses AUTOMATED entry on a partially-marked book
+ * ({@code RiskService#EQUITY_UNMARKED}). Scoped to the warmed books only: a book nobody warms would
+ * otherwise refuse entries forever. Exits and manual orders are never blocked.
  */
 @Component
 public class EquityMarkCache {
@@ -63,15 +67,18 @@ public class EquityMarkCache {
   /** A captured daily-bar close: the price, the session it closed, and when it was captured. */
   public record Mark(BigDecimal price, LocalDate session, Instant capturedAt) {}
 
+  private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+
   private final ConcurrentHashMap<String, Mark> marks = new ConcurrentHashMap<>();
   private final Clock clock;
-  private final Duration maxAge;
+  private final int maxSessionAgeDays;
 
   /** Wires the (test-overridable) clock and the staleness bound. */
   public EquityMarkCache(
-      Clock clock, @Value("${artha.paper.equity-mark.max-age-hours:96}") long maxAgeHours) {
+      Clock clock,
+      @Value("${artha.paper.equity-mark.max-session-age-days:5}") int maxSessionAgeDays) {
     this.clock = clock;
-    this.maxAge = Duration.ofHours(maxAgeHours);
+    this.maxSessionAgeDays = maxSessionAgeDays;
   }
 
   /** The stable {@code EXCHANGE:TRADINGSYMBOL} key — the same grammar {@link LastTickReader} uses. */
@@ -80,28 +87,67 @@ public class EquityMarkCache {
   }
 
   /**
-   * Records a session's closing price for a symbol. LAST WRITE WINS — unlike
-   * {@link ManasGoverningStopCache#put} this is deliberately NOT a ratchet: a mark is a market fact
-   * that must be free to move DOWN, and a "never loosens" rule here would pin book equity to each
-   * position's high-water mark and systematically overstate it. A null or non-positive price is
-   * ignored (a zero close is not a real mark).
+   * Records a session's closing price for a symbol, keeping whichever entry belongs to the LATER
+   * SESSION (ties go to the newer write, so a same-session correction still lands).
+   *
+   * <p><b>Session-monotonic, but NOT a price ratchet</b> — two different axes, and only one of them
+   * may be pinned. Unlike {@link ManasGoverningStopCache#put} this must let the PRICE fall: a mark is
+   * a market fact, and a "never loosens" rule would pin book equity to each position's high-water
+   * close and systematically overstate it. What must not go backwards is the SESSION.
+   *
+   * <p>Why that matters here (cross-vendor review, 2026-08-13): the key is {@code EXCHANGE:SYMBOL},
+   * deliberately shared across books because a close is a property of the symbol — and three symbols
+   * (AVALON, PRECOT, KANORICHEM) are held by BOTH swing books today. Two doctrines write this cache in
+   * the same batch cycle, and a CATCH-UP run pins a past session ({@code requiredBarDate}) and
+   * legitimately evaluates that session's bar. Unconditional last-write-wins therefore let one book's
+   * historical replay clobber the other book's current mark — with a fresh capture instant on it. The
+   * read-side session bound alone does not close that: the old bar would simply be refused, silently
+   * dropping a mark that WAS available. Rejecting the stale write keeps the good one.
+   *
+   * <p>A null or non-positive price is ignored (a zero close is not a real mark); so is a null
+   * session, since freshness could not then be judged.
    */
   public void put(String exchange, String tradingsymbol, BigDecimal price, LocalDate session) {
-    if (price == null || price.signum() <= 0) {
+    if (price == null || price.signum() <= 0 || session == null) {
       return;
     }
-    marks.put(key(exchange, tradingsymbol), new Mark(price, session, clock.instant()));
+    marks.merge(
+        key(exchange, tradingsymbol),
+        new Mark(price, session, clock.instant()),
+        (existing, incoming) ->
+            incoming.session().isBefore(existing.session()) ? existing : incoming);
   }
 
-  /** The cached mark if one was captured recently enough, else empty (never a stale price). */
+  /**
+   * The cached mark if the SESSION it closed is recent enough, else empty (never a stale price).
+   *
+   * <p><b>Freshness is judged on the bar's own session, NOT on when we captured it</b> (cross-vendor
+   * review, 2026-08-13). Capture time is the wrong clock: it measures when this process last ran the
+   * exit pass, not how old the PRICE is, and three real paths refresh the timestamp on an old bar —
+   * a catch-up run pins a PAST session via {@code requiredBarDate} and legitimately evaluates that
+   * session's bar; {@code MarketDataCandlesClient} fail-softs a STALE endpoint response and logs
+   * "data used unchanged"; and a symbol that stops printing keeps re-serving its last bar. Under a
+   * capture-time bound each of those would look permanently fresh while the price aged without
+   * limit. Session age cannot be fooled that way, and it still catches a dead batch for free: no new
+   * captures means the stored session stops advancing.
+   *
+   * <p>CALENDAR days, deliberately, not trading sessions. {@code libs/market-calendar} could count
+   * sessions exactly, but it THROWS outside its bundled year range, and this method is reached four
+   * times inside {@code PaperService#openOrder}'s {@code @Transactional} fill — turning a bounded
+   * read into an exception on the money path to buy a day of precision is the wrong trade. The
+   * default (5) clears a Friday close read on the following Wednesday, i.e. a long weekend plus a
+   * holiday.
+   */
   public Optional<BigDecimal> price(String exchange, String tradingsymbol) {
     Mark mark = marks.get(key(exchange, tradingsymbol));
-    if (mark == null) {
+    if (mark == null || mark.session() == null) {
       return Optional.empty();
     }
-    return Duration.between(mark.capturedAt(), clock.instant()).compareTo(maxAge) > 0
-        ? Optional.empty()
-        : Optional.of(mark.price());
+    LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
+    long age = ChronoUnit.DAYS.between(mark.session(), today);
+    // A future-dated session (clock skew, a mis-stamped bar) is refused too: it is not evidence of
+    // freshness, it is evidence something is wrong, and `age` would go negative and pass silently.
+    return age < 0 || age > maxSessionAgeDays ? Optional.empty() : Optional.of(mark.price());
   }
 
   /** The raw entry (price + session + capture instant), ignoring staleness — for diagnostics. */

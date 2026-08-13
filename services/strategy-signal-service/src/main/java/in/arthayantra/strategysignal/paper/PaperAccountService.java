@@ -25,6 +25,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class PaperAccountService {
 
+  private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+
   /**
    * The /paper account header payload. The two per-class maps carry {@code BigDecimal} values, which
    * ride the wire as strings exactly like every other decimal here — {@code additionalPropertiesSchema}
@@ -141,9 +143,33 @@ public class PaperAccountService {
     return tick.isPresent() ? tick : equityMarks.price(exchange, tradingsymbol);
   }
 
-  /** {@link #markFor} for one open position row. */
+  /**
+   * {@link #markFor} for one open position row, additionally refusing a captured close from BEFORE
+   * the position existed (cross-vendor review, 2026-08-13).
+   *
+   * <p>A mark is only allowed to be a few sessions old, but "a few sessions" is longer than a
+   * position that opened this morning has existed. Valuing it against a close from before its own
+   * entry is not a stale price, it is an unrelated one — it would manufacture an unrealized P&amp;L out
+   * of the gap between the two, in whichever direction the market happened to move. A live tick has
+   * no such problem (it is by definition now), so this only constrains the captured-close path.
+   */
   private Optional<BigDecimal> mark(PositionRow pos) {
-    return markFor(pos.exchange(), pos.tradingsymbol());
+    Optional<BigDecimal> tick = lastTick.lastPrice(pos.exchange(), pos.tradingsymbol());
+    if (tick.isPresent()) {
+      return tick;
+    }
+    return equityMarks
+        .mark(pos.exchange(), pos.tradingsymbol())
+        .filter(m -> !openedAfter(pos, m.session()))
+        .flatMap(m -> equityMarks.price(pos.exchange(), pos.tradingsymbol()));
+  }
+
+  /** True when {@code session} closed BEFORE this position's own IST opening session. */
+  private static boolean openedAfter(PositionRow pos, LocalDate session) {
+    if (pos.openedAt() == null || session == null) {
+      return false;
+    }
+    return session.isBefore(LocalDate.ofInstant(pos.openedAt().toInstant(), IST));
   }
 
   /**

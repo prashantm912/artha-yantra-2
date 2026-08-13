@@ -58,7 +58,7 @@ class PaperAccountServiceEquityMarkTest {
     PaperAccountRepository accounts = mock(PaperAccountRepository.class);
     PaperPositionRepository positions = mock(PaperPositionRepository.class);
     EquityMarkCache marks =
-        new EquityMarkCache(Clock.fixed(Instant.parse("2026-08-13T03:05:00Z"), ZoneOffset.UTC), 96);
+        new EquityMarkCache(Clock.fixed(Instant.parse("2026-08-13T03:05:00Z"), ZoneOffset.UTC), 5);
 
     when(accounts.get(any()))
         .thenReturn(new PaperAccountRepository.Account(STARTING_CAPITAL, STARTING_CAPITAL, null));
@@ -195,11 +195,10 @@ class PaperAccountServiceEquityMarkTest {
     when(positions.realizedTotal(any())).thenReturn(REALIZED);
     when(positions.listOpen(any(String.class))).thenReturn(List.of(row(1, "SANSERA", 6, "3336.8700")));
 
-    // The clock reports T0 to put() and T0+97h to every later read, ageing the entry past the bound.
-    MutableClock clock = new MutableClock(Instant.parse("2026-08-13T03:05:00Z"));
-    EquityMarkCache marks = new EquityMarkCache(clock, 96);
-    marks.put("NSE", "SANSERA", new BigDecimal("3925.0000"), SESSION);
-    clock.advance(java.time.Duration.ofHours(97));
+    Clock clock = Clock.fixed(Instant.parse("2026-08-13T03:05:00Z"), ZoneOffset.UTC);
+    EquityMarkCache marks = new EquityMarkCache(clock, 5);
+    // Captured RIGHT NOW, but off a month-old bar — the shape a pinned catch-up run produces.
+    marks.put("NSE", "SANSERA", new BigDecimal("3925.0000"), LocalDate.of(2026, 7, 10));
 
     PaperAccountService service =
         new PaperAccountService(
@@ -212,31 +211,38 @@ class PaperAccountServiceEquityMarkTest {
     assertThat(service.unmarkedOpenCount(BOOK)).isEqualTo(1);
   }
 
-  /** A clock the test can wind forward. */
-  private static final class MutableClock extends Clock {
-    private Instant now;
+  /**
+   * A close from BEFORE the position existed is not a stale price, it is an unrelated one — valuing
+   * against it manufactures P&L out of the gap. The session bound alone permits this: a mark may be
+   * several sessions old, which is older than a position opened this morning (cross-vendor review).
+   */
+  @Test
+  void aMarkFromBeforeThePositionOpenedIsNotUsed() {
+    PaperAccountRepository accounts = mock(PaperAccountRepository.class);
+    PaperPositionRepository positions = mock(PaperPositionRepository.class);
+    when(accounts.get(any()))
+        .thenReturn(new PaperAccountRepository.Account(STARTING_CAPITAL, STARTING_CAPITAL, null));
+    when(positions.realizedTotal(any())).thenReturn(REALIZED);
+    // Opened 2026-08-12 IST (2026-08-12T04:00Z = 09:30 IST).
+    PositionRow openedYesterday =
+        new PositionRow(
+            1, "NSE", "SANSERA", "BUY", 6, new BigDecimal("3336.8700"), BigDecimal.ZERO, "OPEN",
+            OffsetDateTime.parse("2026-08-12T04:00:00Z"), null, null, new BigDecimal("1.00"), null,
+            BOOK);
+    when(positions.listOpen(any(String.class))).thenReturn(List.of(openedYesterday));
 
-    MutableClock(Instant now) {
-      this.now = now;
-    }
+    Clock clock = Clock.fixed(Instant.parse("2026-08-13T03:05:00Z"), ZoneOffset.UTC);
+    EquityMarkCache marks = new EquityMarkCache(clock, 5);
+    marks.put("NSE", "SANSERA", new BigDecimal("3100.0000"), LocalDate.of(2026, 8, 10)); // pre-entry
 
-    void advance(java.time.Duration by) {
-      now = now.plus(by);
-    }
+    PaperAccountService service =
+        new PaperAccountService(
+            accounts, positions, noTicks(), marks, mock(InstrumentMetaClient.class),
+            mock(MarginServiceClient.class), clock, new BigDecimal("0.15"), new BigDecimal("0.12"));
 
-    @Override
-    public Instant instant() {
-      return now;
-    }
-
-    @Override
-    public ZoneOffset getZone() {
-      return ZoneOffset.UTC;
-    }
-
-    @Override
-    public Clock withZone(java.time.ZoneId zone) {
-      return this;
-    }
+    assertThat(service.unrealizedTotal(BOOK))
+        .as("a pre-entry close must not become this position's mark")
+        .isEqualByComparingTo("0.00");
+    assertThat(service.unmarkedOpenCount(BOOK)).isEqualTo(1);
   }
 }

@@ -137,8 +137,13 @@ public class MonitorSchedulingConfig {
    * jobs silently not running at all. A noisy read-only report is the lesser harm, and the overlap
    * needs a catch-up lasting the full 15 minutes between 08:35 and 08:50 — measured at 81 s for both
    * families on 2026-08-12 — which is the hang case that the shared lane made worse rather than
-   * better. A watchdog keyed to entry completion is still worth building; it is a change of its own,
-   * not a rider, and this arrangement does not depend on it.
+   * better.
+   *
+   * <p><b>The watchdog that paragraph called for is now built</b>, and it does not change any of the
+   * above: {@code PaperReconciliationScheduler.awaitSwingBatchIdle} WAITS on {@code SwingRunMutex}
+   * (an observation, never an acquisition — so still no queueing on this thread) with a hard
+   * pre-open deadline and a paged decline on breach. The reconciler gets the ordering guarantee; a
+   * hung catch-up still cannot silently take it down with it.
    *
    * <p>The per-family {@code SwingRunMutex} remains the run-serialization guard. This pool only removes
    * scheduler starvation; it does not replace the mutex or provide durable idempotency.
@@ -167,6 +172,12 @@ public class MonitorSchedulingConfig {
    * "just after" the reconciler, and one thread makes that true rather than merely scheduled. The
    * blast radius of a hang is these two only, which is strictly narrower than the default pool they
    * came from, where a hang took the bracket sweep with it.
+   *
+   * <p>⚠️ That serialization is why the reconciler's swing-batch wait is DEADLINED rather than
+   * open-ended: while it waits it occupies this thread, so on a catch-up overrun past-expiry
+   * recovery starts late — bounded at 09:00 IST by the default 15-minute reserve, still pre-open,
+   * and only on a day the catch-up is already abnormal. An unbounded wait here would have parked
+   * past-expiry recovery indefinitely, which is the failure this pool exists to prevent.
    */
   @Bean
   public ThreadPoolTaskScheduler preOpenTaskScheduler() {

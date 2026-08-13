@@ -1887,6 +1887,46 @@ shortened, this becomes reachable and should be built.** The structural guard th
 is narrower: the exception handler sits below the successful claim, so a pre-claim throw can no
 longer release another invocation's row.
 
+**OWNER DECISIONS 2026-08-12 (evening) — three, all applied the same session.**
+
+1. **The machine is WEEKDAY-ONLY.** This had been an open question blocking two jobs, and the answer
+   makes both of them *jobs that had never run at all*: `CrossSourceOiCanary` (Sunday 07:00 — outside
+   the window on BOTH counts, weekend AND before the 08:00 start) and the `InsightSweeper` quality
+   report (Saturday 08:00). Moved into weekday evening slots in #1358. ⚠️ The canary went to **Friday**
+   18:16, not Monday: it selects `expiry < today`, and a holiday PREPONES weekly expiries EARLIER, so
+   Monday and Wednesday can host one (the bundled calendar carries 2026-10-20 Tuesday preponed to
+   Monday 2026-10-19). A Monday slot would have skipped that expiry's check for a week. Cross-vendor
+   review caught it. Residual, unfixed: `expiry < today` still excludes a same-day expiry whatever day
+   it runs, so a preponed FRIDAY expiry would wait a week — closing that needs a selection change
+   gated on both source datasets being complete, not a cron move.
+
+2. **`budget_inr` → ₹25,000, not the ₹20,000 the PR proposed** (#1075, retargeted). The concurrency
+   cost is ALREADY fully paid at ₹20,000: allocation is ₹30,000 per sub-account, so ₹20,000 and
+   ₹25,000 both hold exactly ONE position — the cliff is at ₹15,000, which holds two. So ₹25,000 buys
+   25% more premium headroom for zero additional concurrency cost. ⚠️ **And the Architect's own hold
+   review understated the risk**: it said the 15 measured refusals were all comfortably below ₹20,000
+   and "none is a near-miss", but 2026-08-12 saw NIFTY ATM PE at **289.55** against a ₹20,000 ceiling
+   of **₹307.69** — 6% of headroom. Cost, stated: a bigger budget can buy 2 lots where ₹15,000 bought
+   1, on legs under ~₹192 premium; `max_lots: 5` still bounds it. This is a patch fitted to today's
+   premium regime, not a fix — the underlying asymmetry is LOT SIZE (NIFTY 65 vs SENSEX 20).
+
+3. **Build queue, all four approved:** H12 reaper (**DONE — PR #1361**), bhavcopy close-canary
+   persisted-watermark recovery, the pre-open entry watchdog, and the T10 stale-position
+   investigation. The middle two are the features WITHDRAWN from #1358 after they generated a fresh
+   defect in every review round; they are scoped as their own work precisely because doing them as
+   riders is what kept failing.
+
+**THE 2026-08-12 EVENING SESSION EVIDENCE, which decided (2) independently.** The scheduled
+post-market analysis measured, without reference to the PR: **all three NIFTY entry signals
+zero-sized** (premium 250.95–289.55, lot 65, budget 15000, `computedLots=0`). ₹15,000/65 = a max
+fundable premium of **₹230.77** and ATM NIFTY PE never traded below 250 all morning, so the entire
+funded day was SENSEX. The counterfactual is measured, not argued: the 09:48 NIFTY leg's shadow twins
+closed **TAKE_PROFIT +89.85 pts each**. On the biggest fire day the book has had — 24 fired evals
+against a prior max of 3 — the BUDGET, not the entry gate, kept NIFTY out. Also first live
+`daily_profit_target` trip (11:01 IST, 17 fires suppressed, counterfactual neutral-to-protective) and
+a SIXTH consecutive measured loss from loosening the entry gate (challengers 0/5 each,
+−₹11,446.78 each) — the standing prior holds.
+
 **RESOLVED 2026-08-12 · THE 09:15 DEADLINE-ATOMICITY CRITICAL IS REAL IN CODE BUT NOT REACHABLE AT
 08:35 — AND THE POLL IT WAS BLOCKING IS ALSO SAFE.** It had sat "unverified, live, money path" and was
 the stated blocker on restoring the morning poll. Resolved by reading the gate and MEASURING the run,

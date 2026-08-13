@@ -1982,6 +1982,41 @@ every pre-existing cron passthrough carried a value byte-identical to its code d
 placeholder name was indistinguishable from a working one. Ten values now differ from their defaults,
 which proves the wiring end to end.
 
+**THE CHAIN RAN — 2026-08-13, 10 jobs, all SUCCESS, first time inside the window.** Measured live:
+`OPTIONS_SNAPSHOT_PRUNE` 18:04:59 (0) · **`BHAVCOPY` 18:44:59 (8279)** · `MANAS_SCREEN` **18:45:47**
+(2275) · `NSE_FII_DII` 18:45:59 (60) · `NSE_PARTICIPANT_OI` 18:45:59 (5) · `NSE_FII_DERIVATIVE`
+18:46:00 (120) · `MINERVINI_SCREEN` **18:46:18** (1793) · `MARKET_CONTEXT_DAY` 18:48:59 (1) ·
+`DATA_QUALITY` 18:49:59 (11) · `EQUITY_BREADTH` 18:50:59 (2). Every cron within a second of its time.
+
+**N70 CONFIRMED LIVE:** manas ran at **18:45:47 — 48 s after bhavcopy STARTED, not at its 18:48
+cron** — and minervini chained 31 s later. The `BhavcopyBackfillCompleted` event is the mechanism;
+the screen crons are the redundant safety net, exactly as measured this morning.
+
+**#1366 PROVEN LIVE.** `/api/v1/market/health/ingest` now returns for 2026-08-12:
+`MINERVINI_SCREEN GREEN missing=0 — screen stored 1785 rows for this trading day, computed
+2026-08-13 08:04:50 IST — LATE, T+1 catch-up` (manas identically, 2270 rows). Was RED/`missingDays 1`
+this morning on the same data. Zero non-green sources board-wide. Late-but-done stays distinguishable
+from never-done, which was the point.
+
+**#1367 PROVEN LIVE**, first-ever scheduled execution: `bhavcopy-close canary YELLOW: 1 of 22 symbols
+diverge > 1.00% on 2026-08-13: PRECOT (bhav 771.4000 vs kite 748.0000, 3.13%) — and only 22 symbols
+were comparable (floor 100), so this rate is measured on a population too small to certify.` Before
+today it would have said GREEN. ⚠️ The 22 is PERTURBED: #1373's live probes wrote 8 NIFTY-200 KITE
+bars, taking today's count 15→23; unperturbed it would read ~14. Verdict unchanged (both ≪ 100).
+⚠️ Also note **PRECOT is an OPEN swing position in both books** — a 3.13% close divergence on a held
+name is worth its own look, not just a canary line.
+
+⚠️ **N73 · THE SWING DEAD-MAN'S SWITCH HAS NEVER WORKED, AND ONLY FIXING THE SCHEDULE REVEALED IT.**
+2026-08-13 18:54, first attempt in the weekday-only era: `swing batch heartbeat ping failed (external
+monitor may alert): java.net.ConnectException (message withheld — it can embed the secret ping URL)`.
+`ARTHA_HEARTBEAT_URL` is SET, so this is not a config gap — **the endpoint refused the connection.**
+At 20:15 the job never fired at all, so its silence was never evidence the switch worked; it was
+evidence the job wasn't running. **A dormant alarm and a working alarm are indistinguishable from the
+outside — the only way to tell them apart is to make the alarm actually fire.** Two owner actions:
+confirm the monitor URL is still live, and reconfigure its expected schedule to `54 18 * * 1-5`
+(moot until the ping connects). The error text is deliberately withheld because it can embed the
+secret URL — correct, and it is why this cannot be diagnosed from the log alone.
+
 ⚠️ **TOMORROW MORNING (2026-08-14) — THREE FIRST-EVER LIVE TESTS. Verify at ~09:00 IST, after the
 pre-open window closes and before the open. This list is written here because the machine is off
 overnight and the session that shipped these will not exist to remember them.**

@@ -1960,6 +1960,90 @@ argument about the current schedule, not containment. A headroom precondition at
 ("refuse to START unless the deadline is more than N minutes away") is the cheap real fix and is not
 built.
 
+**2026-08-13 · THE SWING BOOKS ARE LOCKED, AND IT IS NOT AN EXIT DEFECT.** Owner-triggered
+measurement; full findings in `docs/signal-analysis/2026-08-13-swing-exit-stickiness.md`. 18 open
+positions, 20 would-enter candidates on the 08:35 catch-up, **0 admitted**. Verdict: **HOLD is
+correct on all 18** — zero NULL stops, `exit_skipped = 0`, 16 of 18 profitable, **+₹27,214** marked,
+median ~12% above the effective exit; only minervini INOXINDIA is close, at 0.78%. Neither book
+declares a `take_profit` or `time_stop` in its PUBLISHED config, so nothing should have fired at 37
+days. Two framing corrections to my own question: the 6% open-risk cap is **manas-only** (minervini
+is blocked by a 12-slot cap, at 12/12), and `strategy.sell_decisions` is a **survivor log** written
+after the passes — all 498 rows ever written are HOLD, so a 100%-HOLD table carries no signal at all.
+
+Three structural findings, all on the RISK side:
+- **manas sits at 99.91% of cap — ₹7.55 of headroom** (₹8,569.23 vs ₹8,576.78), and it is arithmetic:
+  sizing is 1%/trade against a 6% cap, so **1% × 6 = 6% exactly and the 7th declared slot is
+  unreachable by construction.** ⚠️ Growing equity does NOT fix this — both terms are percentages of
+  equity, so the ratio is scale-invariant.
+- **`openRiskInr` measures `avgEntry − stop`**, so appreciation never releases budget. The one
+  release valve (`ManasGoverningStopCache`) was *provably* inert on 2026-08-13: entries run before
+  exits (`SwingBatchEngine.java:316` vs `:321`) and the container booted 08:03 before the 08:35 run.
+  The arithmetic confirms rather than assumes it — a warm cache would have dropped risk to 3.05% and
+  **admitted** the entry that was refused.
+- **The equity denominator cannot see the ₹27,214 of unrealized gain.** `unrealizedTotal` marks via
+  Redis `ticks:last`, verified independently: `HLEN` = 307, every entry an NFO/BFO option contract,
+  and `HEXISTS ticks:last NSE:<sym>` = 0 for every swing equity. The term silently evaluates to
+  **₹0.00**, so the cap binds tighter than designed. Another N44/#14.
+
+**Owner decision 2026-08-13: fix the blind denominator AND the unreachable 7th slot; leave
+`avgEntry − stop` alone for now** (that one is doctrine, not a bug). HOLD tier — built, reviewed, PR
+left OPEN.
+
+**N71 · A COVERAGE BOARD THAT BUCKETS BY WHEN A JOB RAN CANNOT SEE WORK DONE BY CATCH-UP — AND IT
+FAILS IN THE ALARMING DIRECTION.** 2026-08-13, owner-reported: `/api/v1/market/health/ingest` showed
+MINERVINI_SCREEN and MANAS_SCREEN **RED** for exactly one day, 2026-08-12, detail *"no ingest run
+recorded for the trading day"*. **No data was missing.** `screen_date = 2026-08-12` holds 2270 manas
+and 1785 minervini rows, matching the `rows_written` of runs that finished 08:04 IST the next
+morning. `IngestCoverageCanary.java:606` selects by `started_at`, so the catch-up's work stamped
+08-13, fell outside the 07-30→08-12 window, and left 08-12 looking empty. **The board asks "did a run
+START on this calendar day" when the meaningful question is "does output EXIST for this trade
+date"** — and those diverge precisely when catch-up saves you, i.e. every day under a 19:00 shutdown
+with a 19:30 chain head. 08-10 and 08-11 read GREEN only by luck: deploy-triggered boot catch-ups
+happened to land at 18:48 and 18:01, same calendar day. The precedent for the fix already exists in
+the same file — `BHAVCOPY_BOTH_EXCHANGES_ADVANCED` queries `nse_eod_bhavcopy` by `trade_date`
+(`:629`), and `CAPTURE` keys on `window_start` rather than `started_at`. Same family as the
+`series='EQ'` filter artifact: **it is the rare trap that fails LOUD, which makes it burn
+investigation time rather than hide a defect.**
+
+**N70 · THE SCREENS DO NOT RUN ON THEIR CRON, AND I ASSERTED A CRON TIME TWICE BEFORE CHECKING.**
+2026-08-13. `ManasScheduler` has THREE entry points — `@EventListener(ApplicationReadyEvent)` at
+`:54`, `@EventListener(BhavcopyBackfillCompleted.class)` at `:60`, and `@Scheduled` at `:66` — and
+the one that fires is the **event**. Every observed run is bhavcopy-chained, with Minervini starting
+the same second Manas finishes (08-07 19:31:11→19:31:41→19:32:21; 08-10 18:48:38→…; 08-11 18:00:47→…;
+08-13 08:04:06→…). The 19:50/19:55 crons have not fired since the shutdown policy began, because
+`ARTHA_BHAVCOPY_EOD_CRON=0 30 19` is itself past 19:00. **Consequence for #1358: the lever is the
+BHAVCOPY move to 18:45; the 18:47/18:48 screen cron moves are a redundant safety net, not the
+mechanism.** My own errors, both corrected: I first told the owner "19:31 cron" (that was an OBSERVED
+run time, not a schedule), then read the env `0 50 19` as authoritative without asking why observed
+runs disagreed with it. **A schedule and a fire time are different measurements; when they disagree,
+something else is driving the job — enumerate every trigger on the class before naming a cause.**
+
+**N69 · A GUARD AGAINST CROSS-TEST BLEED BOUNDED ON ONE SIDE IS HALF A GUARD.** 2026-08-13, CI red on
+#1361's market-data shard in a test that PR does not touch: `IndexConstituentsIntegrationTest`
+expected `[2026-06-10, 2026-06-11]` and got `[2026-03-02, 2026-06-10, 2026-06-11]`. The assertion
+**already knew** about shared-singleton-DB bleed and filtered for it — `!d.isAfter(2026-06-11)` — and
+its comment names the reasoning: *"another IT's context boot can accrue a TODAY-dated snapshot"*. The
+reasoning was right and stopped at one edge. A sibling with a PAST-dated `@Primary` Clock
+(`ContinuousFuturesBackfillIntegrationTest` pins 2026-03-02) walks straight underneath.
+**Contamination has no preferred direction: scope to a WINDOW, never a ceiling.** Fixed in #1364 by
+bounding both sides AND seeding the contaminant through the real accrual path, so the isolation is
+deterministic rather than dependent on surefire ordering — the red-proof then reproduces CI's message
+verbatim. Third instance of this family after #1357 and #405.
+
+**N68 · A GATE'S OPERAND CAN BE DESTROYED BY A CHANGE IN A DIFFERENT JOB, AND SEVERITY KEYED ON THE
+NUMERATOR WILL NEVER NOTICE.** 2026-08-13. `BhavcopyCloseCanary` compares NSE bhavcopy closes against
+Kite 1d candles. Its denominator collapsed **165 → 15** on 2026-08-11 (`computed`: 08-05=176,
+08-06=164, 08-07=165, 08-10=165, 08-11=15, 08-12=15) — landing exactly on #1333, which moved the
+swing batch from a ~20:00 full-universe evening run to a 16:00 exits-only settle. **The canary never
+had its own bar population**; it was reading a side effect of whatever the swing batch happened to
+fetch, a dependency `MinerviniSwingScheduler`'s javadoc documents outright. Against 3308 NSE EQ
+bhavcopy rows it now checks ~0.4% of the universe and reports **GREEN**, because status is driven
+only by `divergent` vs `redFloor` and never by `compared` being small. Pure N44/#14. ⚠️ **And note
+which direction I got wrong:** I had raised this as a false-ALARM risk on #1358. It is the opposite —
+a success-shaped nothing. **When you predict a gate will misfire, check which way: an operand that
+shrinks makes a numerator-keyed gate quieter, not louder.** Floor being built; the real fix is giving
+the comparison its own population.
+
 **N67 · A CRON MINUTE EXPRESSES ONLY WHEN A JOB STARTS — NOT WHAT WINDOW IT READS, WHAT IT WAITS
 FOR, OR WHICH THREAD IT BLOCKS.** 2026-08-12, #1358: moving three jobs across the 19:00 boundary
 produced three Criticals, and all three were the same mistake in different clothes. (1) The paper

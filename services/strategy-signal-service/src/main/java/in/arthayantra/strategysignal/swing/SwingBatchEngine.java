@@ -313,13 +313,22 @@ public class SwingBatchEngine {
             : List.of();
     java.util.Set<String> heldBefore =
         new java.util.HashSet<>(openLotsBySymbol(resolution).keySet());
-    // HYDRATE book equity BEFORE the entry pass (cross-vendor review Critical 2, 2026-08-13).
-    // The exit pass captures each held symbol's close, but it runs AFTER entries, so on a fresh boot
-    // the mark cache is empty for the whole entry pass — equity would silently value every held
-    // position at cost and the admission rails would size and admit against a denominator that
-    // cannot see existing losses. Warming here makes "equity is fully marked" the normal state, which
-    // is what lets RiskService refuse the abnormal one instead of failing open.
-    warmEquityMarks(doctrine, heldBefore, requiredBarDate);
+    // HYDRATE the two IN-MEMORY accounting caches BEFORE the entry pass. Both are written by the
+    // EXIT pass, which runs AFTER entries (:entryPass then :exitPass below), so both are empty for the
+    // whole entry pass on any run where this JVM has not yet completed one — i.e. every restart day.
+    //
+    // (a) EquityMarkCache — without it equity values every held position at its own entry cost
+    //     (cross-vendor review Critical 2, 2026-08-13).
+    // (b) ManasGoverningStopCache — the designed release valve for the aggregate open-risk cap, and
+    //     PROVABLY INERT until now for exactly this reason (owner decision D, 2026-08-13). openRiskInr
+    //     is avgEntryPrice − stop, so price appreciation never frees budget; only a trailed stop does.
+    //     Measured live 2026-08-13: cold, manas open risk read ₹8,569.23 = 5.99% of a 6% cap and
+    //     refused a 7th position with ₹7.55 of headroom. Warm, three positions whose trails have armed
+    //     above their entry prices contribute zero and it reads ₹4,355.97 = 2.87%.
+    //
+    // The pass ORDER is deliberately untouched — the exit pass is a swing position's only stop
+    // evaluator, and moving it is a money-path risk this warm exists to avoid.
+    warmHeldPositionState(doctrine, resolution, requiredBarDate);
     EntryResult entry =
         entriesEnabled
             ? entryPass(
@@ -950,35 +959,74 @@ public class SwingBatchEngine {
   }
 
   /**
-   * Pre-warms the equity marks for every symbol held at the START of the run, so book equity is
-   * fully marked before the entry pass reads it.
+   * Pre-warms the two accounting caches for every symbol held at the START of the run — the
+   * mark-to-market close ({@link EquityMarkCache}) and the trailed governing stop
+   * ({@code ManasGoverningStopCache}) — so the entry pass reads a fully-formed risk picture instead
+   * of the cold one a restart leaves behind.
+   *
+   * <p><b>Exit-neutral by construction, and that is load-bearing here</b> because this duplicates the
+   * exit pass's setup. It re-fetches, re-builds the bank and re-derives the entry index, but it never
+   * calls {@code ExitEvaluator.evaluate} and never emits — the only writes are to two caches no exit
+   * path reads ({@code ManasGoverningStopCache}'s own javadoc: read solely by the risk accounting).
+   * The governing-stop cache is a tighten-only ratchet, so warming it before the exit pass recomputes
+   * it can only make the RISK figure tighter, never an exit different.
    *
    * <p><b>Deliberately does NOT share {@code seriesCache} with the exit pass.</b> Reusing the warm
    * series would be cheaper, but the exit pass would then evaluate a bar sampled at THIS instant
    * instead of its own — on the 16:00 run the daily bucket is still forming, so that could change an
    * exit decision. This change is required to leave exits byte-identical, so the warm pays for its
-   * own fetch and the exit pass keeps fetching exactly as it does today.
+   * own fetch and the exit pass keeps fetching exactly as it does today. The cost is one extra daily
+   * fetch per HELD symbol (18 live today) in a batch that already fetches for ~100 candidates.
    *
    * <p>Fail-soft per symbol and as a whole: a warm failure must never cost a position its stop
-   * evaluation later in the run. An unwarmed symbol is not silent — it leaves the book partially
-   * marked, which {@code RiskService}'s {@code equity_unmarked} rail turns into a refused ENTRY
-   * (never a refused exit).
+   * evaluation later in the run. An unwarmed symbol degrades to the previous behaviour — valued at
+   * cost, counted in {@code AccountDto.unmarkedPositions} and the {@code ay_paper_mtm_blind_positions}
+   * gauge, and for the risk cap falling back to the wider persisted stop.
    */
-  private void warmEquityMarks(
-      SwingDoctrine doctrine, java.util.Set<String> heldSymbols, LocalDate requiredBarDate) {
-    if (emissionGuard.isEmpty() || heldSymbols.isEmpty()) {
+  private void warmHeldPositionState(
+      SwingDoctrine doctrine, AnchorResolution resolution, LocalDate requiredBarDate) {
+    if (emissionGuard.isEmpty()) {
       return;
     }
-    for (String symbol : heldSymbols) {
+    for (Map.Entry<String, List<SignalRepository.SignalRow>> e :
+        openLotsBySymbol(resolution).entrySet()) {
       try {
-        List<EngineCandle> series = fetchSeries(doctrine, symbol, requiredBarDate);
-        if (!series.isEmpty()) {
-          cacheEquityMark(symbol, series.get(series.size() - 1));
+        List<SignalRepository.SignalRow> lots = lotsAsOf(e.getValue(), requiredBarDate);
+        if (lots.isEmpty()) {
+          continue;
         }
-      } catch (RuntimeException e) {
+        List<EngineCandle> series = fetchSeries(doctrine, e.getKey(), requiredBarDate);
+        if (series.isEmpty()) {
+          continue;
+        }
+        // (a) the mark-to-market close, for book equity.
+        cacheEquityMark(e.getKey(), series.get(series.size() - 1));
+        // (b) the governing (trailed) stop, for the aggregate open-risk cap.
+        SignalRepository.SignalRow primary = oldestLot(lots);
+        SwingStrategy strat = resolution.resolve(primary.strategyVersionId()).orElse(null);
+        if (strat == null) {
+          continue; // another family's anchor — the exit pass logs this case; the warm stays quiet
+        }
+        IndicatorBank bank =
+            buildBank(
+                strat.definition(), primary.tradingsymbol(), series, doctrine.neutralContextSeeds());
+        int entryIndex = bank.primarySeries().indexAtOrBefore(primary.generatedAt().toInstant());
+        if (entryIndex < 0) {
+          continue; // entry bar outside the window — the exit pass reports it; nothing to warm
+        }
+        cacheGoverningStop(
+            doctrine,
+            primary,
+            strat.definition(),
+            bank,
+            new ExitEvaluator.Position(
+                ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex),
+            series.size() - 1,
+            entryIndex);
+      } catch (RuntimeException ex) {
         log.warn(
-            "{} swing: equity-mark warm failed for {} (accounting only, exit unaffected): {}",
-            doctrine.batchName(), symbol, e.getMessage());
+            "{} swing: held-state warm failed for {} (accounting only, exit unaffected): {}",
+            doctrine.batchName(), e.getKey(), ex.getMessage());
       }
     }
   }

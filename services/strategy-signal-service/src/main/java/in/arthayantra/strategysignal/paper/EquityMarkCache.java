@@ -52,14 +52,15 @@ import org.springframework.stereotype.Component;
  * — re-sampling a still-forming daily bar at a different instant could change an exit, and exits must
  * stay byte-identical.
  *
- * <p><b>A miss is visible AND blocking, on the books that are warmed.</b> Callers still fall back to
- * {@code avgEntryPrice} for DISPLAY and for the equity arithmetic itself (no NULL propagation into
- * the account API, no refused batch, no changed exit), and the condition is surfaced —
- * {@code AccountDto.unmarkedPositions}, the {@code ay_paper_mtm_blind_positions} gauge, a WARN. But
- * because that fallback erases a position's unrealized LOSS and therefore INFLATES equity,
- * {@link PaperEmissionGuard#entryVeto} refuses AUTOMATED entry on a partially-marked book
- * ({@code RiskService#EQUITY_UNMARKED}). Scoped to the warmed books only: a book nobody warms would
- * otherwise refuse entries forever. Exits and manual orders are never blocked.
+ * <p><b>A miss is visible, not blocking (owner ruling, 2026-08-13).</b> Callers fall back to
+ * {@code avgEntryPrice} exactly as before — no NULL propagation into the account API, no refused
+ * batch, no changed exit — and the condition is surfaced instead: {@code
+ * AccountDto.unmarkedPositions}, the {@code ay_paper_mtm_blind_positions} gauge, a WARN. A
+ * fail-CLOSED entry rail was built and then removed deliberately: this cache is cold on every boot,
+ * so a gate keyed on it would refuse entries hardest on precisely the degraded days. Hydration is
+ * the mitigation instead — see {@code SwingBatchEngine#warmHeldPositionState}. The residual exposure
+ * is an unmarked LOSS-making position valued at cost, which inflates equity; it is bounded by the
+ * book's own open risk, and it is the reason the count above is published rather than buried.
  */
 @Component
 public class EquityMarkCache {

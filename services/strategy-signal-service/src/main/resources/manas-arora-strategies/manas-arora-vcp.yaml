@@ -49,14 +49,6 @@ exit_rules:
   # §3.5C exhaustion square-off: too-fast (+35% in ≤3 sessions) OR parabolic (+40% over the 10-day MA).
   - { type: square_off, params: { fast_pct: 35, fast_bars: 3, parabolic_ma: 10, parabolic_dist_pct: 40 } }
 risk:
-  # qty = (0.8% equity)/stop distance. Was 1.0 until 2026-08-13, which made the book's declared 7th
-  # slot UNREACHABLE BY CONSTRUCTION: 1.0% per trade against the 6.0% portfolio open-risk cap
-  # (artha.manas-arora.pyramid.max-portfolio-risk-pct) saturates at exactly 6 positions — measured
-  # live at 5.9947% of cap with ₹7.55 of headroom, refusing a 7th every business day since 08-03.
-  # 7 × 0.8 = 5.6% leaves 0.4pp (~₹600) of real headroom. Deliberately NOT 6/7 = 0.857%: that lands
-  # on 6.0000% exactly, and the cap compares strictly `>`, so admission would be decided by BigDecimal
-  # rounding in the 6th decimal — the same knife-edge one slot further out.
-  # BOTH manas YAMLs must carry the same value: they share one Books.MANAS_ARORA risk budget.
-  position_sizing: { method: atr_risk, params: { risk_pct_equity: 0.8 } }
+  position_sizing: { method: atr_risk, params: { risk_pct_equity: 1.0 } } # qty = (1% equity)/stop distance
   max_positions: 7
   session: { style: swing }

@@ -37,13 +37,6 @@ public class PaperEmissionGuard implements EmissionGuard {
   private final ManasGoverningStopCache governingStopCache;
   private final EquityMarkCache equityMarks;
 
-  /**
-   * Books whose open positions are expected to carry a mark, and which therefore fail CLOSED on a
-   * missing one ({@link RiskService#EQUITY_UNMARKED}). Only the swing books qualify today — see
-   * {@link #entryVeto}.
-   */
-  private final java.util.Set<String> equityMarkEnforcedBooks;
-
   /** Wires the risk gate + capital model + the scalper 5-account discipline + the position ledger. */
   public PaperEmissionGuard(
       RiskService risk,
@@ -53,10 +46,7 @@ public class PaperEmissionGuard implements EmissionGuard {
       PaperPositionRepository positions,
       PaperOrderRejectionRecorder rejections,
       ManasGoverningStopCache governingStopCache,
-      EquityMarkCache equityMarks,
-      @org.springframework.beans.factory.annotation.Value(
-              "${artha.paper.equity-mark.enforced-books:minervini,manas-arora}")
-          String equityMarkEnforcedBooks) {
+      EquityMarkCache equityMarks) {
     this.risk = risk;
     this.account = account;
     this.instruments = instruments;
@@ -65,16 +55,11 @@ public class PaperEmissionGuard implements EmissionGuard {
     this.rejections = rejections;
     this.governingStopCache = governingStopCache;
     this.equityMarks = equityMarks;
-    this.equityMarkEnforcedBooks =
-        java.util.Arrays.stream(equityMarkEnforcedBooks.split(","))
-            .map(String::trim)
-            .filter(b -> !b.isEmpty())
-            .collect(java.util.stream.Collectors.toUnmodifiableSet());
   }
 
   @Override
   public boolean entryAllowed(String book) {
-    return entryVeto(book).isEmpty();
+    return risk.entryAllowed(book);
   }
 
   @Override
@@ -82,35 +67,15 @@ public class PaperEmissionGuard implements EmissionGuard {
     // PF-03: surface the exact governor rail (the single source of truth is RiskService.entryVeto,
     // of which risk.entryAllowed is a thin isEmpty() view — identical decision AND audit side-effects).
     //
-    // EQUITY_UNMARKED is checked HERE rather than inside RiskService.entryVeto (cross-vendor review
-    // Critical 2, 2026-08-13). Every rail RiskService evaluates divides by equity — the Manas
-    // open-risk cap, max_deployment_pct, any `mode: pct` daily limit — and an unmarked position is
-    // valued at its own entry cost, which ERASES its unrealized loss and INFLATES equity. So a
-    // partially-marked book does not merely mis-size: it loosens the very gates meant to bound it.
-    // "Cannot compute means refuse" is already this module's doctrine (RiskService's
-    // manasAggregateRiskCheck), and an ENTRY is the one decision that is always safe to skip — no
-    // exit path consults equity, so nothing here can trap a position.
-    //
-    // This SPI is the ENGINE's admission port. RiskService.entryVeto is shared with PaperService's
-    // MANUAL order path, which carries an owner-supplied quantity and does no equity sizing of its
-    // own; vetoing there would block the owner from acting during precisely the degraded state they
-    // need to act in, while preventing no automated mis-sizing. Hence the split.
-    //
-    // Scoped to books whose marks are actually maintained: SwingBatchEngine pre-warms these before
-    // its entry pass, so the rail is INERT in normal operation and fires only when marks are
-    // genuinely missing. A book nobody warms must never be listed — it would refuse entries forever,
-    // turning a safety rail into a permanent outage. The scalper book needs no listing either way:
-    // its option legs tick, so nothing there is ever unmarked.
-    if (equityMarkEnforcedBooks.contains(book)) {
-      int unmarked = account.unmarkedOpenCount(book);
-      if (unmarked > 0) {
-        log.warn(
-            "book '{}' has {} open position(s) with no mark — equity is only partially computable;"
-                + " automated ENTRY refused (exits and manual orders unaffected)",
-            book, unmarked);
-        return Optional.of(RiskService.EQUITY_UNMARKED);
-      }
-    }
+    // NOTE (owner ruling, 2026-08-13): an UNMARKED position does NOT veto entry here. The
+    // cross-vendor review rated the fail-open fallback a Critical and a veto rail was built at this
+    // exact point, then removed on the owner's call. The reasoning: the mark cache is cold on every
+    // boot, so a gate keyed on it locks the books hardest on exactly the days they are already
+    // degraded — and the review offered hydration as an equally acceptable remedy, which
+    // SwingBatchEngine now performs before its entry pass. The residual exposure (a position at a
+    // LOSS, unmarked, valued at cost, inflating equity) is bounded by the book's own open risk and is
+    // SURFACED — AccountDto.unmarkedPositions, the ay_paper_mtm_blind_positions gauge — rather than
+    // blocked. Arming it later is a one-branch change at this line.
     return risk.entryVeto(book);
   }
 

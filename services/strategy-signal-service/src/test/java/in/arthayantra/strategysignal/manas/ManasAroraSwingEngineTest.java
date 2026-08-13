@@ -120,14 +120,22 @@ class ManasAroraSwingEngineTest {
     SwingBatchEngine.SwingRun run = engine.runDaily(doctrine);
 
     assertThat(run.exits()).as("the armed trail has not been BREACHED — nothing exits").isZero();
+    // TWICE per run since the pre-entry warm was added (owner decision D, 2026-08-13): once to
+    // hydrate the cache before admission, once by the exit pass on the bar it evaluates. Both derive
+    // from the same series and the cache is a tighten-only ratchet, so the second is a no-op on the
+    // stored value — assert EVERY published stop, not just a call count.
     ArgumentCaptor<BigDecimal> stop = ArgumentCaptor.forClass(BigDecimal.class);
-    verify(guard)
+    verify(guard, org.mockito.Mockito.atLeast(1))
         .cacheManasGoverningStop(
             eq(Books.MANAS_ARORA), eq("NSE"), eq("TESTCO"), eq("BUY"), eq(42L), stop.capture());
-    assertThat(stop.getValue())
+    assertThat(stop.getAllValues())
         .as("the armed (breakeven-floored) trail ratchets to AT LEAST entry price — strictly tighter"
             + " than the persisted initial stop (entry − 2×ATR, well below entry)")
-        .isGreaterThanOrEqualTo(new BigDecimal("152"));
+        .isNotEmpty()
+        .allSatisfy(v -> assertThat(v).isGreaterThanOrEqualTo(new BigDecimal("152")));
+    assertThat(java.util.Set.copyOf(stop.getAllValues()))
+        .as("warm and exit-pass publications agree — the second cannot move the ratchet")
+        .hasSize(1);
   }
 
   @Test
@@ -295,6 +303,64 @@ class ManasAroraSwingEngineTest {
   }
 
   @Test
+  void theGoverningStopIsWarmedBeforeTheEntryPassSoTheRiskCapCanSeeIt() throws IOException {
+    // Owner decision D (2026-08-13). ManasGoverningStopCache is the aggregate open-risk cap's only
+    // release valve — openRiskInr is avgEntryPrice − stop, so a position up 59% consumes exactly the
+    // budget it did on day one unless its TRAILED stop is known. The cache is written by the exit
+    // pass, which runs AFTER entries, so on any restart day the entry pass read a cold cache and the
+    // valve was inert: measured live, manas open risk read ₹8,569.23 (5.99% of a 6% cap, ₹7.55 of
+    // headroom) when the warm figure is ₹4,355.97 (2.87%). This proves the warm publishes the trail
+    // BEFORE the governor is consulted, with the REAL ExitEvaluator arithmetic.
+    UUID strategyId = UUID.randomUUID();
+    UUID publishedVersion = UUID.randomUUID();
+    JsonNode config = breakoutConfig();
+    StrategyRepository registry = mock(StrategyRepository.class);
+    when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
+    when(registry.findVersionById(publishedVersion))
+        .thenReturn(Optional.of(version(publishedVersion, strategyId, config)));
+
+    List<EngineCandle> series = craftArmedTrail();
+    SignalRepository signals = mock(SignalRepository.class);
+    when(signals.activeEntries())
+        .thenReturn(
+            List.of(anchor(42L, publishedVersion, new BigDecimal("152"), series.get(0).bucketStart())));
+    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    when(candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(series);
+    ManasFunnelClient funnel = mock(ManasFunnelClient.class);
+    when(funnel.buyableAndOnDeck()).thenReturn(List.of());
+
+    EmissionGuard guard = mock(EmissionGuard.class);
+    when(guard.entryAllowed(any())).thenReturn(true);
+    SwingBatchEngine engine =
+        new SwingBatchEngine(
+            registry, candles, signals, mock(SignalPublisher.class),
+            mock(ApplicationEventPublisher.class), Optional.of(guard), passthroughTx(),
+            new ObjectMapper(), Clock.systemUTC());
+    ManasDoctrine doctrine =
+        new ManasDoctrine(
+            funnel, signals,
+            new ManasPyramidPolicy(false, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
+            new ObjectMapper(), true, 520, 10, 1440);
+
+    engine.runDaily(doctrine);
+
+    ArgumentCaptor<BigDecimal> stop = ArgumentCaptor.forClass(BigDecimal.class);
+    org.mockito.InOrder order = org.mockito.Mockito.inOrder(guard);
+    order
+        .verify(guard)
+        .cacheManasGoverningStop(
+            eq(Books.MANAS_ARORA), eq("NSE"), eq("TESTCO"), eq("BUY"), eq(42L), stop.capture());
+    order
+        .verify(guard, org.mockito.Mockito.atLeastOnce())
+        .entryAllowed(eq(Books.MANAS_ARORA));
+    assertThat(stop.getValue())
+        .as(
+            "the warm publishes the ARMED, breakeven-floored trail (>= entry) before admission — that"
+                + " is what drops a winner's contribution to the open-risk cap to zero")
+        .isGreaterThanOrEqualTo(new BigDecimal("152"));
+  }
+
+  @Test
   void theEquityMarkIsPublishedEvenWhenThePositionExitsThisRun() throws IOException {
     // Placement proof: the capture sits BEFORE the exit rules are evaluated, so it cannot vary with
     // the exit outcome. If it were inside the no-exit branch (where cacheManasGoverningStop lives) a
@@ -315,9 +381,9 @@ class ManasAroraSwingEngineTest {
   @Test
   void aFreshEntryAtSixOpenPositionsIsRefusedWhenTheSeventhWouldBreachTheOpenRiskCap() throws IOException {
     // M40 (owner-directed 2026-08-02): 6 open Manas positions already risking exactly 6% of a
-    // ₹1,000,000 book. The 6% figure is supplied directly by this test, NOT derived from the YAMLs'
-    // risk_pct_equity (0.8 since 2026-08-13, when 1.0 was found to make max_open_paper_positions=7
-    // unreachable — 1.0 × 6 = the 6.0% cap exactly); this test pins the GATE, not the sizing. NEWCO is
+    // ₹1,000,000 book (representative of 6 names each risking risk_pct_equity=1.0, the value both
+    // manas-arora-breakout.yaml and manas-arora-vcp.yaml carry — max_open_paper_positions=7 makes a
+    // 7th reachable at current config since both strategies share one Books.MANAS_ARORA key). NEWCO is
     // NOT held (signals.activeEntries() is empty) — this is a FRESH (first) entry, not a pyramid add,
     // and pyramiding is DISABLED (enabled=false) to prove the cap fires independently of that flag.
     FreshResult r = runFreshEntry(new BigDecimal("60000"));

@@ -2006,16 +2006,39 @@ bars, taking today's count 15→23; unperturbed it would read ~14. Verdict uncha
 ⚠️ Also note **PRECOT is an OPEN swing position in both books** — a 3.13% close divergence on a held
 name is worth its own look, not just a canary line.
 
-⚠️ **N73 · THE SWING DEAD-MAN'S SWITCH HAS NEVER WORKED, AND ONLY FIXING THE SCHEDULE REVEALED IT.**
-2026-08-13 18:54, first attempt in the weekday-only era: `swing batch heartbeat ping failed (external
-monitor may alert): java.net.ConnectException (message withheld — it can embed the secret ping URL)`.
-`ARTHA_HEARTBEAT_URL` is SET, so this is not a config gap — **the endpoint refused the connection.**
-At 20:15 the job never fired at all, so its silence was never evidence the switch worked; it was
-evidence the job wasn't running. **A dormant alarm and a working alarm are indistinguishable from the
-outside — the only way to tell them apart is to make the alarm actually fire.** Two owner actions:
-confirm the monitor URL is still live, and reconfigure its expected schedule to `54 18 * * 1-5`
-(moot until the ping connects). The error text is deliberately withheld because it can embed the
-secret URL — correct, and it is why this cannot be diagnosed from the log alone.
+⚠️ **N73 · I DIAGNOSED THE DEAD-MAN'S SWITCH FROM INSIDE THE SYSTEM AND GOT BOTH SIDES WRONG. THE
+EXTERNAL DASHBOARD SETTLED IT IN ONE LOOK.** 2026-08-13 18:54: `swing batch heartbeat ping failed
+(external monitor may alert): java.net.ConnectException`. From that plus `ARTHA_HEARTBEAT_URL` being
+SET, I asserted two things to the owner and **both were false**:
+
+- ❌ *"The switch has never worked."* It worked fine. healthchecks.io logs **23 successful pings,
+  Jul 22 → Aug 11 20:15**, all `Java-http-client/21.0.11`. It went `up ➔ down` on **Aug 12 22:15** —
+  exactly when the 19:00 shutdown policy started killing the 20:15 job. The silence had a cause, and
+  the cause was two days old, not permanent.
+- ❌ *"No integration → it notifies nobody."* Email notification was **ON** to the owner's address the
+  whole time. I inferred "no alerts" from an empty `Integrations` column in a list view that simply
+  does not render it.
+
+Also already true before I kept recommending it: the check's schedule was **already** `54 18 * * 1-5`
+in `Asia/Kolkata`.
+
+**The lesson is about method, not about heartbeats. This system has an EXTERNAL OBSERVER that holds
+the ground truth — a ping log with timestamps and outcomes. I theorised from container logs, env
+vars, DNS and TCP probes for several turns and reached two confident wrong conclusions, when one look
+at the dashboard was decisive. When a component's whole job is to be watched from outside, ASK THE
+WATCHER FIRST.** Related: the one probe I could safely run from inside (DNS + TCP 443, deliberately
+NOT the ping URL, since a GET registers a ping and would falsely satisfy the alarm) came back healthy
+and therefore proved nothing about the app's HTTP client.
+
+**What is actually open.** Tonight's 18:54 `ConnectException` is **the only ping attempted since the
+15:44 container recreate** — Session Liveness' last success was 15:20, before the deploy — so there
+is no successful post-recreate ping yet. **Tomorrow's 18:54 is the discriminator: success ⇒ tonight
+was transient; failure ⇒ the fault is in the recreated container's HTTP client.** Note the check
+shows **56.98% uptime in July and 81.86% in August across 12 downtimes**, so it was flapping long
+before any of this and that predates the shutdown policy. Owner paused the check at 19:10 on 08-13
+and has since unpaused it; owner declined to rotate the ping URLs (their call, recorded).
+Session Liveness is healthy — 10:30→15:20 today, every 10 minutes, unbroken — which also confirms
+that this session's "0 pings today" reading was purely N72's log destruction, not a failure.
 
 ⚠️ **TOMORROW MORNING (2026-08-14) — THREE FIRST-EVER LIVE TESTS. Verify at ~09:00 IST, after the
 pre-open window closes and before the open. This list is written here because the machine is off

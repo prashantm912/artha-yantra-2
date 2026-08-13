@@ -154,22 +154,39 @@ public class PaperAccountService {
    * no such problem (it is by definition now), so this only constrains the captured-close path.
    */
   private Optional<BigDecimal> mark(PositionRow pos) {
-    Optional<BigDecimal> tick = lastTick.lastPrice(pos.exchange(), pos.tradingsymbol());
+    return markFor(pos.exchange(), pos.tradingsymbol(), pos.openedAt());
+  }
+
+  /**
+   * The position-scoped mark: {@link #markFor} plus the opening-session guard, taking the fields
+   * rather than a row so BOTH {@code PositionRow} and {@code DetailRow} display paths can use it.
+   *
+   * <p>Public because the display paths need it (cross-vendor review, round 2): {@code
+   * PaperService#positionDetail} and {@code #toPositionDto} previously called the raw symbol-level
+   * {@link #markFor}, which has no opening-session guard. A symbol closed and REOPENED inside the
+   * mark's session window would then DISPLAY unrealized P&L measured from a close that predates the
+   * new position, while the account header — which goes through here — correctly treated it as
+   * unmarked. Two numbers, one book, disagreeing.
+   */
+  public Optional<BigDecimal> markFor(
+      String exchange, String tradingsymbol, java.time.OffsetDateTime openedAt) {
+    Optional<BigDecimal> tick = lastTick.lastPrice(exchange, tradingsymbol);
     if (tick.isPresent()) {
       return tick;
     }
     return equityMarks
-        .mark(pos.exchange(), pos.tradingsymbol())
-        .filter(m -> !openedAfter(pos, m.session()))
-        .flatMap(m -> equityMarks.price(pos.exchange(), pos.tradingsymbol()));
+        .mark(exchange, tradingsymbol)
+        .filter(m -> !openedAfter(openedAt, m.session()))
+        .flatMap(m -> equityMarks.price(exchange, tradingsymbol));
   }
 
+
   /** True when {@code session} closed BEFORE this position's own IST opening session. */
-  private static boolean openedAfter(PositionRow pos, LocalDate session) {
-    if (pos.openedAt() == null || session == null) {
+  private static boolean openedAfter(java.time.OffsetDateTime openedAt, LocalDate session) {
+    if (openedAt == null || session == null) {
       return false;
     }
-    return session.isBefore(LocalDate.ofInstant(pos.openedAt().toInstant(), IST));
+    return session.isBefore(LocalDate.ofInstant(openedAt.toInstant(), IST));
   }
 
   /**

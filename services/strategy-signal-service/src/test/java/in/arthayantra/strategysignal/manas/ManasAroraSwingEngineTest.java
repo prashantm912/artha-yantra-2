@@ -120,22 +120,14 @@ class ManasAroraSwingEngineTest {
     SwingBatchEngine.SwingRun run = engine.runDaily(doctrine);
 
     assertThat(run.exits()).as("the armed trail has not been BREACHED — nothing exits").isZero();
-    // TWICE per run since the pre-entry warm was added (owner decision D, 2026-08-13): once to
-    // hydrate the cache before admission, once by the exit pass on the bar it evaluates. Both derive
-    // from the same series and the cache is a tighten-only ratchet, so the second is a no-op on the
-    // stored value — assert EVERY published stop, not just a call count.
     ArgumentCaptor<BigDecimal> stop = ArgumentCaptor.forClass(BigDecimal.class);
-    verify(guard, org.mockito.Mockito.atLeast(1))
+    verify(guard)
         .cacheManasGoverningStop(
             eq(Books.MANAS_ARORA), eq("NSE"), eq("TESTCO"), eq("BUY"), eq(42L), stop.capture());
-    assertThat(stop.getAllValues())
+    assertThat(stop.getValue())
         .as("the armed (breakeven-floored) trail ratchets to AT LEAST entry price — strictly tighter"
             + " than the persisted initial stop (entry − 2×ATR, well below entry)")
-        .isNotEmpty()
-        .allSatisfy(v -> assertThat(v).isGreaterThanOrEqualTo(new BigDecimal("152")));
-    assertThat(java.util.Set.copyOf(stop.getAllValues()))
-        .as("warm and exit-pass publications agree — the second cannot move the ratchet")
-        .hasSize(1);
+        .isGreaterThanOrEqualTo(new BigDecimal("152"));
   }
 
   @Test
@@ -238,9 +230,7 @@ class ManasAroraSwingEngineTest {
     SwingBatchEngine.SwingRun run = h.engine(Optional.of(guard)).runDaily(h.doctrine(false));
 
     ArgumentCaptor<BigDecimal> close = ArgumentCaptor.forClass(BigDecimal.class);
-    // Twice per run by design: once by the pre-entry warm, once by the exit pass.
-    verify(guard, org.mockito.Mockito.atLeastOnce())
-        .cacheEquityMark(eq("NSE"), eq("TESTCO"), close.capture(), any());
+    verify(guard).cacheEquityMark(eq("NSE"), eq("TESTCO"), close.capture(), any());
     assertThat(close.getValue())
         .as("the mark is the LAST bar's close — the same bar the exit rules were evaluated against")
         .isEqualByComparingTo(h.series.get(h.series.size() - 1).close());
@@ -271,93 +261,13 @@ class ManasAroraSwingEngineTest {
 
     EngineCandle last = utcSeries.get(utcSeries.size() - 1);
     ArgumentCaptor<java.time.LocalDate> session = ArgumentCaptor.forClass(java.time.LocalDate.class);
-    verify(guard, org.mockito.Mockito.atLeastOnce())
-        .cacheEquityMark(eq("NSE"), eq("TESTCO"), any(), session.capture());
+    verify(guard).cacheEquityMark(eq("NSE"), eq("TESTCO"), any(), session.capture());
     assertThat(session.getValue())
         .as(
             "the IST session date (%s), not the raw-offset date (%s) the UTC-stamped bucket reads as",
             last.bucketStart().withOffsetSameInstant(IST).toLocalDate(),
             last.bucketStart().toLocalDate())
         .isEqualTo(last.bucketStart().withOffsetSameInstant(IST).toLocalDate());
-  }
-
-  @Test
-  void equityMarksAreHydratedBeforeTheEntryPassConsultsTheGovernor() throws IOException {
-    // Cross-vendor review Critical 2. The exit pass captures marks, but it runs AFTER entries — so on
-    // a fresh boot the whole entry pass would read an equity that values every held position at cost,
-    // hiding existing losses from the sizing and admission rails. Hydrating first is what makes
-    // "fully marked" the normal state, and therefore what makes the EQUITY_UNMARKED rail safe to arm
-    // rather than an every-restart outage.
-    ExitHarness h = new ExitHarness();
-    when(h.candles.fetch(any(), any(), any(), any(), any())).thenReturn(h.series);
-    EmissionGuard guard = mock(EmissionGuard.class);
-    when(guard.entryAllowed(any())).thenReturn(true);
-
-    h.engine(Optional.of(guard)).runDaily(h.doctrine(false));
-
-    org.mockito.InOrder order = org.mockito.Mockito.inOrder(guard);
-    order.verify(guard).cacheEquityMark(eq("NSE"), eq("TESTCO"), any(), any());
-    order
-        .verify(guard, org.mockito.Mockito.atLeastOnce())
-        .entryAllowed(eq(Books.MANAS_ARORA));
-  }
-
-  @Test
-  void theGoverningStopIsWarmedBeforeTheEntryPassSoTheRiskCapCanSeeIt() throws IOException {
-    // Owner decision D (2026-08-13). ManasGoverningStopCache is the aggregate open-risk cap's only
-    // release valve — openRiskInr is avgEntryPrice − stop, so a position up 59% consumes exactly the
-    // budget it did on day one unless its TRAILED stop is known. The cache is written by the exit
-    // pass, which runs AFTER entries, so on any restart day the entry pass read a cold cache and the
-    // valve was inert: measured live, manas open risk read ₹8,569.23 (5.99% of a 6% cap, ₹7.55 of
-    // headroom) when the warm figure is ₹4,355.97 (2.87%). This proves the warm publishes the trail
-    // BEFORE the governor is consulted, with the REAL ExitEvaluator arithmetic.
-    UUID strategyId = UUID.randomUUID();
-    UUID publishedVersion = UUID.randomUUID();
-    JsonNode config = breakoutConfig();
-    StrategyRepository registry = mock(StrategyRepository.class);
-    when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
-    when(registry.findVersionById(publishedVersion))
-        .thenReturn(Optional.of(version(publishedVersion, strategyId, config)));
-
-    List<EngineCandle> series = craftArmedTrail();
-    SignalRepository signals = mock(SignalRepository.class);
-    when(signals.activeEntries())
-        .thenReturn(
-            List.of(anchor(42L, publishedVersion, new BigDecimal("152"), series.get(0).bucketStart())));
-    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
-    when(candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(series);
-    ManasFunnelClient funnel = mock(ManasFunnelClient.class);
-    when(funnel.buyableAndOnDeck()).thenReturn(List.of());
-
-    EmissionGuard guard = mock(EmissionGuard.class);
-    when(guard.entryAllowed(any())).thenReturn(true);
-    SwingBatchEngine engine =
-        new SwingBatchEngine(
-            registry, candles, signals, mock(SignalPublisher.class),
-            mock(ApplicationEventPublisher.class), Optional.of(guard), passthroughTx(),
-            new ObjectMapper(), Clock.systemUTC());
-    ManasDoctrine doctrine =
-        new ManasDoctrine(
-            funnel, signals,
-            new ManasPyramidPolicy(false, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
-            new ObjectMapper(), true, 520, 10, 1440);
-
-    engine.runDaily(doctrine);
-
-    ArgumentCaptor<BigDecimal> stop = ArgumentCaptor.forClass(BigDecimal.class);
-    org.mockito.InOrder order = org.mockito.Mockito.inOrder(guard);
-    order
-        .verify(guard)
-        .cacheManasGoverningStop(
-            eq(Books.MANAS_ARORA), eq("NSE"), eq("TESTCO"), eq("BUY"), eq(42L), stop.capture());
-    order
-        .verify(guard, org.mockito.Mockito.atLeastOnce())
-        .entryAllowed(eq(Books.MANAS_ARORA));
-    assertThat(stop.getValue())
-        .as(
-            "the warm publishes the ARMED, breakeven-floored trail (>= entry) before admission — that"
-                + " is what drops a winner's contribution to the open-risk cap to zero")
-        .isGreaterThanOrEqualTo(new BigDecimal("152"));
   }
 
   @Test
@@ -374,8 +284,7 @@ class ManasAroraSwingEngineTest {
     SwingBatchEngine.SwingRun run = h.engine(Optional.of(guard)).runDaily(h.doctrine(false));
 
     assertThat(run.exits()).as("this run really does exit the position").isEqualTo(1);
-    verify(guard, org.mockito.Mockito.atLeastOnce())
-        .cacheEquityMark(eq("NSE"), eq("TESTCO"), any(), any());
+    verify(guard).cacheEquityMark(eq("NSE"), eq("TESTCO"), any(), any());
   }
 
   @Test
@@ -405,62 +314,6 @@ class ManasAroraSwingEngineTest {
     assertThat(r.run().entries()).as("under the cap at 7 names — still admitted").isEqualTo(1);
     verify(r.events()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
     verify(r.guard(), never()).recordPyramidRiskCapBreach(any(), any(), any());
-  }
-
-  @Test
-  void theWarmDoesNotPublishAGoverningStopForAMixedPrePostSessionLotSet() throws IOException {
-    // The exit pass refuses a mixed pre/post-session lot set outright rather than evaluate an
-    // approximate position. The pre-entry warm must refuse the same way, and the reason is sharper:
-    // the stop is cached against the OLDEST lot's id and the paper adapter attaches it by
-    // opening_signal_id, which an averaging add RETAINS — so a trail derived from the pre-session
-    // subset would attach to the live position that ALSO holds the post-session lots, i.e. a
-    // differently composed one at a different average entry. That error runs in the LOOSENING
-    // direction: a trail above the old lot's entry zeroes the whole position's contribution to the
-    // open-risk cap.
-    //
-    // FIXTURE NOTE (a broken red-proof caught this): craftDecline() cannot test this at all — its
-    // trail never ARMS, so governingStop is null and NOTHING is published with or without the guard.
-    // craftArmedTrail() + a pin at day 34 (+11.1% off entry, past the +9% arm) is the only shape
-    // where removing the guard actually publishes.
-    UUID strategyId = UUID.randomUUID();
-    UUID publishedVersion = UUID.randomUUID();
-    StrategyRepository registry = mock(StrategyRepository.class);
-    when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
-    when(registry.findVersionById(publishedVersion))
-        .thenReturn(Optional.of(version(publishedVersion, strategyId, breakoutConfig())));
-
-    List<EngineCandle> series = craftArmedTrail(); // days 0..35 from 2026-06-01
-    SignalRepository signals = mock(SignalRepository.class);
-    when(signals.activeEntries())
-        .thenReturn(
-            List.of(
-                anchor(42L, publishedVersion, new BigDecimal("152"), series.get(0).bucketStart()),
-                anchor(43L, publishedVersion, new BigDecimal("152"), series.get(35).bucketStart())));
-    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
-    when(candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(series);
-    ManasFunnelClient funnel = mock(ManasFunnelClient.class);
-    when(funnel.buyableAndOnDeck()).thenReturn(List.of());
-
-    EmissionGuard guard = mock(EmissionGuard.class);
-    when(guard.entryAllowed(any())).thenReturn(true);
-    SwingBatchEngine engine =
-        new SwingBatchEngine(
-            registry, candles, signals, mock(SignalPublisher.class),
-            mock(ApplicationEventPublisher.class), Optional.of(guard), passthroughTx(),
-            new ObjectMapper(), Clock.systemUTC());
-    ManasDoctrine doctrine =
-        new ManasDoctrine(
-            funnel, signals,
-            new ManasPyramidPolicy(false, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
-            new ObjectMapper(), true, 520, 10, 1440);
-
-    // Pin 2026-07-05 = day 34: lot 42 (06-01) is kept, lot 43 (07-06) is dropped -> MIXED.
-    engine.runDaily(doctrine, LocalDate.of(2026, 7, 5), false);
-
-    verify(guard, never()).cacheManasGoverningStop(any(), any(), any(), any(), anyLong(), any());
-    // The MARK is still published: a close is a property of the SYMBOL, not of the lot composition.
-    verify(guard, org.mockito.Mockito.atLeastOnce())
-        .cacheEquityMark(eq("NSE"), eq("TESTCO"), any(), any());
   }
 
   @Test

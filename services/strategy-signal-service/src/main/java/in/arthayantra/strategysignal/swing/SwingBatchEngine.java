@@ -313,22 +313,6 @@ public class SwingBatchEngine {
             : List.of();
     java.util.Set<String> heldBefore =
         new java.util.HashSet<>(openLotsBySymbol(resolution).keySet());
-    // HYDRATE the two IN-MEMORY accounting caches BEFORE the entry pass. Both are written by the
-    // EXIT pass, which runs AFTER entries (:entryPass then :exitPass below), so both are empty for the
-    // whole entry pass on any run where this JVM has not yet completed one — i.e. every restart day.
-    //
-    // (a) EquityMarkCache — without it equity values every held position at its own entry cost
-    //     (cross-vendor review Critical 2, 2026-08-13).
-    // (b) ManasGoverningStopCache — the designed release valve for the aggregate open-risk cap, and
-    //     PROVABLY INERT until now for exactly this reason (owner decision D, 2026-08-13). openRiskInr
-    //     is avgEntryPrice − stop, so price appreciation never frees budget; only a trailed stop does.
-    //     Measured live 2026-08-13: cold, manas open risk read ₹8,569.23 = 5.99% of a 6% cap and
-    //     refused a 7th position with ₹7.55 of headroom. Warm, three positions whose trails have armed
-    //     above their entry prices contribute zero and it reads ₹4,355.97 = 2.87%.
-    //
-    // The pass ORDER is deliberately untouched — the exit pass is a swing position's only stop
-    // evaluator, and moving it is a money-path risk this warm exists to avoid.
-    warmHeldPositionState(doctrine, resolution, requiredBarDate);
     EntryResult entry =
         entriesEnabled
             ? entryPass(
@@ -854,18 +838,12 @@ public class SwingBatchEngine {
         skipped++;
         continue;
       }
-      // Capture the daily close as this symbol's mark-to-market price for book equity. Placed HERE —
-      // after the series is resolved, before any exit rule is evaluated — so the capture is
-      // unconditional and cannot vary with the exit outcome; and it reuses the bar this pass already
-      // fetched, so it adds no round-trip. Cash equities never appear in the Redis `ticks:last` hash
-      // (the WS subscription is the futures/options universe), so without this every swing position
-      // marked at its own entry price and contributed ZERO unrealized to equity.
-      // Capture the daily close as this symbol's mark-to-market price for book equity. Placed HERE —
-      // after the series is resolved, before any exit rule is evaluated — so the capture is
-      // unconditional and cannot vary with the exit outcome; and it reuses the bar this pass already
-      // fetched, so it adds no round-trip. Cash equities never appear in the Redis `ticks:last` hash
-      // (the WS subscription is the futures/options universe), so without this every swing position
-      // marked at its own entry price and contributed ZERO unrealized to equity.
+      // Capture the daily close as this symbol's mark-to-market price for book equity — the ONLY
+      // producer of EquityMarkCache. Reuses the bar this pass has already fetched: no extra
+      // round-trip, no new query, no deadline interaction, and it cannot vary with the exit outcome
+      // because it sits above the evaluation. Cash equities never appear in the Redis `ticks:last`
+      // hash (the WS subscription is the futures/options universe), so without this every swing
+      // position marks at its own entry price and contributes ZERO unrealized to equity.
       cacheEquityMark(primary.tradingsymbol(), series.get(series.size() - 1));
       // geometry is irrelevant to the exit rules (percent/ATR stop + trail), so the pivot contexts are
       // seeded neutral (0) — the bank still builds every declared indicator, the exit eval never reads
@@ -959,95 +937,6 @@ public class SwingBatchEngine {
   }
 
   /**
-   * Pre-warms the two accounting caches for every symbol held at the START of the run — the
-   * mark-to-market close ({@link EquityMarkCache}) and the trailed governing stop
-   * ({@code ManasGoverningStopCache}) — so the entry pass reads a fully-formed risk picture instead
-   * of the cold one a restart leaves behind.
-   *
-   * <p><b>Exit-neutral by construction, and that is load-bearing here</b> because this duplicates the
-   * exit pass's setup. It re-fetches, re-builds the bank and re-derives the entry index, but it never
-   * calls {@code ExitEvaluator.evaluate} and never emits — the only writes are to two caches no exit
-   * path reads ({@code ManasGoverningStopCache}'s own javadoc: read solely by the risk accounting).
-   * The governing-stop cache is a tighten-only ratchet, so warming it before the exit pass recomputes
-   * it can only make the RISK figure tighter, never an exit different.
-   *
-   * <p><b>Deliberately does NOT share {@code seriesCache} with the exit pass.</b> Reusing the warm
-   * series would be cheaper, but the exit pass would then evaluate a bar sampled at THIS instant
-   * instead of its own — on the 16:00 run the daily bucket is still forming, so that could change an
-   * exit decision. This change is required to leave exits byte-identical, so the warm pays for its
-   * own fetch and the exit pass keeps fetching exactly as it does today. The cost is one extra daily
-   * fetch per HELD symbol (18 live today) in a batch that already fetches for ~100 candidates.
-   *
-   * <p>Fail-soft per symbol and as a whole: a warm failure must never cost a position its stop
-   * evaluation later in the run. An unwarmed symbol degrades to the previous behaviour — valued at
-   * cost, counted in {@code AccountDto.unmarkedPositions} and the {@code ay_paper_mtm_blind_positions}
-   * gauge, and for the risk cap falling back to the wider persisted stop.
-   */
-  private void warmHeldPositionState(
-      SwingDoctrine doctrine, AnchorResolution resolution, LocalDate requiredBarDate) {
-    if (emissionGuard.isEmpty()) {
-      return;
-    }
-    for (Map.Entry<String, List<SignalRepository.SignalRow>> e :
-        openLotsBySymbol(resolution).entrySet()) {
-      try {
-        List<SignalRepository.SignalRow> lots = lotsAsOf(e.getValue(), requiredBarDate);
-        if (lots.isEmpty()) {
-          continue;
-        }
-        List<EngineCandle> series = fetchSeries(doctrine, e.getKey(), requiredBarDate);
-        if (series.isEmpty()) {
-          continue;
-        }
-        // (a) the mark-to-market close, for book equity. Unconditional: a close is a property of the
-        // SYMBOL, so it is valid whatever the lot composition happens to be.
-        cacheEquityMark(e.getKey(), series.get(series.size() - 1));
-        // (b) the governing (trailed) stop, for the aggregate open-risk cap. UNLIKE the mark, this is
-        // a property of a PARTICULAR position, so it inherits the exit pass's mixed-lot refusal.
-        //
-        // With a session pinned, `lotsAsOf` drops lots opened after it. When that drops SOME but not
-        // all, the exit pass refuses the symbol outright rather than evaluate an approximate position
-        // (:807-822). The warm must refuse too, and the reason is sharper here than there: the stop
-        // is cached against `primary.id()` and the paper adapter attaches it by `opening_signal_id`,
-        // which an averaging add RETAINS — so a trail computed from the pre-session subset would
-        // attach to the live position that also contains the post-session lots, i.e. a differently
-        // composed one at a different average entry. That error runs in the LOOSENING direction: a
-        // trail above the old lot's entry zeroes the whole position's contribution to the risk cap.
-        // Skip silently — `recordMixedLotRefusal` is the exit pass's durable record and writing it
-        // twice would double-count a single condition.
-        if (requiredBarDate != null && lots.size() != e.getValue().size()) {
-          continue;
-        }
-        SignalRepository.SignalRow primary = oldestLot(lots);
-        SwingStrategy strat = resolution.resolve(primary.strategyVersionId()).orElse(null);
-        if (strat == null) {
-          continue; // another family's anchor — the exit pass logs this case; the warm stays quiet
-        }
-        IndicatorBank bank =
-            buildBank(
-                strat.definition(), primary.tradingsymbol(), series, doctrine.neutralContextSeeds());
-        int entryIndex = bank.primarySeries().indexAtOrBefore(primary.generatedAt().toInstant());
-        if (entryIndex < 0) {
-          continue; // entry bar outside the window — the exit pass reports it; nothing to warm
-        }
-        cacheGoverningStop(
-            doctrine,
-            primary,
-            strat.definition(),
-            bank,
-            new ExitEvaluator.Position(
-                ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex),
-            series.size() - 1,
-            entryIndex);
-      } catch (RuntimeException ex) {
-        log.warn(
-            "{} swing: held-state warm failed for {} (accounting only, exit unaffected): {}",
-            doctrine.batchName(), e.getKey(), ex.getMessage());
-      }
-    }
-  }
-
-  /**
    * Publishes a held cash equity's latest daily close through the {@code EmissionGuard} port so
    * {@code PaperAccountService} can mark the position to market. Pure accounting, exactly like
    * {@link #cacheGoverningStop}: nothing here closes a position, changes an exit decision, or writes
@@ -1070,7 +959,6 @@ public class SwingBatchEngine {
               bar.close(),
               // IST, never the raw offset: daily buckets arrive as 18:30+00, so a bare toLocalDate()
               // yields the PREVIOUS calendar day and the mark would claim a session it is not from.
-              // Same conversion every other bar->session site in this class uses (e.g. :1054).
               bar.bucketStart().withOffsetSameInstant(IST).toLocalDate());
     } catch (RuntimeException e) {
       log.warn(
@@ -1291,21 +1179,14 @@ public class SwingBatchEngine {
   private List<EngineCandle> series(
       SwingDoctrine doctrine, String symbol, Map<String, List<EngineCandle>> cache,
       LocalDate requiredBarDate) {
-    return cache.computeIfAbsent(symbol, s -> fetchSeries(doctrine, s, requiredBarDate));
-  }
-
-  /**
-   * One uncached daily-series fetch, session-truncated like every other read in this class. Extracted
-   * so {@link #warmEquityMarks} can fetch WITHOUT populating {@code seriesCache} — sharing that cache
-   * with the exit pass would move which instant the still-forming daily bar is sampled at, and exits
-   * must stay byte-identical.
-   */
-  private List<EngineCandle> fetchSeries(
-      SwingDoctrine doctrine, String symbol, LocalDate requiredBarDate) {
-    OffsetDateTime now = OffsetDateTime.now(clock).withOffsetSameInstant(IST);
-    return truncateToSession(
-        candles.fetch(EX, symbol, IV, now.minusDays(doctrine.warmupDays()), now), symbol,
-        requiredBarDate);
+    return cache.computeIfAbsent(
+        symbol,
+        s -> {
+          OffsetDateTime now = OffsetDateTime.now(clock).withOffsetSameInstant(IST);
+          return truncateToSession(
+              candles.fetch(EX, s, IV, now.minusDays(doctrine.warmupDays()), now), s,
+              requiredBarDate);
+        });
   }
 
   private List<SwingStrategy> loadPublishedSwingStrategies(SwingDoctrine doctrine) {

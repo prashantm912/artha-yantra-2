@@ -71,9 +71,10 @@ public class PaperEmissionGuard implements EmissionGuard {
     // cross-vendor review rated the fail-open fallback a Critical and a veto rail was built at this
     // exact point, then removed on the owner's call. The reasoning: the mark cache is cold on every
     // boot, so a gate keyed on it locks the books hardest on exactly the days they are already
-    // degraded — and the review offered hydration as an equally acceptable remedy, which
-    // SwingBatchEngine now performs before its entry pass. The residual exposure (a position at a
-    // LOSS, unmarked, valued at cost, inflating equity) is bounded by the book's own open risk and is
+    // degraded. The pre-entry hydration that would have made a fail-closed rail safe was itself
+    // withdrawn (it perturbed the exit sample), so the cold-boot window is real and open. The
+    // residual exposure (a position at a LOSS, unmarked, valued at cost, inflating equity) is
+    // bounded by the book's own open risk and is
     // SURFACED — AccountDto.unmarkedPositions, the ay_paper_mtm_blind_positions gauge — rather than
     // blocked. Arming it later is a one-branch change at this line.
     return risk.entryVeto(book);

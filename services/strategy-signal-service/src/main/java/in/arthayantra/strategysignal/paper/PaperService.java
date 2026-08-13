@@ -1445,7 +1445,12 @@ public class PaperService {
     if ("OPEN".equals(row.status())) {
       // Same mark resolution as book equity (tick, else the captured daily close) so a swing
       // position's displayed unrealized agrees with the account header instead of reading null.
-      mark = accountService.markFor(row.exchange(), row.tradingsymbol()).orElse(null);
+      // Position-scoped, NOT the raw symbol lookup: that one has no opening-session guard, so a
+      // reopened symbol would display P&L measured from a close predating this position.
+      mark =
+          accountService
+              .markFor(row.exchange(), row.tradingsymbol(), row.openedAt())
+              .orElse(null);
       if (mark != null) {
         BigDecimal move =
             "BUY".equals(row.side())
@@ -1756,8 +1761,11 @@ public class PaperService {
   }
 
   private PositionDto toPositionDto(PositionRow row) {
-    // Same mark resolution as book equity — see positionDetail.
-    BigDecimal mark = accountService.markFor(row.exchange(), row.tradingsymbol()).orElse(null);
+    // Same position-scoped mark resolution as book equity — see positionDetail.
+    BigDecimal mark =
+          accountService
+              .markFor(row.exchange(), row.tradingsymbol(), row.openedAt())
+              .orElse(null);
     BigDecimal unrealized = null;
     if (mark != null) {
       BigDecimal move =

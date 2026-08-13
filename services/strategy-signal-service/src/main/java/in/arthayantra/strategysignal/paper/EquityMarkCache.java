@@ -44,23 +44,24 @@ import org.springframework.stereotype.Component;
  * than serving a stale price into a money figure. Capture time is kept for diagnostics only — see
  * {@link #price} for why it is the wrong clock to gate on.
  *
- * <p><b>Hydration and the entry pass.</b> {@code SwingBatchEngine} warms every held symbol's mark at
- * the START of a run, BEFORE the entry pass, then the exit pass refreshes it from the bar it already
- * holds. The warm exists because entries run before exits: without it the whole entry pass would read
- * an equity that values every held position at cost, hiding existing losses from the sizing and
- * admission rails on every restart. The warm deliberately does not share the exit pass's series cache
- * — re-sampling a still-forming daily bar at a different instant could change an exit, and exits must
- * stay byte-identical.
+ * <p><b>Populated by the swing EXIT pass only, which is a real limitation.</b> The exit pass runs
+ * AFTER the entry pass, so on any run this JVM has not already completed one — i.e. after every
+ * restart — the cache is EMPTY for the whole entry pass and equity falls back to entry cost there.
+ * A pre-entry warm was built to close that and WITHDRAWN (owner decision, 2026-08-13): it inserted
+ * sequential blocking fetches ahead of the exit pass's own fetch, which moved when the still-forming
+ * daily bar is sampled and could cross the run deadline and skip exits entirely. Closing this
+ * properly is tracked as its own item; it is NOT closed here. The consequence is bounded and
+ * one-directional: equity is under-marked (never over-marked) until the first exit pass of a
+ * process completes, which is the same state as before this class existed.
  *
  * <p><b>A miss is visible, not blocking (owner ruling, 2026-08-13).</b> Callers fall back to
  * {@code avgEntryPrice} exactly as before — no NULL propagation into the account API, no refused
  * batch, no changed exit — and the condition is surfaced instead: {@code
  * AccountDto.unmarkedPositions}, the {@code ay_paper_mtm_blind_positions} gauge, a WARN. A
  * fail-CLOSED entry rail was built and then removed deliberately: this cache is cold on every boot,
- * so a gate keyed on it would refuse entries hardest on precisely the degraded days. Hydration is
- * the mitigation instead — see {@code SwingBatchEngine#warmHeldPositionState}. The residual exposure
- * is an unmarked LOSS-making position valued at cost, which inflates equity; it is bounded by the
- * book's own open risk, and it is the reason the count above is published rather than buried.
+ * so a gate keyed on it would refuse entries hardest on precisely the degraded days. The residual
+ * exposure is an unmarked LOSS-making position valued at cost, which inflates equity; it is bounded
+ * by the book's own open risk, and it is the reason the count above is published rather than buried.
  */
 @Component
 public class EquityMarkCache {

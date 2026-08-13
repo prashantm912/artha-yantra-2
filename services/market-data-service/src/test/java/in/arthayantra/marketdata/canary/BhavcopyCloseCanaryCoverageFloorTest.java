@@ -98,11 +98,40 @@ class BhavcopyCloseCanaryCoverageFloorTest {
   }
 
   @Test
-  @DisplayName("a floor of 0 disables the check, leaving the pre-existing verdict untouched")
-  void floorOfZeroIsInert() {
-    // The escape hatch has to actually work, or an operator who disables the floor gets a
-    // surprise instead of the old behaviour.
-    assertThat(canary(0, 0, 0).evaluate(DAY).status()).isEqualTo("GREEN");
+  @DisplayName("a floor of 0 CANNOT disable the check — it is clamped, not honoured")
+  void floorOfZeroCannotDisableTheCheck() {
+    // ⚠️ This test asserted the OPPOSITE in the first round of this PR, and the reviewer was right
+    // to call it: every SQL count is non-negative, so `compared < 0` can never fire and an EMPTY
+    // population read GREEN again. A knob that reintroduces trap #14 inside the fix for trap #14,
+    // with a test ratifying it. The floor is now clamped to max(1, redFloor).
+    var report = canary(0, 0, 0).evaluate(DAY);
+
+    assertThat(report.status())
+        .as("an empty population must never certify, whatever the floor is configured to")
+        .isEqualTo("YELLOW");
+    assertThat(report.minCompared())
+        .as("the report publishes the EFFECTIVE floor, so the clamp is visible in the artifact and"
+            + " not only in a startup log line")
+        .isEqualTo(20);
+  }
+
+  @Test
+  @DisplayName("a floor below redFloor is raised to it — certifying implies RED was reachable")
+  void floorBelowRedFloorIsRaised() {
+    // divergent can never exceed compared, so at compared < redFloor the top severity cannot fire
+    // however corrupt the feed is. Certification must imply RED was at least reachable.
+    assertThat(canary(19, 0, 5).evaluate(DAY).minCompared()).isEqualTo(20);
+    assertThat(canary(19, 0, 5).evaluate(DAY).status())
+        .as("19 comparable symbols cannot reach a redFloor of 20, so this must not read GREEN")
+        .isEqualTo("YELLOW");
+  }
+
+  @Test
+  @DisplayName("a floor above redFloor is honoured as configured — the clamp is a floor, not a pin")
+  void floorAboveRedFloorIsHonoured() {
+    // ⚠️ Without this the clamp could overwrite EVERY configured value with redFloor and the two
+    // tests above would still pass — a guard that silently ignores its own knob.
+    assertThat(canary(150, 0, FLOOR).evaluate(DAY).minCompared()).isEqualTo(FLOOR);
   }
 
   @Test

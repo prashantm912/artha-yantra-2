@@ -147,6 +147,36 @@ public class BhavcopyCloseCanary {
    * scheduling, rate-limiter contention and failure modes — a larger change that deserves its own
    * PR and its own review. Shipping the floor first means the next session cannot pass silently
    * while that is decided, which is the property actually worth having today.
+   *
+   * <p><b>⚠️ EFFECTIVE, not configured — this field is CLAMPED at construction.</b> The configured
+   * value is raised to at least {@code max(1, redFloor)}, because a floor below {@code redFloor}
+   * would certify a population on which RED is arithmetically unreachable: {@code divergent} can
+   * never exceed {@code compared}, so at {@code compared < redFloor} the top severity cannot fire
+   * however corrupt the feed is. That is precisely the defect this property exists to remove, and
+   * without the clamp the property reintroduces it inside its own knob — trap #14 one level up, in
+   * the fix for trap #14. {@code min-compared=0} is the worst case: every SQL count is
+   * non-negative, so the condition can never fire and an EMPTY population reads GREEN again.
+   *
+   * <p><b>Why clamp-and-warn rather than refuse to start.</b> Three options, and the choice is
+   * deliberate:
+   *
+   * <ul>
+   *   <li><b>Fail fast</b> — a bean that refuses to construct takes market-data, and with it the
+   *       LIVE FEED, down over a misconfigured canary threshold. This package is fail-soft
+   *       throughout ({@link #sweep()} swallows a RuntimeException, alerting never throws), and
+   *       trading the feed for a canary knob inverts that priority.
+   *   <li><b>Silent clamp</b> — a quiet lie. An operator who set 0 would see 20 and never learn
+   *       why.
+   *   <li><b>Clamp + WARN + publish the effective value</b> — chosen. The clamp direction is
+   *       always toward ALARMING, never toward certifying, so the safety property holds whether or
+   *       not anyone reads the log; and the report carries this effective value on the wire, so
+   *       the clamp is visible in the ARTIFACT rather than only in a startup line that scrolls
+   *       away.
+   * </ul>
+   *
+   * <p>To silence this canary use {@code artha.bhavcopy-close.enabled=false} (stops the sweep) or
+   * {@code alerts-enabled=false} (stops the page), never a low floor. Note {@code enabled=false}
+   * deliberately does NOT change the GET: the endpoint reports what is true regardless.
    */
   private final int minCompared;
 
@@ -172,7 +202,18 @@ public class BhavcopyCloseCanary {
     this.threshold = threshold;
     this.redFloor = redFloor;
     this.sampleLimit = sampleLimit;
-    this.minCompared = minCompared;
+    // ⚠️ Clamped, not trusted — see the field javadoc. A floor under redFloor certifies populations
+    // on which RED cannot arithmetically fire. redFloor itself is NOT clamped (it is tuned, and
+    // this change does not own it); max(1, ...) only stops a non-positive redFloor from dragging
+    // the floor back to zero and reopening the empty-population GREEN.
+    this.minCompared = Math.max(minCompared, Math.max(1, redFloor));
+    if (this.minCompared != minCompared) {
+      log.warn(
+          "artha.bhavcopy-close.min-compared={} would certify a population on which RED is"
+              + " arithmetically unreachable (red-floor={}); raised to {}. To silence this canary"
+              + " use artha.bhavcopy-close.enabled=false, not a low floor.",
+          minCompared, redFloor, this.minCompared);
+    }
   }
 
   /**

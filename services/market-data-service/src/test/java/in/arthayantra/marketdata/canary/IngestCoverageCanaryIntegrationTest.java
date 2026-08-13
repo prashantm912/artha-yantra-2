@@ -169,8 +169,11 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     clearWindow(target);
     seedBatchesHealthy(target);
     seedCapture(target, 5200L);
-    // minervini ran but wrote 0 rows — a data-starved skip, not a healthy screen.
+    // minervini ran but wrote 0 rows — a data-starved skip, not a healthy screen. Writing 0 rows
+    // means no OUTPUT landed either, which is the shape the artifact-first policy must still see as
+    // the SAME data-starved YELLOW, not as a missing day.
     deleteSource(target, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    deleteScreenRows(target, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
     seedBatch(target, IngestRunLedger.SOURCE_MINERVINI_SCREEN, "SUCCESS", 0L, true);
 
     IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
@@ -179,6 +182,115 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     SourceCoverage cov = find(report, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
     assertThat(cov.status()).isEqualTo("YELLOW");
     assertThat(cov.detail()).contains("data-starved");
+  }
+
+  /**
+   * The FALSE RED this policy change closes, in its exact production shape (measured 2026-08-13).
+   * Neither screen has its own cron — both are {@code @EventListener(BhavcopyBackfillCompleted)} off
+   * the 19:30 IST bhavcopy job, and the owner's machine shuts down at 19:00, so the whole chain
+   * routinely runs on the NEXT MORNING's boot. On 2026-08-12 that produced 1785 Minervini + 2270
+   * Manas rows for the trade date, complete, written by runs that STARTED 2026-08-13 08:04 IST —
+   * {@code ingest_runs} held no screen row stamped 08-12 at all, and the board reported RED with
+   * "no ingest run recorded for the trading day". So: NO run rows in the trade day's window, and
+   * output that exists but was computed the next morning.
+   */
+  @Test
+  void aScreenerIsGreenWhenTheNextMorningCatchUpDidTheWork() {
+    LocalDate target = LocalDate.of(2026, 1, 6);
+    clearWindow(target);
+    seedBatchesHealthy(target);
+    seedCapture(target, 5200L);
+    // the 19:30 chain never fired: no screen run row lands inside the trade day at all...
+    deleteSource(target, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    deleteSource(target, IngestRunLedger.SOURCE_MANAS_SCREEN);
+    // ...but the next morning's boot catch-up screened the day and stored its output.
+    seedScreenRows(target, target.plusDays(1).atTime(8, 4));
+
+    IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
+
+    assertThat(report.status())
+        .as("a screen that produced its rows must not read as a missing day just because catch-up did it")
+        .isEqualTo("GREEN");
+    for (String source :
+        List.of(IngestRunLedger.SOURCE_MINERVINI_SCREEN, IngestRunLedger.SOURCE_MANAS_SCREEN)) {
+      SourceCoverage cov = find(report, source);
+      assertThat(cov.status()).as(source).isEqualTo("GREEN");
+      assertThat(cov.detail()).contains("screen stored 1 rows for this trading day");
+      // Late-but-done must stay distinguishable from never-done, or the false RED has simply been
+      // traded for a blind GREEN. The lateness rides the detail, with its T+n.
+      assertThat(cov.detail()).contains("LATE, T+1 catch-up");
+      assertThat(cov.detail()).contains("computed " + target.plusDays(1) + " 08:04 IST");
+    }
+  }
+
+  /** The mirror: a screen computed on its own evening says so, and must NOT be labelled late. */
+  @Test
+  void aScreenerComputedTheSameEveningIsGreenAndNotLabelledLate() {
+    LocalDate target = LocalDate.of(2026, 1, 13);
+    clearWindow(target);
+    seedBatchesHealthy(target); // seeds the screen output at 19:01 on the trade date itself
+    seedCapture(target, 5200L);
+
+    IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
+
+    SourceCoverage cov = find(report, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    assertThat(cov.status()).isEqualTo("GREEN");
+    assertThat(cov.detail()).contains("computed " + target + " 19:01 IST (same day)");
+    assertThat(cov.detail()).doesNotContain("LATE");
+  }
+
+  /**
+   * The guard must still be able to fire (catalogue trap #14: a check whose operand can no longer be
+   * non-empty reports success forever). Genuinely-missing screen output for the trade date — no run
+   * row AND no stored rows — stays RED, and the detail now names the ABSENCE THAT MATTERS: the
+   * output's, not the run row's.
+   */
+  @Test
+  void aScreenerWithNoStoredOutputAndNoRunIsStillRed() {
+    LocalDate target = LocalDate.of(2026, 1, 20);
+    clearWindow(target);
+    seedBatchesHealthy(target);
+    seedCapture(target, 5200L);
+    deleteSource(target, IngestRunLedger.SOURCE_MANAS_SCREEN);
+    deleteScreenRows(target, IngestRunLedger.SOURCE_MANAS_SCREEN);
+
+    IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
+
+    assertThat(report.status()).isEqualTo("RED");
+    SourceCoverage cov = find(report, IngestRunLedger.SOURCE_MANAS_SCREEN);
+    assertThat(cov.status()).isEqualTo("RED");
+    assertThat(cov.detail()).contains("no screen output stored for the trading day");
+    // the sibling screen kept its output and must be unaffected — a real gap, not a blanket RED
+    assertThat(find(report, IngestRunLedger.SOURCE_MINERVINI_SCREEN).status()).isEqualTo("GREEN");
+  }
+
+  /**
+   * Newly reachable, and previously a SILENT GREEN: the run reports SUCCESS with a positive
+   * {@code rows_written}, but every row it wrote carries a DIFFERENT {@code screen_date} — the
+   * bhavcopy watermark never advanced, so the screen restated an older day. The old policy read the
+   * counter, and the counter was never about this date. Same family as the bhavcopy aggregate that
+   * greened over a dead NSE side.
+   */
+  @Test
+  void aScreenerThatRestatedAnotherDayIsRedDespiteAPositiveRowCount() {
+    LocalDate target = LocalDate.of(2026, 4, 14);
+    clearWindow(target);
+    seedBatchesHealthy(target);
+    seedCapture(target, 5200L);
+    // the run ran on the trade date and reports 1783 rows written, yet no row in the output table
+    // carries THIS screen_date — the screen restated whatever day the stalled watermark still named
+    deleteScreenRows(target, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    deleteSource(target, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    seedBatch(target, IngestRunLedger.SOURCE_MINERVINI_SCREEN, "SUCCESS", 1783L, true);
+
+    IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
+
+    SourceCoverage cov = find(report, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    assertThat(cov.status())
+        .as("a positive rows_written must NOT rescue a trade date the screen never labelled")
+        .isEqualTo("RED");
+    assertThat(cov.detail()).contains("NONE carry screen_date=" + target);
+    assertThat(cov.detail()).contains("stale watermark");
   }
 
   /**
@@ -1026,6 +1138,45 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     seedBatch(day, IngestRunLedger.SOURCE_INSTRUMENT_SYNC, "SUCCESS", 90000L, true);
     seedBatch(day, IngestRunLedger.SOURCE_MINERVINI_SCREEN, "SUCCESS", 96L, true);
     seedBatch(day, IngestRunLedger.SOURCE_MANAS_SCREEN, "SUCCESS", 40L, true);
+    // The SCREENER policy reads the OUTPUT tables, not the run rows — a healthy day must seed both
+    // (same reason seedBhavRows exists for the bhavcopy policy). Computed the same evening.
+    seedScreenRows(day, day.atTime(19, 1));
+  }
+
+  /**
+   * Seeds the DESTINATION tables the screener policy actually reads, at an explicit
+   * {@code computedAt} so a test can choose the same-evening or the next-morning catch-up shape.
+   * Minimal columns only — the policy counts rows and reads {@code max(computed_at)}, nothing else.
+   */
+  private void seedScreenRows(LocalDate day, java.time.LocalDateTime computedAtIst) {
+    OffsetDateTime computedAt = computedAtIst.atZone(Ist.ZONE).toOffsetDateTime();
+    jdbc.update(
+        "INSERT INTO minervini_screen_results (screen_date, symbol, close_price, gate1, gate2,"
+            + " gate3, gate4, gate5, gate6, gate7, gate8, gates_passed, passes_all, computed_at)"
+            + " VALUES (?, ?, 100, true, true, true, true, true, true, true, true, 8, true, ?)"
+            + " ON CONFLICT (screen_date, symbol) DO UPDATE SET computed_at = EXCLUDED.computed_at",
+        day,
+        "RELIANCE",
+        computedAt);
+    jdbc.update(
+        "INSERT INTO manas_arora_screen_results (screen_date, symbol, close_price, within_high,"
+            + " above_sma50, liquid_volume, liquid_depth, low_cap, gate1, gate2, gate3, gate4,"
+            + " gate5, gate6, gates_passed, passes_all, computed_at)"
+            + " VALUES (?, ?, 100, true, true, true, true, true, true, true, true, true, true,"
+            + " true, 6, true, ?)"
+            + " ON CONFLICT (screen_date, symbol) DO UPDATE SET computed_at = EXCLUDED.computed_at",
+        day,
+        "RELIANCE",
+        computedAt);
+  }
+
+  /** Drops one screener's stored output for {@code day} — the "the screen never ran" shape. */
+  private void deleteScreenRows(LocalDate day, String source) {
+    String table =
+        IngestRunLedger.SOURCE_MINERVINI_SCREEN.equals(source)
+            ? "minervini_screen_results"
+            : "manas_arora_screen_results";
+    jdbc.update("DELETE FROM " + table + " WHERE screen_date = ?", day);
   }
 
   private void seedBatch(LocalDate day, String source, String status, Long rows, boolean finished) {
@@ -1063,6 +1214,8 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
         end);
     jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE trade_date = ?", day);
     jdbc.update("DELETE FROM bse_eod_bhavcopy WHERE trade_date = ?", day);
+    jdbc.update("DELETE FROM minervini_screen_results WHERE screen_date = ?", day);
+    jdbc.update("DELETE FROM manas_arora_screen_results WHERE screen_date = ?", day);
   }
 
   /**

@@ -73,14 +73,23 @@ public class IngestRunLedger {
     }
   }
 
-  /** Stamp the run {@code SUCCESS} with its row count. No-op when {@code id} is null; never throws. */
+  /**
+   * Stamp the run {@code SUCCESS} with its row count. No-op when {@code id} is null; never throws.
+   *
+   * <p>{@code error} is cleared, not left as-is: a SUCCESS row carrying error text is a contradiction
+   * every downstream reader has to disambiguate. No caller writes an error on a success path today,
+   * so this is defence rather than repair — specifically against {@link IngestRunReaper} having
+   * stamped {@code REAPED_ON_BOOT} on a row that then went on to finish, which would otherwise
+   * persist for the row's whole life.
+   */
   public void succeed(Long id, long rowsWritten) {
     if (id == null) {
       return;
     }
     try {
       jdbc.update(
-          "UPDATE ingest_runs SET status='SUCCESS', rows_written=?, finished_at=now() WHERE id=?",
+          "UPDATE ingest_runs SET status='SUCCESS', rows_written=?, finished_at=now(), error=NULL"
+              + " WHERE id=?",
           rowsWritten,
           id);
     } catch (RuntimeException e) {

@@ -359,6 +359,9 @@ public class PaperService {
     // tick state directly (see #countMtmBlindPositions), so there is no persistent state to race,
     // purge, or rebuild.
     meterRegistry.gauge("ay_paper_mtm_blind_positions", this, PaperService::countMtmBlindPositions);
+    // Derived the same way, for the same reason: re-queried on every scrape, no stored state.
+    meterRegistry.gauge(
+        "ay_paper_unrealized_withheld_books", this, PaperService::countUnrealizedWithheldBooks);
   }
 
   /**
@@ -1793,6 +1796,16 @@ public class PaperService {
    * scraped/read, decoupled from how often the UI polls {@link #positionDetail}/{@link
    * #openPositions} (which stay display-only and never touch this method at all).
    */
+  /**
+   * Companion to {@link #countMtmBlindPositions}: how many BOOKS are currently withholding their
+   * unrealized entirely because at least one of their positions cannot be marked. The blind-position
+   * count says how much data is missing; this says how much MONEY MATH is degraded, which is the
+   * alertable quantity — one unmarked position withholds its whole book's unrealized.
+   */
+  private double countUnrealizedWithheldBooks() {
+    return accountService.withheldBookCount();
+  }
+
   private double countMtmBlindPositions() {
     // Counts positions with NO mark of any kind — tick OR captured daily close. Before the equity-mark
     // change this read `lastTick` alone, so all 18 cash-equity swing positions counted as blind purely

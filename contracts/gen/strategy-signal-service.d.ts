@@ -1286,6 +1286,8 @@ export interface components {
              * @description Open positions carrying NO mark — neither a live tick nor a captured daily close — and therefore valued at entry cost (zero unrealized) in the figures above. Non-zero means equity is only partially marked.
              */
             unmarkedPositions: number;
+            /** @description True when unrealized is WITHHELD: at least one open position cannot be marked, so `unrealized` reports 0 for this book rather than a partial sum that would depend on which marks happen to be missing. Read with unmarkedPositions (N) and openPositions (M). */
+            unrealizedWithheld: boolean;
         };
         JournalBody: {
             /** Format: int64 */

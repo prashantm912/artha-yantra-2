@@ -10,7 +10,9 @@ import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
@@ -48,7 +50,14 @@ public class PaperAccountService {
                   "Open positions carrying NO mark — neither a live tick nor a captured daily close"
                       + " — and therefore valued at entry cost (zero unrealized) in the figures"
                       + " above. Non-zero means equity is only partially marked.")
-          int unmarkedPositions) {}
+          int unmarkedPositions,
+      @Schema(
+              description =
+                  "True when unrealized is WITHHELD: at least one open position cannot be marked, so"
+                      + " `unrealized` reports 0 for this book rather than a partial sum that would"
+                      + " depend on which marks happen to be missing. Read with unmarkedPositions"
+                      + " (N) and openPositions (M).")
+          boolean unrealizedWithheld) {}
 
   private final PaperAccountRepository account;
   private final PaperPositionRepository positions;
@@ -101,16 +110,94 @@ public class PaperAccountService {
     return account.get(book).startingCapital();
   }
 
-  /** Σ mark-to-market unrealized over a book's open positions ({@code book} null → all books). */
+  /**
+   * Σ mark-to-market unrealized over a book's open positions ({@code book} null → all books),
+   * withheld ENTIRELY for any book that cannot mark every one of them.
+   *
+   * <p><b>All-or-nothing, per BOOK</b> (owner decision, 2026-08-13). Per-position fallback let a
+   * partially-marked book mix marked and cost-valued positions, and the error then depended on WHICH
+   * marks were missing: a book whose marked positions are winners and whose unmarked ones are losers
+   * reports equity ABOVE the truth, loosening every {@code mode: pct} rail — the one direction an
+   * entry gate must never fail in. Withholding the whole book removes that cherry-picking: the
+   * degraded output is a single explainable quantity (cost-basis equity) instead of an arbitrary
+   * subset sum, and it is EXACTLY what these books computed before this class existed, so nothing is
+   * refused and no behaviour is surprising.
+   *
+   * <p><b>What this does NOT give you, stated plainly because it was claimed and is false:</b> it is
+   * not a one-sided sign guarantee. Withholding reports 0, so a book whose TRUE aggregate unrealized
+   * is NEGATIVE still reports equity above the truth — measured: true −90 reports 0, overstating by
+   * 90. It is strictly better than per-position on the cherry-picking case (+10 overstated becomes
+   * −90 understated) and strictly worse when the MARKED subset is itself net-negative (−10
+   * understated becomes +40 overstated). The honest invariant is narrower: the error is always the
+   * book's WHOLE unrealized, never a subset chosen by which marks happen to be missing. Sign is
+   * one-directional only while a book's aggregate unrealized is ≥ 0 — true for both swing books today
+   * (+9,093.77 / +18,120.20) but a property of the book, not of the mechanism. Only refusing to
+   * compute bounds the sign outright, and that was declined for availability.
+   *
+   * <p>Per BOOK and never globally: manas and minervini have separate equity, so one book's missing
+   * mark must not zero the other's. The {@code null} aggregate therefore sums each book's own
+   * all-or-nothing result rather than withholding everything.
+   */
   public BigDecimal unrealizedTotal(String book) {
+    if (book != null) {
+      return unrealizedForBook(positions.listOpen(book)).setScale(2, RoundingMode.HALF_UP);
+    }
     BigDecimal total = BigDecimal.ZERO;
-    for (PositionRow pos : positions.listOpen(book)) {
-      BigDecimal mark = mark(pos).orElse(pos.avgEntryPrice());
-      BigDecimal move =
-          "BUY".equals(pos.side()) ? mark.subtract(pos.avgEntryPrice()) : pos.avgEntryPrice().subtract(mark);
-      total = total.add(move.multiply(BigDecimal.valueOf(pos.qty())));
+    for (List<PositionRow> rows : openByBook().values()) {
+      total = total.add(unrealizedForBook(rows));
     }
     return total.setScale(2, RoundingMode.HALF_UP);
+  }
+
+  /** Σ unrealized over ONE book's rows, or ZERO if any single one of them cannot be marked. */
+  private BigDecimal unrealizedForBook(List<PositionRow> open) {
+    BigDecimal total = BigDecimal.ZERO;
+    for (PositionRow pos : open) {
+      Optional<BigDecimal> mark = mark(pos);
+      if (mark.isEmpty()) {
+        return BigDecimal.ZERO; // withhold the WHOLE book — see unrealizedTotal
+      }
+      BigDecimal move =
+          "BUY".equals(pos.side())
+              ? mark.get().subtract(pos.avgEntryPrice())
+              : pos.avgEntryPrice().subtract(mark.get());
+      total = total.add(move.multiply(BigDecimal.valueOf(pos.qty())));
+    }
+    return total;
+  }
+
+  /** Open positions grouped by their own book (the unit all-or-nothing applies to). */
+  private Map<String, List<PositionRow>> openByBook() {
+    Map<String, List<PositionRow>> byBook = new LinkedHashMap<>();
+    for (PositionRow pos : positions.listOpen(null)) {
+      byBook.computeIfAbsent(pos.book(), b -> new ArrayList<>()).add(pos);
+    }
+    return byBook;
+  }
+
+  /**
+   * True when unrealized is being WITHHELD — i.e. at least one open position cannot be marked, so
+   * {@link #unrealizedTotal} is reporting 0 for that book rather than a partial sum. For the {@code
+   * null} aggregate, true when ANY book is withholding.
+   *
+   * <p>This exists so the degraded state cannot hide. A silently-zero unrealized is precisely how the
+   * original defect survived unnoticed for months; the fix must not inherit that invisibility. Rides
+   * {@code AccountDto.unrealizedWithheld} alongside the {@code unmarkedPositions} count and the
+   * {@code ay_paper_unrealized_withheld_books} gauge.
+   */
+  public boolean unrealizedWithheld(String book) {
+    if (book != null) {
+      return positions.listOpen(book).stream().anyMatch(pos -> mark(pos).isEmpty());
+    }
+    return openByBook().values().stream()
+        .anyMatch(rows -> rows.stream().anyMatch(pos -> mark(pos).isEmpty()));
+  }
+
+  /** How many books are currently withholding unrealized (the alertable gauge value). */
+  public long withheldBookCount() {
+    return openByBook().values().stream()
+        .filter(rows -> rows.stream().anyMatch(pos -> mark(pos).isEmpty()))
+        .count();
   }
 
   /**
@@ -313,7 +400,8 @@ public class PaperAccountService {
         capitalUsed(book),
         usageByClass(book),
         Map.of("future", futureMarginPct, "shortOption", shortOptionMarginPct),
-        unmarkedOpenCount(book));
+        unmarkedOpenCount(book),
+        unrealizedWithheld(book));
   }
 
   /** Owner edit of a book's starting capital. */

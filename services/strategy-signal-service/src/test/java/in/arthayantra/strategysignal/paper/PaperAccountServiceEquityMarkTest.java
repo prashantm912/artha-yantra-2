@@ -171,18 +171,23 @@ class PaperAccountServiceEquityMarkTest {
         .isEqualByComparingTo("9543.77");
   }
 
-  /** A partially-warmed cache marks what it can and reports the rest — no all-or-nothing. */
+  /**
+   * Superseded characterization (owner decision, 2026-08-13). This used to assert PARTIAL summing —
+   * the two marked positions contributing 6,280.14 while the other four scored zero. That is exactly
+   * the shape that let a marked winner sit beside an unmarked loser and report equity above the
+   * truth, so a partially-warmed book now withholds entirely.
+   */
   @Test
-  void aPartiallyWarmedCacheMarksWhatItCanAndCountsTheRest() {
+  void aPartiallyWarmedCacheWithholdsTheWholeBook() {
     Fixture f = fixture(noTicks());
     f.marks().put("NSE", "SANSERA", new BigDecimal("3925.0000"), SESSION);
     f.marks().put("NSE", "SKYGOLD", new BigDecimal("838.0000"), SESSION);
 
     assertThat(f.service().unmarkedOpenCount(BOOK)).as("four of six still blind").isEqualTo(4);
-    // SANSERA 6×588.13 = 3528.78, SKYGOLD 24×114.64 = 2751.36; the other four contribute 0.
     assertThat(f.service().unrealizedTotal(BOOK))
-        .as("only the two marked positions contribute; the other four still score zero")
-        .isEqualByComparingTo("6280.14");
+        .as("no partial sum — the whole book is withheld rather than mixing marked and cost-valued")
+        .isEqualByComparingTo("0.00");
+    assertThat(f.service().unrealizedWithheld(BOOK)).isTrue();
   }
 
   /** A stale mark is refused rather than served, and the position reverts to being counted blind. */
@@ -244,5 +249,102 @@ class PaperAccountServiceEquityMarkTest {
         .as("a pre-entry close must not become this position's mark")
         .isEqualByComparingTo("0.00");
     assertThat(service.unmarkedOpenCount(BOOK)).isEqualTo(1);
+  }
+
+  // ---- all-or-nothing marks, per BOOK (owner decision 2026-08-13) -------------------------------
+
+  private static PaperAccountService svc(
+      PaperPositionRepository positions, EquityMarkCache marks, LastTickReader ticks) {
+    PaperAccountRepository accounts = mock(PaperAccountRepository.class);
+    when(accounts.get(any()))
+        .thenReturn(new PaperAccountRepository.Account(STARTING_CAPITAL, STARTING_CAPITAL, null));
+    when(positions.realizedTotal(any())).thenReturn(BigDecimal.ZERO);
+    Clock clock = Clock.fixed(Instant.parse("2026-08-13T03:05:00Z"), ZoneOffset.UTC);
+    return new PaperAccountService(
+        accounts, positions, ticks, marks, mock(InstrumentMetaClient.class),
+        mock(MarginServiceClient.class), clock, new BigDecimal("0.15"), new BigDecimal("0.12"));
+  }
+
+  private static PositionRow row(long id, String book, String sym, long qty, String avgEntry) {
+    return new PositionRow(
+        id, "NSE", sym, "BUY", qty, new BigDecimal(avgEntry), BigDecimal.ZERO, "OPEN",
+        OffsetDateTime.parse("2026-07-20T14:35:00Z"), null, null, new BigDecimal("1.00"), null, book);
+  }
+
+  /**
+   * THE SIGN CASE — the whole reason all-or-nothing exists. A book whose MARKED position is a WINNER
+   * and whose UNMARKED position is a LOSER reported equity ABOVE the truth under per-position
+   * fallback (the loser's loss was erased), loosening every {@code mode: pct} rail. Withholding the
+   * whole book must land BELOW the all-marked figure, never above it.
+   */
+  @Test
+  void anUnmarkedLoserMustNotPushEquityAboveTheFullyMarkedFigure() {
+    PositionRow winner = row(1, BOOK, "WINNER", 10, "100.00"); // marks at 150 -> +500
+    PositionRow loser = row(2, BOOK, "LOSER", 10, "100.00"); //  marks at  40 -> -600
+    PaperPositionRepository positions = mock(PaperPositionRepository.class);
+    when(positions.listOpen(any(String.class))).thenReturn(List.of(winner, loser));
+    when(positions.listOpen(null)).thenReturn(List.of(winner, loser));
+
+    EquityMarkCache both = new EquityMarkCache(
+        Clock.fixed(Instant.parse("2026-08-13T03:05:00Z"), ZoneOffset.UTC), 5);
+    both.put("NSE", "WINNER", new BigDecimal("150.00"), SESSION);
+    both.put("NSE", "LOSER", new BigDecimal("40.00"), SESSION);
+    BigDecimal fullyMarked = svc(positions, both, noTicks()).equity(BOOK);
+
+    EquityMarkCache winnerOnly = new EquityMarkCache(
+        Clock.fixed(Instant.parse("2026-08-13T03:05:00Z"), ZoneOffset.UTC), 5);
+    winnerOnly.put("NSE", "WINNER", new BigDecimal("150.00"), SESSION);
+    PaperAccountService degraded = svc(positions, winnerOnly, noTicks());
+
+    assertThat(fullyMarked)
+        .as("truth: +500 winner, -600 loser = -100 unrealized")
+        .isEqualByComparingTo("149900.00");
+    assertThat(degraded.unrealizedTotal(BOOK))
+        .as("the loser cannot be marked -> the WHOLE book is withheld, not just the loser")
+        .isEqualByComparingTo("0.00");
+    assertThat(degraded.equity(BOOK))
+        .as(
+            "per-position fallback reported 150500.00 here — ABOVE the 149900.00 truth, because the"
+                + " loser's -600 was erased while the winner's +500 was kept. That is the defect.")
+        .isLessThan(new BigDecimal("150500.00"));
+    assertThat(degraded.unrealizedWithheld(BOOK)).as("and it is not silent").isTrue();
+  }
+
+  /** One book's missing mark must not zero another book's unrealized. */
+  @Test
+  void withholdingIsPerBookNotGlobal() {
+    PositionRow manasOk = row(1, "manas-arora", "AAA", 10, "100.00"); // marked -> +200
+    PositionRow minerviniGap = row(2, "minervini", "BBB", 10, "100.00"); // unmarked
+    PaperPositionRepository positions = mock(PaperPositionRepository.class);
+    when(positions.listOpen("manas-arora")).thenReturn(List.of(manasOk));
+    when(positions.listOpen("minervini")).thenReturn(List.of(minerviniGap));
+    when(positions.listOpen(null)).thenReturn(List.of(manasOk, minerviniGap));
+
+    EquityMarkCache marks = new EquityMarkCache(
+        Clock.fixed(Instant.parse("2026-08-13T03:05:00Z"), ZoneOffset.UTC), 5);
+    marks.put("NSE", "AAA", new BigDecimal("120.00"), SESSION);
+    PaperAccountService s = svc(positions, marks, noTicks());
+
+    assertThat(s.unrealizedTotal("manas-arora"))
+        .as("a fully-marked book keeps its unrealized")
+        .isEqualByComparingTo("200.00");
+    assertThat(s.unrealizedTotal("minervini")).as("the gapped book withholds").isEqualByComparingTo("0.00");
+    assertThat(s.unrealizedTotal(null))
+        .as("the aggregate SUMS per-book results — one gap must not zero the other book")
+        .isEqualByComparingTo("200.00");
+    assertThat(s.unrealizedWithheld("manas-arora")).isFalse();
+    assertThat(s.unrealizedWithheld("minervini")).isTrue();
+    assertThat(s.withheldBookCount()).isEqualTo(1);
+  }
+
+  /** Fully marked = unchanged behaviour; withholding must not fire on a complete book. */
+  @Test
+  void aFullyMarkedBookIsUnaffectedByTheAllOrNothingRule() {
+    Fixture f = fixture(noTicks());
+    warmAllMarks(f.marks());
+
+    assertThat(f.service().unrealizedTotal(BOOK)).isEqualByComparingTo("9093.77");
+    assertThat(f.service().unrealizedWithheld(BOOK)).isFalse();
+    assertThat(f.service().withheldBookCount()).isZero();
   }
 }

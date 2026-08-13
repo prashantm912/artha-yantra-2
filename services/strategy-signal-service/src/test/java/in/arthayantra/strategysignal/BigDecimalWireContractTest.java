@@ -624,7 +624,8 @@ class BigDecimalWireContractTest {
         bd("475.00"), 3, bd("50000.00"),
         Map.of("OPTION_LONG", bd("2350.00")),
         Map.of("FUTURES", bd("12.5")),
-        0);
+        0,
+        false);
   }
 
   @Test

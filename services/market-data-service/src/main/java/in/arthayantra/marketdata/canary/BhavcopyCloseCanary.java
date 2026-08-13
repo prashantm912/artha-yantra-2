@@ -183,19 +183,30 @@ public class BhavcopyCloseCanary {
    * has not landed when this fires, and without the guard below the canary silently re-evaluates
    * YESTERDAY's session and alerts on it as if it were tonight's: an operator message naming the
    * wrong day, repeated every late night — and a confidently wrong alert trains the owner to ignore
-   * the channel. The margin is thin even at the current 20:10 against a 19:30 bhavcopy, and it
-   * shrinks to nothing under the pending schedule move.
+   * the channel.
    *
    * <p>⚠️ A skipped comparison is PERMANENTLY missed for that session, not deferred.
    * {@code BhavcopyStartupCatchup} starts the backfill on the next boot, so the DATA arrives — but
    * this canary has no completion listener and only fires on its own cron, and by the time it next
-   * fires that session is no longer today, so the guard below skips it again. Forever. Only a
-   * same-day retry, or a bhavcopy-complete listener, can ever make it. Skipping still trades a
-   * missed check for a WRONG one, which is the right trade; it does not make the check free, and
-   * the loss is a whole session's close comparison rather than a delay. Wiring that listener is the
-   * real fix and is deliberately not in this change.
+   * fires that session is no longer today, so the guard below skips it again. Forever. Skipping
+   * still trades a missed check for a WRONG one, which is the right trade; it does not make the
+   * check free, and the loss is a whole session's close comparison rather than a delay.
+   *
+   * <p><b>20:10 → 18:58, and this LOSES coverage. Stated because it is a real cost of moving the
+   * chain inside the 19:00 machine-off boundary, not a wash.</b> Against the four measured publish
+   * times, 20:10 caught all four; 18:58 catches three (17:52, 17:59, 18:47) and misses 19:31. It is
+   * the last free minute before shutdown, so it is the most coverage the window allows — 18:52,
+   * seven minutes after an ASYNCHRONOUS 18:45 submit, would have caught only two.
+   *
+   * <p>The 19:31 case needs a bhavcopy-completion listener, and that was BUILT AND WITHDRAWN from
+   * the schedule PR rather than shipped half-right. Three review rounds found successive defects in
+   * it: routed through the date guard it was meant to bypass, so it recovered nothing; then a
+   * dedupe that covered only the rare trigger order; then — decisively — the watermark is
+   * in-memory, so the daily JVM restart replays the startup catch-up with a null watermark and
+   * re-alerts yesterday's divergence every morning. Doing it properly needs a PERSISTED compared-
+   * session watermark, which is its own change with its own migration.
    */
-  @Scheduled(cron = "${artha.bhavcopy-close.cron:0 10 20 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.bhavcopy-close.cron:0 58 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void sweep() {
     if (!live || !enabled) {
       return;

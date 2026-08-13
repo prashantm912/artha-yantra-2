@@ -85,8 +85,12 @@ public class InsightSweeper {
     }
   }
 
-  /** Weekly Saturday quality-report job — QUALITY_REPORT (§10.2). */
-  @Scheduled(cron = "${artha.insights.quality-cron:0 0 8 * * SAT}", zone = "Asia/Kolkata")
+  /**
+   * Weekly quality report — QUALITY_REPORT (§10.2). FRIDAY 18:12 IST since 2026-08-12: it ran
+   * Saturday 08:00, and the owner's machine is weekday-only, so it had never run. Friday evening
+   * keeps the "end of the week" intent inside the operating window.
+   */
+  @Scheduled(cron = "${artha.insights.quality-cron:0 12 18 * * FRI}", zone = "Asia/Kolkata")
   public void qualityReport() {
     try {
       engine.runQualityReport();
@@ -95,8 +99,8 @@ public class InsightSweeper {
     }
   }
 
-  /** 21:10-IST strategy-evidence sweep — STRATEGY_EVIDENCE, after the 21:00 graduation eval (§5.2). */
-  @Scheduled(cron = "${artha.insights.strategy-evidence-cron:0 10 21 * * MON-FRI}", zone = "Asia/Kolkata")
+  /** 18:56-IST strategy-evidence sweep — STRATEGY_EVIDENCE, after the 18:55 graduation eval (§5.2). */
+  @Scheduled(cron = "${artha.insights.strategy-evidence-cron:0 56 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void strategyEvidenceSweep() {
     try {
       engine.runStrategyEvidenceSweep();
@@ -105,8 +109,8 @@ public class InsightSweeper {
     }
   }
 
-  /** 21:15-IST sell-decision sweep — SELL_DECISION, after the 20:05 swing batch persists V037 (§5.3). */
-  @Scheduled(cron = "${artha.insights.sell-decision-cron:0 15 21 * * MON-FRI}", zone = "Asia/Kolkata")
+  /** 18:57-IST sell-decision sweep — SELL_DECISION, after the swing batch persists V037 (§5.3). */
+  @Scheduled(cron = "${artha.insights.sell-decision-cron:0 57 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void sellDecisionSweep() {
     try {
       engine.runSellDecisionSweep();

@@ -53,7 +53,7 @@ public class MinerviniBuyableProducer {
    * STALE vs the bhavcopy watermark (would re-diff yesterday's data) and dedupes per screen date
    * (a stale-screen evening would otherwise re-push yesterday's alert verbatim).
    */
-  @Scheduled(cron = "${artha.minervini.buyable-alerts.cron:0 58 19 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.minervini.buyable-alerts.cron:0 53 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void alertNewlyBuyable() {
     try {
       List<LocalDate> dates = screenRepo.recentScreenDates(2);

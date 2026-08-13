@@ -9,8 +9,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Fires the F7 graduation evaluator once per trading evening (21:00 IST, after the swing batches at
- * 20:00/20:05). Gated on {@code artha.graduation.promotion-enabled=true} (default off) so the marker
+ * Fires the F7 graduation evaluator once per trading evening (18:55 IST, inside the 19:00 machine-off
+ * boundary, after the evening data chain). Gated on {@code artha.graduation.promotion-enabled=true} (default off) so the marker
  * pass only runs once the owner arms it — CI/test/mock contexts stay inert; it is dormant anyway
  * until a strategy accrues ≥ the promotion-min-trades closed paper trades.
  */
@@ -30,8 +30,8 @@ public class GraduationPromotionScheduler {
     this.events = events;
   }
 
-  /** Post-close daily evaluation (21:00 IST, weekdays). */
-  @Scheduled(cron = "${artha.graduation.promotion-cron:0 0 21 * * MON-FRI}", zone = "Asia/Kolkata")
+  /** Post-close daily evaluation (18:55 IST, weekdays). */
+  @Scheduled(cron = "${artha.graduation.promotion-cron:0 55 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void run() {
     try {
       GraduationPromotionService.PromotionResult r = promotion.evaluate();
@@ -46,7 +46,7 @@ public class GraduationPromotionScheduler {
         events.publishEvent(
             new SwingBatchAlert(
                 "graduation", "Graduation evaluation FAILED",
-                "The 21:00 IST promotion evaluator threw: " + e.getMessage()));
+                "The 18:55 IST promotion evaluator threw: " + e.getMessage()));
       } catch (RuntimeException publishFailure) {
         log.warn("graduation alert publish failed: {}", publishFailure.getMessage());
       }

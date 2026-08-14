@@ -110,7 +110,8 @@ class BhavcopyCloseCanaryStaleSessionTest {
         20,
         25,
         100,
-        "NIFTY 200");
+        "NIFTY 200",
+        "0 5 16 * * MON-FRI");
   }
 
   private static BhavcopyCloseCanary canary(JdbcTemplate jdbc, NtfyClient ntfy) {

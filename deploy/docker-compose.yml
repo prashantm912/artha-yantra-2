@@ -400,7 +400,8 @@ services:
       # fires on every boot; ingest_runs shows BHAVCOPY runs from 00:55 to 23:45 IST in one week),
       # so "5 minutes early" guarantees nothing. NSE's earliest measured publish is 17:52, so 16:05
       # is ahead of every same-day write. The 16:00 Kite daily bar is already final (measured
-      # byte-identical on re-fetch at 17:43 IST, 2026-08-13).
+      # byte-identical on re-fetch at 17:43 IST, 2026-08-13). Retuning this moves BOTH triggers: a
+      # boot after this time replays the missed pass ahead of that boot's bhavcopy projection.
       ARTHA_BHAVCOPY_CLOSE_PREFETCH_CRON: "${ARTHA_BHAVCOPY_CLOSE_PREFETCH_CRON:-0 5 16 * * MON-FRI}"
       # the bhavcopy fetch the chain waits on
       ARTHA_BHAVCOPY_EOD_CRON: "${ARTHA_BHAVCOPY_EOD_CRON:-0 45 18 * * MON-FRI}"

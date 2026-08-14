@@ -157,6 +157,14 @@ public class MonitorSchedulingConfig {
    * liveness DETECTORS. This is a WRITE path (Kite fetch + {@code upsertAuthoritativeAll}), so
    * parking it there could starve {@code FeedWatchdog.check} and {@code DataHealthCanary.sweep}.
    *
+   * <p><b>The 16:05 cron is not the only caller of that pass.</b> {@code
+   * BhavcopyCloseCanary.catchUpPopulation} replays a MISSED pass at boot, and it runs on {@code
+   * BhavcopyStartupCatchup}'s own one-shot thread rather than here — deliberately, because its
+   * whole job is to precede that bean's bhavcopy projection, and queueing it behind this
+   * single-thread scheduler would put a hung 16:05 cron in front of it. The two can only overlap
+   * on a boot landing inside the same second as the cron, and the pass is idempotent (cache-first
+   * upserts), so the overlap costs duplicate fetches and nothing else.
+   *
    * <p><b>The canary's own {@code sweep()} deliberately does NOT move here.</b> Serialising the
    * 18:58 evaluation behind the 16:05 fetch on one thread would guarantee a complete population —
    * and would also mean a HUNG fetch silently cancels the evaluation entirely. A short population

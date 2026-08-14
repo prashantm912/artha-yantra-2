@@ -52,11 +52,19 @@ class BhavcopyClosePopulationPrefetchTest {
   /** 2026-08-13T12:10:00Z is 17:40 IST on 2026-08-13, a Thursday. */
   private static final Instant NOW = Instant.parse("2026-08-13T12:10:00Z");
 
+  /** 2026-08-13T03:30:00Z is 09:00 IST — a normal morning boot, hours before the 16:05 pass. */
+  private static final Instant MORNING = Instant.parse("2026-08-13T03:30:00Z");
+
   private static final LocalDate DAY = LocalDate.of(2026, 8, 13);
+
+  /** The canary's own {@code @Scheduled} default, so the catch-up's "was it due?" matches it. */
+  private static final String PREFETCH_CRON = "0 5 16 * * MON-FRI";
 
   private final StaticIndexConstituents constituents = mock(StaticIndexConstituents.class);
   private final GapBackfiller backfiller = mock(GapBackfiller.class);
   private final MarketCalendar calendar = mock(MarketCalendar.class);
+  private final NtfyClient ntfy = mock(NtfyClient.class);
+  private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
 
   @Test
   @DisplayName("every constituent gets a 1d fetch bounded to the trade date's IST session")
@@ -87,14 +95,37 @@ class BhavcopyClosePopulationPrefetchTest {
     assertThat(to.getAllValues()).containsOnly(NOW);
   }
 
+  /**
+   * ⚠️ This test asserts the guard's OWN SIGNAL, and it has to, because everything else about the
+   * empty case is indistinguishable from having no guard at all.
+   *
+   * <p>Delete the {@code symbols.isEmpty()} branch and the loop below it runs zero times, returns
+   * the same {@code 0}, and touches the backfiller not at all — so the obvious assertions
+   * ({@code isZero()}, {@code verifyNoInteractions}) pass IDENTICALLY with and without it. That is
+   * catalogue trap #14 sitting inside the fix for trap #14: a guard that enumerates zero items and
+   * reports success. The counter and the alert are the only things that exist ONLY when the guard
+   * does, so they are what this pins.
+   */
   @Test
-  @DisplayName("an empty reference index is reported, not silently treated as a completed pass")
+  @DisplayName("an empty reference index pages and counts, not just returns zero")
   void anEmptyPopulationIndexFetchesNothingAndSaysSo() {
     when(constituents.symbols("NIFTY 200")).thenReturn(List.of());
 
     assertThat(canary().prefetchNow(DAY)).isZero();
 
     verifyNoInteractions(backfiller);
+    assertThat(meters.counter("ay_bhavcopy_close_population_empty_total").count())
+        .as(
+            "an empty reference index must increment a counter of its own — without one, deleting"
+                + " the guard entirely leaves every other assertion here green")
+        .isEqualTo(1.0);
+    ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+    verify(ntfy)
+        .send(
+            eq("ArthaYantra bhavcopy-close population empty"), eq("urgent"), body.capture());
+    assertThat(body.getValue())
+        .as("the page must name the misconfigured index, not just report a small population")
+        .contains("NIFTY 200");
   }
 
   @Test
@@ -175,6 +206,62 @@ class BhavcopyClosePopulationPrefetchTest {
     disabled.prefetchPopulation();
 
     verifyNoInteractions(backfiller, calendar);
+  }
+
+  /**
+   * ⚠️ The 16:05 cron only fires while the service is UP at 16:05. Nothing else replays it.
+   *
+   * <p>This machine is off overnight and the live stack has already spent a whole afternoon down
+   * (2026-08-10: no batch 08:29→18:47 IST). On a boot after 16:05 the scheduled pass is simply
+   * skipped for that session — and {@code BhavcopyStartupCatchup} fires immediately, so the
+   * bhavcopy projection claims today's 1d buckets first and the perfectly-agreeing bars keep
+   * {@code source='BHAVCOPY'}. That is the exact ordering inversion the 16:05 hour exists to
+   * prevent, arriving through the one door the cron cannot cover.
+   */
+  @Test
+  @DisplayName("a boot after the scheduled slot replays the missed population pass")
+  void aLateBootReplaysTheMissedPass() {
+    // NOW is 17:40 IST: past the 16:05 pass, and still ahead of NSE's earliest measured 17:52
+    // publish — the window where a replay can still win the race against tonight's projection.
+    when(calendar.isTradingDay(DAY)).thenReturn(true);
+    when(constituents.symbols("NIFTY 200")).thenReturn(List.of("RELIANCE", "TCS"));
+
+    assertThat(canary().catchUpPopulation())
+        .as(
+            "a boot at 17:40 IST missed the 16:05 pass; without a replay the evening's population"
+                + " is whatever other jobs left behind — measured 14 against a floor of 100")
+        .isEqualTo(2);
+
+    verify(backfiller).prefetch(eq(new InstrumentKey("NSE", "RELIANCE")), eq("1d"), any(), any());
+    verify(backfiller).prefetch(eq(new InstrumentKey("NSE", "TCS")), eq("1d"), any(), any());
+  }
+
+  @Test
+  @DisplayName("a boot before the scheduled slot leaves the pass to its own cron")
+  void anEarlyBootDoesNotReplayAnything() {
+    // 09:00 IST. Replaying here fetches 202 IN-PROGRESS 1d bars — 71 s of kite-historical budget
+    // for a partial bar that the 16:05 pass then re-fetches anyway (B-4 always refreshes the
+    // in-progress bucket). "Catch up whenever we boot" would pay that on every restart.
+    when(calendar.isTradingDay(DAY)).thenReturn(true);
+
+    assertThat(canary(live(), true, MORNING).catchUpPopulation()).isZero();
+
+    verifyNoInteractions(backfiller);
+    verify(constituents, never()).symbols(anyString());
+  }
+
+  @Test
+  @DisplayName("the catch-up honours the same holiday / profile / off-switch guards as the cron")
+  void theCatchUpHonoursTheSameGuardsAsTheScheduledPass() {
+    when(calendar.isTradingDay(DAY)).thenReturn(false);
+    assertThat(canary().catchUpPopulation()).isZero();
+
+    assertThat(canary(new MockEnvironment().withProperty("spring.profiles.active", "mock"), true)
+            .catchUpPopulation())
+        .isZero();
+    assertThat(canary(live(), false).catchUpPopulation()).isZero();
+
+    verifyNoInteractions(backfiller);
   }
 
   /**
@@ -280,18 +367,22 @@ class BhavcopyClosePopulationPrefetchTest {
   }
 
   private BhavcopyCloseCanary canary() {
-    return canary(new MockEnvironment().withProperty("spring.profiles.active", "live"), true);
+    return canary(live(), true);
   }
 
   private BhavcopyCloseCanary canary(MockEnvironment environment, boolean enabled) {
+    return canary(environment, enabled, NOW);
+  }
+
+  private BhavcopyCloseCanary canary(MockEnvironment environment, boolean enabled, Instant now) {
     return new BhavcopyCloseCanary(
         mock(JdbcTemplate.class),
-        mock(NtfyClient.class),
-        Clock.fixed(NOW, ZoneOffset.UTC),
+        ntfy,
+        Clock.fixed(now, ZoneOffset.UTC),
         constituents,
         backfiller,
         calendar,
-        new SimpleMeterRegistry(),
+        meters,
         environment,
         enabled,
         true,
@@ -299,6 +390,11 @@ class BhavcopyClosePopulationPrefetchTest {
         20,
         25,
         100,
-        "NIFTY 200");
+        "NIFTY 200",
+        PREFETCH_CRON);
+  }
+
+  private static MockEnvironment live() {
+    return new MockEnvironment().withProperty("spring.profiles.active", "live");
   }
 }

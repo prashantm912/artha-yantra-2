@@ -184,7 +184,8 @@ class BhavcopyCloseCanaryCoverageFloorTest {
         20,
         25,
         floor,
-        "NIFTY 200");
+        "NIFTY 200",
+        "0 5 16 * * MON-FRI");
   }
 
   private static List<CloseMismatch> offenders(int n) {

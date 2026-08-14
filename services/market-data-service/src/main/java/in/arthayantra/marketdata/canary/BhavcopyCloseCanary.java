@@ -13,6 +13,7 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZonedDateTime;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +21,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Component;
 
 /**
@@ -53,7 +55,8 @@ import org.springframework.stereotype.Component;
  * something that can actually satisfy it.
  *
  * <p><b>⚠️ What this canary certifies, and what it does NOT.</b> The population is a SAMPLE — the
- * {@code NIFTY 200} reference list, 202 large-cap NSE names — not the ~2 450-name EQ bhavcopy
+ * {@code NIFTY 200} reference list, 202 large-cap NSE names, plus whatever residue other jobs leave
+ * behind (measured 215 compared against a 202-symbol seed) — not the ~2 450-name EQ bhavcopy
  * universe. That is a real limit and naming it is the whole point of the coverage work: a partial
  * check that reads as complete is how this gate got into trouble in the first place.
  *
@@ -95,6 +98,11 @@ public class BhavcopyCloseCanary {
    * verdict: a {@code YELLOW} carrying {@code divergent=0} is a COVERAGE failure, and without the
    * floor beside the count a reader cannot tell that from a clean run.
    */
+  // ⚠️ `compared` is NOT the size of the seeded sample. It counts every EQ bhavcopy row that has a
+  // source='KITE' 1d bar on that date — the symbols prefetchPopulation() seeds PLUS whatever other
+  // jobs happen to leave behind (the swing settle's holdings, an owner browsing charts). Measured
+  // 215 against a 202-symbol seed. So the seed is a FLOOR on this number, not its definition, and a
+  // count above the seed size is expected rather than a counting bug.
   public record BhavcopyCloseReport(
       @Schema(types = {"string", "null"}) LocalDate tradeDate,
       String status,
@@ -141,6 +149,17 @@ public class BhavcopyCloseCanary {
   private final GapBackfiller backfiller;
   private final MarketCalendar calendar;
   private final Counter divergenceCounter;
+  private final Counter emptyPopulationCounter;
+  private final String prefetchCron;
+
+  /**
+   * The prefetch cron, parsed, so {@link #catchUpPopulation()} can ask "was today's pass already
+   * due?" from the SAME property the schedule uses rather than a second copy of the literal that
+   * could drift away from it. {@code null} when the job is disabled Spring's documented way
+   * ({@code cron = "-"}), in which case there is no scheduled pass and so nothing to catch up.
+   */
+  private final CronExpression prefetchSchedule;
+
   private final boolean live;
   private final boolean enabled;
   private final boolean alertsEnabled;
@@ -216,7 +235,8 @@ public class BhavcopyCloseCanary {
       @Value("${artha.bhavcopy-close.red-floor:20}") int redFloor,
       @Value("${artha.bhavcopy-close.sample-limit:25}") int sampleLimit,
       @Value("${artha.bhavcopy-close.min-compared:100}") int minCompared,
-      @Value("${artha.bhavcopy-close.population-index:NIFTY 200}") String populationIndex) {
+      @Value("${artha.bhavcopy-close.population-index:NIFTY 200}") String populationIndex,
+      @Value("${artha.bhavcopy-close.prefetch-cron:0 5 16 * * MON-FRI}") String prefetchCron) {
     this.jdbc = jdbc;
     this.ntfy = ntfy;
     this.clock = clock;
@@ -224,7 +244,12 @@ public class BhavcopyCloseCanary {
     this.backfiller = backfiller;
     this.calendar = calendar;
     this.populationIndex = populationIndex;
+    this.prefetchCron = prefetchCron;
+    this.prefetchSchedule =
+        Scheduled.CRON_DISABLED.equals(prefetchCron) ? null : CronExpression.parse(prefetchCron);
     this.divergenceCounter = meterRegistry.counter("ay_bhavcopy_close_divergence_total");
+    this.emptyPopulationCounter =
+        meterRegistry.counter("ay_bhavcopy_close_population_empty_total");
     this.live = environment.matchesProfiles("live");
     this.enabled = enabled;
     this.alertsEnabled = alertsEnabled;
@@ -301,6 +326,13 @@ public class BhavcopyCloseCanary {
    * delisted name should SHRINK the population, not abort the pass, because a short population is
    * precisely what the coverage floor is built to report. This pass is therefore self-checking — if
    * it quietly achieves nothing, {@link #sweep()} says so 18 minutes later.
+   *
+   * <p><b>A cron alone is not enough, and that is what {@link #catchUpPopulation()} is for.</b> This
+   * fires only while the service is UP at 16:05. The machine is off overnight and the stack has
+   * been down for a whole afternoon before (2026-08-10: no batch 08:29→18:47 IST), so a boot after
+   * 16:05 skips this pass entirely — and then the boot's own {@code BhavcopyStartupCatchup} claims
+   * today's 1d buckets first, which is the exact inversion the hour above exists to prevent. The
+   * catch-up replays the missed pass ahead of that projection.
    */
   // ⚠️ `cron` and `zone` stay on ONE line: CronPassthroughParityTest matches the @Scheduled site by
   // a single-line `cron = "${...:` needle and then asserts THAT line carries the IST zone. Split
@@ -319,16 +351,85 @@ public class BhavcopyCloseCanary {
   }
 
   /**
+   * Replays a MISSED {@link #prefetchPopulation()} at boot, synchronously, and returns the symbols
+   * attempted (0 when there was nothing to replay). Called by {@code BhavcopyStartupCatchup}
+   * BEFORE it submits the bhavcopy pull — see that class for why the ordering is expressed as a
+   * direct call rather than two independent {@code ApplicationReadyEvent} listeners.
+   *
+   * <p><b>Why this is not optional polish.</b> {@link #prefetchPopulation()} is cron-only, so it
+   * fires only while the service is up at 16:05 IST. On a boot after that hour the pass is simply
+   * never run for that session, while the boot's bhavcopy catch-up runs immediately — so the
+   * evening's population is back to whatever other jobs left behind (measured: 14), and the very
+   * ordering the 16:05 hour was chosen to guarantee is inverted. It is not a rare shape: this
+   * machine is off overnight, and the live stack has already spent an entire afternoon down
+   * (2026-08-10, no batch 08:29→18:47 IST).
+   *
+   * <p><b>Due, not "always on boot".</b> Replaying on an 08:00 boot would fetch 202 IN-PROGRESS 1d
+   * bars — 71 s of {@code kite-historical} budget for a partial bar that the 16:05 pass then
+   * re-fetches anyway (B-4 always refreshes the in-progress bucket). So the catch-up runs only when
+   * today's scheduled fire time has already passed, read from {@link #prefetchSchedule} — the same
+   * property the annotation uses, so retuning the cron moves both.
+   *
+   * <p>Note the catch-up is still LATE by construction: it happens whenever the service comes up,
+   * which on a bad night can be after NSE has published. It cannot beat a bhavcopy write that
+   * landed while the stack was down — nothing running inside the stack can. What it does guarantee
+   * is that THIS boot's projection does not get in first.
+   */
+  public int catchUpPopulation() {
+    if (!live || !enabled) {
+      return 0;
+    }
+    ZonedDateTime now = ZonedDateTime.now(clock.withZone(Ist.ZONE));
+    LocalDate today = now.toLocalDate();
+    if (!isTradingDaySafe(today) || !scheduledPassIsAlreadyPast(now)) {
+      return 0;
+    }
+    log.info(
+        "bhavcopy-close population pass missed its scheduled slot (cron '{}', service not up) —"
+            + " replaying it for {} now, ahead of this boot's bhavcopy projection",
+        prefetchCron, today);
+    return prefetchNow(today);
+  }
+
+  /** Whether the prefetch cron's fire time for {@code now}'s IST date is at or before {@code now}. */
+  private boolean scheduledPassIsAlreadyPast(ZonedDateTime now) {
+    if (prefetchSchedule == null) {
+      return false;
+    }
+    ZonedDateTime firstToday =
+        prefetchSchedule.next(now.toLocalDate().atStartOfDay(Ist.ZONE).minusNanos(1));
+    // Not-today covers the cron simply not firing on this date at all (a MON-FRI cron on a Saturday
+    // that some future calendar counts as a trading day) — there is no missed pass to replay.
+    return firstToday != null
+        && firstToday.toLocalDate().equals(now.toLocalDate())
+        && !firstToday.isAfter(now);
+  }
+
+  /**
    * One synchronous population pass for {@code tradeDate}; returns the symbols attempted. Callable
    * from tests and by hand — the guards live in {@link #prefetchPopulation()}, so this always runs.
    */
   public int prefetchNow(LocalDate tradeDate) {
     List<String> symbols = constituents.symbols(populationIndex);
     if (symbols.isEmpty()) {
-      log.warn(
-          "bhavcopy-close population index '{}' has no constituents — the comparison population"
-              + " will be whatever other jobs leave behind, and the coverage floor will say so",
-          populationIndex);
+      // ⚠️ This branch must emit something NOTHING ELSE emits, or it is not a guard at all. Delete
+      // it and the loop below runs zero times, returns the same 0, and raises no interaction — so a
+      // test written against the return value or the backfiller passes IDENTICALLY with and without
+      // it: catalogue trap #14, the guard that enumerates zero items and reports success, inside the
+      // fix for trap #14. The counter is what the test can pin; the alert is what an operator
+      // actually sees. Both, deliberately: a metric nothing scrapes is loud only in principle.
+      //
+      // It does NOT wait for the 18:58 sweep to notice. The sweep's coverage YELLOW says "too few
+      // symbols were comparable" — true, but it cannot name the cause, and the causes are wildly
+      // different repairs (a typo in population-index vs. a Kite outage vs. index erosion). This
+      // fires 2h53m earlier and names it.
+      emptyPopulationCounter.increment();
+      String message =
+          "bhavcopy-close population index '" + populationIndex + "' has no constituents — the"
+              + " canary fetched NOTHING, so tonight's comparison population is whatever other jobs"
+              + " leave behind. Check the index name against reference/index-constituents.json";
+      log.error("bhavcopy-close population pass fetched nothing: {}", message);
+      sendAlert("ArthaYantra bhavcopy-close population empty", "urgent", message);
       return 0;
     }
     // Today only: one 1d bucket per symbol, so one Kite page each. A wider window would re-fetch
@@ -506,9 +607,15 @@ public class BhavcopyCloseCanary {
       // Names the population on purpose. "202 symbols compared, none diverge" invites the reader to
       // hear "the close feed is clean" — but this is a large-cap SAMPLE, and an idiosyncratic bad
       // print outside it is exactly what a GREEN here cannot speak to (see the class javadoc).
+      //
+      // "after seeding", not "of": `compared` is every dual-sourced EQ row (see BhavcopyCloseReport),
+      // which is the seeded sample PLUS other jobs' leftovers — measured 215 against a 202-symbol
+      // seed. "215 of the NIFTY 200 sample" would be arithmetically impossible and would read as a
+      // bug in the count rather than as the residual it is.
       log.info(
-          "bhavcopy-close canary GREEN for {} — {} of the '{}' sample compared, none diverge > {}%"
-              + " (systemic agreement only; per-symbol correctness outside the sample is unchecked)",
+          "bhavcopy-close canary GREEN for {} — {} symbols compared after seeding the '{}' list,"
+              + " none diverge > {}% (systemic agreement only; per-symbol correctness outside the"
+              + " sample is unchecked)",
           report.tradeDate(), report.compared(), populationIndex, report.thresholdPct());
       return;
     }

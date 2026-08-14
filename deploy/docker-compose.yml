@@ -389,6 +389,12 @@ services:
       ARTHA_EVENING_CHAIN_ENABLED: ${ARTHA_EVENING_CHAIN_ENABLED:-true}
       ARTHA_EVENING_CHAIN_ALERTS_ENABLED: ${ARTHA_EVENING_CHAIN_ALERTS_ENABLED:-true}
       ARTHA_EVENING_CHAIN_CHECK_CRON: "${ARTHA_EVENING_CHAIN_CHECK_CRON:-0 59 18 * * MON-FRI}"
+      # How long a RUNNING ingest_runs row may sit unfinished before the push says "(stuck)" rather
+      # than "still pending". DELIBERATELY NOT the shared ARTHA_INGEST_CANARY_RUNNING_STALE_MINUTES
+      # (120): the nine expected writers fire 18:45-18:51 and this check runs at 18:59, so the oldest
+      # RUNNING row it can ever see is 14 minutes old — at 120 the STUCK state was unreachable in
+      # production. VALUE IS THE CODE DEFAULT, BYTE FOR BYTE (#653).
+      ARTHA_EVENING_CHAIN_RUNNING_STALE_MINUTES: ${ARTHA_EVENING_CHAIN_RUNNING_STALE_MINUTES:-10}
       # ---- Evening-chain cron passthroughs (added 2026-08-11) ----
       # ⚠️ VALUES ARE THE CODE DEFAULTS, BYTE FOR BYTE. This block changes NOTHING about when these
       # jobs run; it exists because they had no passthrough at all, so setting any of them in `.env`

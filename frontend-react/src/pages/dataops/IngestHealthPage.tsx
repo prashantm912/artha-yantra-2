@@ -227,7 +227,11 @@ function chainStateTone(s: ChainSourceProgress): string {
   return 'text-warn ring-warn/40'; // PENDING
 }
 
-/** Human label for a source chip: the state, plus the raw status when it disambiguates DONE. */
+/**
+ * Human label for a source chip: the state, plus the status when it disambiguates DONE. A screener
+ * that skipped because it was already current carries the synthetic `UP_TO_DATE` rather than
+ * `SUCCESS` — no run happened, and the chip should say which of the two it was.
+ */
 function chainStateLabel(s: ChainSourceProgress): string {
   if (s.state === 'DONE') return s.status ?? 'DONE';
   if (s.state === 'STUCK') return 'STUCK';
@@ -270,17 +274,29 @@ function EveningChainPanel({ chain }: { chain: ChainReport }) {
   const outstandingNames = outstanding
     .map((s) => (s.state === 'STUCK' ? `${s.source} (stuck)` : s.source))
     .join(', ');
+  // ⚠️ THREE outcomes, not two (review Major 4). A FAILURE row is TERMINAL, so it is DONE and it does
+  // NOT block `chain.complete` — `complete` answers "will anything more run", never "is it safe".
+  // This line used to branch on `complete` alone, so a failed evening was announced as
+  // "complete — safe to shut down" into a role="status" aria-live region: the one reader who gets
+  // ONLY the announcement was told the exact opposite of the truth. Mirrors EveningChainCanary#publish.
+  const failed = chain.sources.filter((s) => s.state === 'DONE' && s.status === 'FAILURE');
+  const failedNames = failed.map((s) => s.source).join(', ');
+  const safeToShutDown = outstanding.length === 0 && failed.length === 0;
+  const headline = outstanding.length
+    ? `Evening chain ${chain.done}/${chain.total} done — still pending: ${outstandingNames}.` +
+      (failed.length ? ` Failed: ${failedNames}.` : '')
+    : failed.length
+      ? `Evening chain finished ${chain.done}/${chain.total} — FAILED: ${failedNames}. Nothing more will run, but it is not clean.`
+      : `Evening chain complete ${chain.done}/${chain.total} — safe to shut down.`;
   return (
     <div
       className={cn(
         'space-y-2 rounded-lg border px-4 py-3',
-        chain.complete ? 'border-bull/40 bg-bull/5' : 'border-warn/40 bg-warn/5',
+        safeToShutDown ? 'border-bull/40 bg-bull/5' : 'border-warn/40 bg-warn/5',
       )}
     >
       <p role="status" aria-live="polite" className="text-sm font-semibold text-ay-text">
-        {chain.complete
-          ? `Evening chain complete ${chain.done}/${chain.total} — safe to shut down.`
-          : `Evening chain ${chain.done}/${chain.total} done — still pending: ${outstandingNames}.`}
+        {headline}
       </p>
       <div className="flex flex-wrap gap-1.5">
         {chain.sources.map((s) => (

@@ -73,9 +73,13 @@ class OperatingWindowTest {
     // against the shutdown boundary. They must follow the 08:35 entry pass; see the ordering test.
     JOBS.put("artha.paper.reconciliation.cron", SS + "paper/PaperReconciliationScheduler.java");
     JOBS.put("artha.paper.past-expiry-recon.cron", SS + "paper/PaperScheduler.java");
+    // The pre-shutdown "can I shut down yet?" push. It is the LAST job of the window (18:59, one
+    // minute before the machine goes off), so it is also the one with the least margin for a drift
+    // out of it — a cron edit that pushed it to 19:00 would silently never fire.
+    JOBS.put("artha.evening-chain.check-cron", MD + "canary/EveningChainCanary.java");
   }
 
-  private static final int EXPECTED_JOB_COUNT = 16;
+  private static final int EXPECTED_JOB_COUNT = 17;
 
   @Test
   @DisplayName("the catalogue is not silently shrunk")

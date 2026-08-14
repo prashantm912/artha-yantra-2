@@ -52,7 +52,7 @@ class CronPassthroughParityTest {
    * the whole file execute zero assertions and pass — the guard-that-checks-nothing shape. Lowering
    * this number is a deliberate act that must be justified in the PR that does it.
    */
-  private static final int EXPECTED_JOB_COUNT = 10;
+  private static final int EXPECTED_JOB_COUNT = 11;
 
   private static final List<Job> JOBS =
       List.of(
@@ -92,7 +92,18 @@ class CronPassthroughParityTest {
           new Job(
               "artha.minervini.buyable-alerts.cron",
               "ARTHA_MINERVINI_BUYABLE_ALERTS_CRON",
-              SRC + "screener/minervini/MinerviniBuyableProducer.java"));
+              SRC + "screener/minervini/MinerviniBuyableProducer.java"),
+          // Added 2026-08-14 (review Major 6). Compose already carried this passthrough, which made
+          // it an UNPINNED third copy of the schedule — the exact #653 shape this file exists for.
+          // ⚠️ It is also why EveningChainCanary's @Scheduled keeps `cron` and `zone` on ONE source
+          // line: activeCronSites() below matches PER LINE, so a wrapped annotation reads to
+          // onePropertyOneActiveScheduledSite as a job with no zone at all. That per-line extraction
+          // was the stated blocker for adding this job; reformatting the annotation is the fix, and
+          // the comment lives in both files so neither side can be "corrected" back on its own.
+          new Job(
+              "artha.evening-chain.check-cron",
+              "ARTHA_EVENING_CHAIN_CHECK_CRON",
+              SRC + "canary/EveningChainCanary.java"));
 
   @Test
   @DisplayName("the catalogue still covers every job it claims to")

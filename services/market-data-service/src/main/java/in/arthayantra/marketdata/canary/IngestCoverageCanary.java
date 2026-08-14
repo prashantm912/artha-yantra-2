@@ -692,25 +692,6 @@ public class IngestCoverageCanary {
             + " fetch itself came back empty");
   }
 
-  /**
-   * The destination table each SCREENER source writes, or {@code null} for a source the policy has
-   * no artifact mapped for. Table names are switch-selected literals over our own constants, never
-   * interpolated user input.
-   *
-   * <p>An unmapped source must never read as healthy: a SCREENER whose artifact cannot be located is
-   * a canary that cannot fire, so it reds loudly in {@link #screenerStored} instead of greening on a
-   * count it never took (catalogue trap #14 — a guard that enumerates zero and reports success).
-   */
-  private static String screenTable(String source) {
-    if (IngestRunLedger.SOURCE_MINERVINI_SCREEN.equals(source)) {
-      return "minervini_screen_results";
-    }
-    if (IngestRunLedger.SOURCE_MANAS_SCREEN.equals(source)) {
-      return "manas_arora_screen_results";
-    }
-    return null;
-  }
-
   /** A screen's stored artifact for one trade date: how many rows, and when they were computed. */
   private record ScreenOutput(long rows, Instant computedAt) {}
 
@@ -729,7 +710,10 @@ public class IngestCoverageCanary {
    * false-REDding is still visible as late, just no longer reported as missing.
    */
   private SourceCoverage screenerStored(ExpectedSource expected, LocalDate tradingDay) {
-    String table = screenTable(expected.source());
+    // An unmapped source must never read as healthy: a SCREENER whose artifact cannot be located is
+    // a canary that cannot fire, so it reds loudly rather than greening on a count it never took
+    // (catalogue trap #14 — a guard that enumerates zero and reports success).
+    String table = ScreenOutputTables.tableFor(expected.source());
     if (table == null) {
       return red(
           expected,

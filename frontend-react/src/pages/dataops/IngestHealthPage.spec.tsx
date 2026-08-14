@@ -138,6 +138,36 @@ const stuckOnlyChain: ChainReport = {
   ],
 };
 
+/**
+ * Major-4 regression: a FAILURE row is terminal, so it is DONE and `complete` stays true — but the
+ * evening is NOT clean. The panel used to branch on `complete` alone and announce
+ * "complete — safe to shut down" into a role="status" aria-live region on exactly this shape.
+ */
+const failedChain: ChainReport = {
+  generatedAt: '2026-09-15T13:29:00Z',
+  day: '2026-09-15',
+  tradingDay: true,
+  total: 9,
+  done: 9,
+  complete: true,
+  sources: [
+    {
+      source: 'NSE_FII_DII',
+      state: 'DONE',
+      status: 'SUCCESS',
+      startedAt: '2026-09-15T13:15:00Z',
+      finishedAt: '2026-09-15T13:16:00Z',
+    },
+    {
+      source: 'DATA_QUALITY',
+      state: 'DONE',
+      status: 'FAILURE',
+      startedAt: '2026-09-15T13:20:00Z',
+      finishedAt: '2026-09-15T13:21:00Z',
+    },
+  ],
+};
+
 let chain: ChainReport = completeChain;
 
 vi.mock('../../api/ingestHealth.ts', async (importOriginal) => ({
@@ -224,5 +254,17 @@ describe('IngestHealthPage', () => {
     expect(screen.queryByText(/^Evening chain complete/)).not.toBeInTheDocument();
     // The "still pending:" line must name the stuck source, not render an empty list.
     expect(screen.getByText(/still pending: MANAS_SCREEN \(stuck\)/)).toBeInTheDocument();
+  }, 15_000);
+
+  it('never says safe-to-shut-down when a source FAILED, even though the chain is complete (Major 4)', () => {
+    chain = failedChain;
+    renderPage();
+
+    // The announcement is a role="status" aria-live region — a screen-reader user gets ONLY this
+    // sentence, so it must not be the opposite of the truth.
+    expect(screen.queryByText(/safe to shut down/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Evening chain complete/)).not.toBeInTheDocument();
+    expect(screen.getByText(/FAILED: DATA_QUALITY/)).toBeInTheDocument();
+    expect(screen.getByText(/not clean/)).toBeInTheDocument();
   }, 15_000);
 });

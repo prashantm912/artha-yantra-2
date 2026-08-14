@@ -488,6 +488,17 @@ Run in order; each answers one question. Canned SQL in §6.
     falsifier: 07-23 (BSE weekly day-of) saturated with 390. Read the fails as *the front weekly
     sitting outside the delta/premium band when freshly rolled or at expiry*, and expect them on
     the cluster days, not only the expiry date itself.
+    ⚠️ **AMENDED 2026-08-14 — the post-expiry-Friday third of the cluster shape is now 3-of-4.**
+    The fourth post-BSE-expiry Friday came in CLEAN: **14 `strike-pick` fails (7 SENSEX slugs)**
+    against 550 (07-24), 374 (07-31) and 350 (08-07), while the same session's SENSEX picks
+    resolved and funded (~₹767 premium legs). Two mechanism checks before crediting anything
+    else: the picker's premium band is the STATIC S24 table (`ScalperConfig` — SENSEX 300–800
+    under both tag states) and `budget_inr` never reaches `StrikePicker`, so #1075 (₹15k→₹25k,
+    first live this day) CANNOT explain it — the budget bounds LOTS, the band bounds PREMIUM.
+    The fresh 08-20 weekly simply priced its delta-band strikes ~700–775, inside the band, where
+    the three prior post-roll Fridays priced outside it. Read the fails as *whether the fresh
+    front weekly's delta-band strikes price inside the static premium band* — a chain-pricing
+    regime fact that the calendar only correlates with, not a calendar rule.
 28. **A dot at 0% (or 100%) on a LIVE, MOVING operand is a FOURTH state — "never crosses" — that neither
     the alive/dead nor the frozen probe can see; check the operand's own min/max against the dot's
     threshold before classifying** (added 2026-07-30) — `breadth` (w **1.0**, the canary's only required

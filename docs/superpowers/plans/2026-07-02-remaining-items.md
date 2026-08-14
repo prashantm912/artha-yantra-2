@@ -2188,9 +2188,32 @@ three in-flight pulls, declared them corrupt and killed them, three times, befor
 it; real progress is `fsutil sparse queryrange`, not `ls -l`), and **#17** a parameter the API
 ACCEPTS and the model IGNORES (`think: "low"` — exact sibling of `@Schema(nullable = true)` being a
 silent no-op at OpenAPI 3.1). Full measurements, hardware ceiling and the still-open questions live in
-memory topic `local-model-evaluation`; the three open ones are **build capability (untested — the
-deciding metric is whether reviewing its diff costs fewer tokens than writing the code, and it
-forfeits STEP 0)**, whether ollama implements MTP, and prefill-after-`<think>` via `"raw": true`.
+memory topic `local-model-evaluation`; still open are whether ollama implements MTP,
+prefill-after-`<think>` via `"raw": true`, and whether a non-test build task behaves differently.
+
+⚠️ **BUILD MEASURED THE SAME NIGHT — ALSO DISPROVEN, AND THE BIGGER MODEL FAILS *GREEN*.** Fair probe,
+same discipline: `ScalpAlertDedupe` (42 lines, pure logic, injected `Clock`, no existing test), class
+source + repo conventions handed over, **no hint at which behaviours matter**, rubric fixed BEFORE
+running. `qwen3-coder:30b` emitted 4 tests that compile, pass checkstyle and go **4/4 GREEN with
+`MAVEN_EXIT=0`** — and **both red-proofs stayed green**: making the window SLIDING (a rejected alert
+refreshes the timestamp, suppressing a re-firing setup forever) and making it NEVER EXPIRE (a setup
+fires once, ever) were each undetected. `qwen3.5:9b` emitted 9 tests and went 3/9 FAIL, BUILD FAILURE.
+
+**Both models made the identical conceptual error, which is what makes it a blind spot rather than
+noise: neither can model a moving clock.** Both "simulated time passing" by constructing a **NEW
+instance** with a later `Clock.fixed`, discarding the `lastSent` map that is the entire thing under
+test. The 30B's one non-trivial test is therefore structurally incapable of failing; the 9B applied
+the same error inconsistently and asserted `isFalse()` on a fresh empty instance, which is impossible.
+
+**The green one is the dangerous one.** A receipt reading *"4 tests, all pass, exit 0, checkstyle
+clean"* would be true in every word while the suite detects neither planted bug — a builder-shaped
+instance of [[success-shaped-nothing-catalogue]]. ⚠️ **And it corrects the deciding metric this
+ledger recorded hours earlier.** "Does reviewing its diff cost less than writing the code" was the
+wrong question. The right one: **the verification needed to TRUST a local build costs more than the
+build, and cannot be skipped, because the failure mode is a passing suite.** Measured on this task:
+brief ~500 tok + reading output ~700 + **two red-proof Maven cycles ~600** ≈ 1,800 for a suite that
+catches nothing, versus ~1,600 to write it myself for a suite that catches both. Neither model
+questioned anything about the brief, so STEP 0 is forfeited too.
 
 **N72 · A ROUTINE POST-CLOSE DEPLOY DESTROYED THE SESSION'S FORENSICS, AND THE OBVIOUS REMEDY IS
 IMPOSSIBLE HERE.** 2026-08-13, and it was MINE. I recreated both strategy-signal and market-data at

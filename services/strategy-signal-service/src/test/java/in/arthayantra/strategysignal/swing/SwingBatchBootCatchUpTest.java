@@ -69,6 +69,18 @@ class SwingBatchBootCatchUpTest {
   private static final Clock BOOTED_2214 = fixed("2026-08-14T16:44:00Z");
   /** Saturday 2026-08-15, 10:00 IST — a non-trading day, so ONLY the cron's weekday clause refuses. */
   private static final Clock BOOTED_SATURDAY = fixed("2026-08-15T04:30:00Z");
+  /** Friday 2026-08-14, 09:05 IST — before the open but INSIDE the 15-minute pre-open reserve. */
+  private static final Clock BOOTED_0905 = fixed("2026-08-14T03:35:00Z");
+  /** Friday 2026-08-14, 08:59 IST — the last minute the boot sweep may still start. */
+  private static final Clock BOOTED_0859 = fixed("2026-08-14T03:29:00Z");
+  /**
+   * Monday 2026-09-14, 18:30 IST — Ganesh Chaturthi, a WEEKDAY exchange holiday. The cron is
+   * {@code MON-FRI} and holiday-blind so its fire "passed", while {@code isTradingDay} is false all
+   * day — which is what made the old trading-day-conditional deadline gate structurally inert here.
+   */
+  private static final Clock BOOTED_HOLIDAY_EVENING = fixed("2026-09-14T13:00:00Z");
+  /** Monday 2026-09-14, 08:38 IST — the same weekday holiday, but inside the cron's own window. */
+  private static final Clock BOOTED_HOLIDAY_MORNING = fixed("2026-09-14T03:08:00Z");
 
   private static final String CRON = "0 35 8 * * MON-FRI";
   private static final String BATCH = "manas-arora";
@@ -307,11 +319,53 @@ class SwingBatchBootCatchUpTest {
   }
 
   @Test
+  @DisplayName("a WEEKDAY-HOLIDAY evening boot is refused — the day type that defeated the old gate")
+  void aWeekdayHolidayEveningBootIsRefused() {
+    // ⚠️ MAJOR 1 (cross-vendor review). On Ganesh Chaturthi the cron still "fired" (MON-FRI is
+    // holiday-blind) while isTradingDay is false ALL DAY — so the previous
+    // `isTradingDay(today) && time >= SESSION_OPEN` gate could never be true and this boot took real
+    // entries at 18:30 on a holiday evening. 16 weekday holidays in the bundled 2026 calendar have
+    // this shape. The wall-clock cutoff refuses it without consulting the calendar at all.
+    SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
+
+    bootCatchUp(BOOTED_HOLIDAY_EVENING, CRON, doctrine).onStartup();
+
+    assertThat(ledger.seeded)
+        .as("a weekday-holiday evening boot must not sweep — this is the exact 22:14 shape the"
+            + " original boot-catch-up rejection was reasoned from, arriving on the one day type"
+            + " where the trading-day-conditional deadline gate is structurally inert")
+        .isEmpty();
+    verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+  }
+
+  @Test
+  @DisplayName("a weekday-holiday MORNING boot still sweeps — it mirrors the holiday-blind cron")
+  void aWeekdayHolidayMorningBootStillSweeps() {
+    // The deliberate half of the Major 1 decision, pinned so it cannot be "tightened" by accident.
+    // The 08:35 cron IS holiday-blind and fires on this day, so refusing here would make the boot
+    // door STRICTER than the schedule it stands in for, and the prior sessions in its window are
+    // real sessions that may still owe entries. Holidays sweep; holiday EVENINGS do not.
+    SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
+
+    bootCatchUp(BOOTED_HOLIDAY_MORNING, CRON, doctrine).onStartup();
+
+    assertThat(ledger.seeded)
+        .as("a weekday holiday inside the cron's own window must sweep exactly as the cron would")
+        .isNotEmpty();
+  }
+
+  @Test
   @DisplayName("the 22:14 EVENING boot the original rejection cited is STILL refused")
   void anEveningBootIsStillRefused() {
     // The 2026-07-17 reasoning ("it fires once, at the moment inputs are least likely to exist")
-    // stays honoured: at 22:14 today's fire HAS passed, so only the market-open deadline refuses it.
-    // If that gate were dropped, this test — not the morning ones — is what would catch it.
+    // stays honoured: at 22:14 today's fire HAS passed, so a time gate is the only thing refusing it.
+    //
+    // ⚠️ MINOR 1 (review): an earlier comment here claimed "if that gate were dropped, this test —
+    // not the morning ones — is what would catch it." Red-proof 3 MEASURED that to be false: while
+    // the gate was trading-day-conditional, removing the boot door's copy left this test GREEN
+    // because catchUp() carried an identical one. Since the Major 1 fix the boot door's gate is
+    // WALL-CLOCK and strictly stronger than catchUp()'s, so it is no longer redundant at all — and
+    // the weekday-holiday test above is the one that proves the difference.
     SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
 
     bootCatchUp(BOOTED_2214, CRON, doctrine).onStartup();
@@ -320,6 +374,40 @@ class SwingBatchBootCatchUpTest {
         .as("an END-OF-DAY batch may not price off a session's partial daily bar")
         .isEmpty();
     verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+  }
+
+  @Test
+  @DisplayName("09:05 — before the open but inside the pre-open reserve — is refused")
+  void aBootInsideThePreOpenReserveIsRefused() {
+    // ⚠️ MAJOR 2 (cross-vendor review). This band was entirely untested: the old gate accepted any
+    // instant strictly before 09:15, and the boot door fires exactly when the backlog is LARGEST
+    // (up to 7 sessions x 2 families = 14 session runs, against 81 s measured for a normal
+    // two-family sweep). Crossing 09:15 mid-entry-pass is not merely late — SwingBatchEngine skips
+    // the EXIT pass entirely when the entry pass trips the deadline, so it takes a partial entry set
+    // AND leaves every held stop unevaluated, and the half-done session can never be completed.
+    SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
+
+    bootCatchUp(BOOTED_0905, CRON, doctrine).onStartup();
+
+    assertThat(ledger.seeded)
+        .as("a sweep with under 15 minutes of clear air must not START — a partial entry set with"
+            + " the exit pass skipped is strictly worse than not running")
+        .isEmpty();
+    verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+  }
+
+  @Test
+  @DisplayName("08:59 — the last minute with full headroom — still sweeps")
+  void aBootJustInsideTheReserveBoundarySweeps() {
+    // The other side of the boundary, so the reserve cannot be silently widened into uselessness:
+    // a guard that refuses everything would pass every refusal test above while forfeiting every
+    // real recovery, including the 08:38 incident this whole change exists for.
+    SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
+
+    bootCatchUp(BOOTED_0859, CRON, doctrine).onStartup();
+
+    assertThat(ledger.seeded).contains(MISSED);
+    verify(recorder).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
   }
 
   @Test
@@ -344,6 +432,26 @@ class SwingBatchBootCatchUpTest {
 
     bootCatchUp(BOOTED_SATURDAY, CRON, doctrine).onStartup();
 
+    assertThat(ledger.seeded).isEmpty();
+    verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+  }
+
+  @Test
+  @DisplayName("boot armed but catchup-enabled off: reports NOT-run rather than announcing a replay")
+  void aDisarmedSweepIsNotAnnouncedAsAReplay() {
+    // ⚠️ MINOR 2 (review). This combination used to log "replaying the missed sweep on boot" at WARN
+    // and then call catchUp(), which returned having done nothing — an operator-facing sentence that
+    // was simply false, on the one path where someone is most likely to be reading the log to work
+    // out why nothing happened. catchUpIfMissed now returns false, honestly.
+    SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
+    SwingBatchCatchUp disarmedSweep =
+        new SwingBatchCatchUp(
+            recorder, runs, ledger.repo, intents, effects, signals, new SwingRunMutex(),
+            List.of(doctrine), events, BOOTED_0838, false, 5, CRON);
+
+    assertThat(disarmedSweep.catchUpIfMissed())
+        .as("a sweep that cannot emit must not report itself as having run")
+        .isFalse();
     assertThat(ledger.seeded).isEmpty();
     verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
   }

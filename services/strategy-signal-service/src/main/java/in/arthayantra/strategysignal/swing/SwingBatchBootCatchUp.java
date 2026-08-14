@@ -18,11 +18,33 @@ import org.springframework.stereotype.Component;
  * the entries were recoverable only by hand.
  *
  * <p><b>Deliberately dumb.</b> Every gate BELOW this door lives in
- * {@link SwingBatchCatchUp#catchUpIfMissed()} — the cron's own fire time, the market-open deadline,
- * the {@code artha.swing.catchup-enabled} arming, the window seed, the atomic per-{@code (batch,
- * session)} claim and the per-family {@link SwingRunMutex}. So a boot before the cron, a boot after
- * the open, an evening boot, a weekend, a disabled cron and a second boot the same morning are all
- * no-ops, and nothing here can emit anything the 08:35 cron would not have.
+ * {@link SwingBatchCatchUp#catchUpIfMissed()} — the cron's own fire time, the pre-open wall-clock
+ * cutoff, the {@code artha.swing.catchup-enabled} arming, the window seed and the atomic
+ * per-{@code (batch, session)} claim. So a boot before the cron, a boot near or after the open, an
+ * evening boot, a weekend, a disabled cron and a second boot the same morning are all no-ops, and
+ * nothing here can emit anything the 08:35 cron would not have.
+ *
+ * <h2>What actually prevents a double entry, in order of who does the work</h2>
+ *
+ * <ol>
+ *   <li><b>{@code swingCatchUpTaskScheduler} corePoolSize=1</b> — the boot one-shot and the 08:35
+ *       {@code @Scheduled} share this pool, so they cannot overlap. Ratcheted by
+ *       {@code MonitorSchedulingConfigTest}.
+ *   <li><b>The atomic claim</b> in {@code swing_catchup_runs} — never re-claims a {@code RUNNING} or
+ *       terminal row, so a SEQUENTIAL second sweep skips a session the first still owns.
+ *   <li><b>The per-family {@link SwingRunMutex}</b> — ⚠️ <b>inert for the boot-vs-cron pair</b>
+ *       (point 1 already forbids that overlap, so it is never contended by those two). It guards a
+ *       manual {@code POST /run} arriving on a Tomcat request thread. Cited here as what it really
+ *       does, because an earlier version of this note credited it with the boot-vs-cron guarantee.
+ *   <li><b>The money backstop, and the one that would still hold if all three above failed:</b>
+ *       {@code swing_paper_effects} UNIQUE {@code (batch, session_date, effect_key)} (V050:25),
+ *       claimed by {@code expectEntry}'s {@code INSERT … ON CONFLICT DO NOTHING} <b>inside the same
+ *       transaction as the signal insert</b> ({@code SwingBatchEngine:729-756}) — a lost claim
+ *       returns {@code -1} and no signal row is written. Pool serialization alone would NOT suffice:
+ *       two SEQUENTIAL sweeps of a still-PENDING session would otherwise re-run the recorder and
+ *       re-enter, and {@code PaperService} AVERAGES a second open on the same key rather than
+ *       rejecting it.
+ * </ol>
  *
  * <h2>⚠️ Why this door needs its OWN flag, and why reusing the existing one would have been wrong</h2>
  *

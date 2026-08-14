@@ -101,6 +101,31 @@ public class SwingBatchCatchUp {
   /** A live run never approaches this; the daily cadence makes any RUNNING claim this old a crash. */
   private static final int STALE_LEASE_MINUTES = 30;
 
+  /**
+   * How much clear air a BOOT sweep must have before the 09:15 open, in minutes.
+   *
+   * <p>⚠️ This is a safety FLOOR, not a tuning knob, which is why it is a constant while the paper
+   * reconciler's equivalent reserve is a property. Crossing the open mid-sweep is not a late run —
+   * {@code SwingBatchEngine} checks the deadline PER CANDIDATE and, when the ENTRY pass trips it,
+   * <b>skips the exit pass entirely</b> ({@code SwingBatchEngine:321-324}). So a sweep that starts
+   * too late takes a PARTIAL entry set AND leaves every held stop unevaluated — strictly worse than
+   * not running, because the partial session then cannot be completed either (the funnel is no
+   * longer that session's screen, so {@code entriesReady} is false on every later sweep and the
+   * session burns its attempt budget to ABANDONED).
+   *
+   * <p><b>Sized against the worst case this door is FOR.</b> The boot door fires exactly when the
+   * backlog is largest: the window is {@code maxAttempts + 2 = 7} sessions × 2 families = up to 14
+   * session runs, against a measured 81 s for a NORMAL two-family sweep (≈40 s per session run) —
+   * so a full backlog is order-10 minutes, not seconds. 15 minutes covers that with margin and
+   * matches {@code artha.paper.reconciliation.catchup-deadline-reserve-minutes}, the in-repo
+   * precedent for exactly this decision.
+   */
+  private static final int BOOT_PRE_OPEN_RESERVE_MINUTES = 15;
+
+  /** The latest wall-clock IST time a BOOT sweep may START (09:00). */
+  private static final java.time.LocalTime BOOT_LATEST_START =
+      MarketCalendar.SESSION_OPEN.minusMinutes(BOOT_PRE_OPEN_RESERVE_MINUTES);
+
   private final SwingBatchRecorder recorder;
   private final SwingBatchRunRepository runs;
   private final SwingCatchUpStateRepository state;
@@ -278,22 +303,39 @@ public class SwingBatchCatchUp {
    * pass that takes entries and forfeits them permanently (a later sweep withholds entries once the
    * funnel is no longer that session's screen, then burns attempt budget to ABANDONED).
    *
-   * <p><b>Armed by exactly two conditions, and it delegates to {@link #catchUp()} for everything
-   * else.</b> It adds NO new flag, NO second claim and NO alternate emission path: {@code
-   * catchUp()}'s window seed, its {@code artha.swing.catchup-enabled} arming, the atomic per-{@code
-   * (batch, session)} claim in {@code swing_catchup_runs} and the per-family {@link SwingRunMutex}
-   * are the same objects on both doors, which is what makes an overlapping boot and cron emit at
-   * most once between them.
+   * <p><b>Armed by exactly two wall-clock conditions, and it delegates to {@link #catchUp()} for
+   * everything else.</b> It adds NO new flag, NO second claim and NO alternate emission path:
+   * {@code catchUp()}'s window seed, its {@code artha.swing.catchup-enabled} arming and the atomic
+   * per-{@code (batch, session)} claim in {@code swing_catchup_runs} are the same objects on both
+   * doors.
    *
    * <ul>
    *   <li><b>Today's fire has already passed</b> — derived from the cron EXPRESSION, so the weekday
    *       clause comes free (on a Saturday the next fire is Monday ⇒ nothing was missed) and a boot
    *       at 07:00, before the cron, correctly leaves the job to the scheduler.
-   *   <li><b>The market has not opened</b> — the same {@link #marketOpenDeadlinePassed()} the sweep
-   *       itself gates on. This is what still refuses the 22:14 EVENING boot the original
-   *       boot-catch-up rejection was reasoned from: at 22:14 on a trading day today's fire has
-   *       passed, but the deadline has too, so the boot door declines and the 08:35 cron owns it.
+   *   <li><b>Wall-clock is before {@link #BOOT_LATEST_START}</b> (09:00 IST). This refuses the 22:14
+   *       EVENING boot the original boot-catch-up rejection was reasoned from, and — unlike
+   *       {@link #marketOpenDeadlinePassed()}, which is trading-day-conditional and therefore
+   *       structurally inert on a weekday holiday — it refuses it on EVERY day type.
    * </ul>
+   *
+   * <h3>Non-trading days: weekends refused, weekday holidays swept — deliberately</h3>
+   *
+   * <p>The governing principle is that this door may never emit anything the 08:35 cron would not
+   * have, nor run at a wall-clock time it could not have run at. That decides both cases without a
+   * separate calendar rule. <b>Weekends</b> never reach the door at all: the cron is {@code MON-FRI},
+   * so on a Saturday the next fire is Monday and nothing was missed — a Saturday boot after a Friday
+   * miss does not sweep, exactly as the cron would not have. <b>Weekday exchange holidays</b> DO
+   * sweep, because the cron is holiday-blind and fires at 08:35 on them too; refusing here would make
+   * the boot door stricter than the schedule it stands in for, and the prior sessions in its window
+   * are real sessions that may still owe entries. What was wrong was never that a holiday swept — it
+   * is that the holiday EVENING was unbounded, which the wall-clock gate now closes.
+   *
+   * <p>(Both in-repo precedents chose differently and for their own reasons:
+   * {@code IngestCoverageCanary.catchUpIfMissed} refuses non-trading days via {@code targetFor(today)
+   * == null} because it assesses THAT day's ingest, which a holiday has none of;
+   * {@code NotifierHealthCheck} documents having no calendar gate at all. This sweep is neither — it
+   * replays PRIOR sessions, so today's tradability is not what makes its work valid.)
    *
    * @return true iff the sweep was actually run
    */
@@ -302,12 +344,33 @@ public class SwingBatchCatchUp {
     if (!scheduledFireHasPassed(now)) {
       return false;
     }
-    if (marketOpenDeadlinePassed()) {
-      // Not a failure: an END-OF-DAY batch may not price off a live (or post-open) session's partial
-      // daily bar, which is the same reason catchUp() refuses here.
+    // ⚠️ WALL-CLOCK, deliberately NOT marketOpenDeadlinePassed(). That method is
+    // `isTradingDay(today) && time >= SESSION_OPEN`, and isTradingDay is false on a weekday exchange
+    // HOLIDAY — so on the 16 weekday holidays in the bundled 2026 calendar it can never be true and
+    // this door would accept a boot at ANY hour. Cross-vendor review's scenario: Monday 2026-09-14
+    // (Ganesh Chaturthi), stack down all day, boot 18:30 — the cron is MON-FRI and holiday-blind so
+    // the fire "passed", the deadline gate is structurally inert, and the sweep takes REAL ENTRIES
+    // on a holiday evening. That is precisely the evening boot the 2026-07-17 rejection was reasoned
+    // from, arriving through the one day-type nobody tested.
+    //
+    // A plain wall-clock bound is strictly stronger and needs no calendar at all: the 08:35 cron can
+    // only ever run before the open, so refusing any boot at or after BOOT_LATEST_START makes this
+    // door a strict SUBSET of the cron in time, on every day type, holiday or not.
+    if (!now.toLocalTime().isBefore(BOOT_LATEST_START)) {
       log.info(
-          "swing catch-up: booted {} IST, past the market-open deadline — today's missed '{}' fire"
-              + " is NOT replayed on boot",
+          "swing catch-up: booted {} IST, at/after the {} pre-open cutoff — today's missed '{}' fire"
+              + " is NOT replayed on boot (a sweep that crosses 09:15 mid-entry-pass takes a PARTIAL"
+              + " entry set and skips the exit pass entirely)",
+          now.toLocalTime(),
+          BOOT_LATEST_START,
+          cron);
+      return false;
+    }
+    if (!enabled) {
+      // Honest logging: catchUp() would return having done nothing, so do not announce a replay.
+      log.info(
+          "swing catch-up: booted {} IST after today's '{}' fire, but artha.swing.catchup-enabled is"
+              + " off — nothing to replay",
           now.toLocalTime(),
           cron);
       return false;

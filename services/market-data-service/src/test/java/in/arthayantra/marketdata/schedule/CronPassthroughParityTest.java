@@ -52,7 +52,7 @@ class CronPassthroughParityTest {
    * the whole file execute zero assertions and pass — the guard-that-checks-nothing shape. Lowering
    * this number is a deliberate act that must be justified in the PR that does it.
    */
-  private static final int EXPECTED_JOB_COUNT = 10;
+  private static final int EXPECTED_JOB_COUNT = 11;
 
   private static final List<Job> JOBS =
       List.of(
@@ -64,6 +64,10 @@ class CronPassthroughParityTest {
           new Job(
               "artha.bhavcopy-close.cron",
               "ARTHA_BHAVCOPY_CLOSE_CRON",
+              SRC + "canary/BhavcopyCloseCanary.java"),
+          new Job(
+              "artha.bhavcopy-close.prefetch-cron",
+              "ARTHA_BHAVCOPY_CLOSE_PREFETCH_CRON",
               SRC + "canary/BhavcopyCloseCanary.java"),
           new Job(
               "artha.upstox.canary-cron",
@@ -208,6 +212,47 @@ class CronPassthroughParityTest {
           .as("%s must schedule in IST", job.property())
           .contains("zone = \"Asia/Kolkata\"");
     }
+  }
+
+  /**
+   * ⚠️ A cron property may be read TWICE in the same class, and the second reader is a fourth copy
+   * of the default with nothing pinning it.
+   *
+   * <p>{@code artha.bhavcopy-close.prefetch-cron} is the live case: {@code @Scheduled} runs the
+   * pass, and a {@code @Value} of the same property lets {@code catchUpPopulation()} ask "was
+   * today's pass already due?" at boot. If those two defaults drift, the catch-up decides against a
+   * DIFFERENT time than the schedule fires at — so a boot between the two silently either replays a
+   * pass that has not happened yet (fetching partial bars) or skips one that never ran. Nothing
+   * else in this file looks past the {@code @Scheduled} site.
+   */
+  @Test
+  @DisplayName("a second reader of the same cron property carries the identical default")
+  void everyExtraDeclarationOfACronDefaultAgreesWithTheScheduledOne() throws IOException {
+    int declarations = 0;
+    for (Job job : JOBS) {
+      String scheduled = codeDefault(job);
+      String source =
+          String.join(
+              "\n",
+              uncommentedLines(
+                  Files.readString(repoRoot().resolve(job.sourceFile()), StandardCharsets.UTF_8)));
+      Matcher m =
+          Pattern.compile("\\$\\{" + Pattern.quote(job.property()) + ":([^}]*)}").matcher(source);
+      while (m.find()) {
+        declarations++;
+        assertThat(m.group(1))
+            .as(
+                "%s declares ${%s} twice with different defaults ('%s' vs the @Scheduled '%s') —"
+                    + " the two readers now disagree about when this job runs",
+                job.sourceFile(), job.property(), m.group(1), scheduled)
+            .isEqualTo(scheduled);
+      }
+    }
+    assertThat(declarations)
+        .as(
+            "the placeholder scan matched fewer declarations than there are jobs — it found no"
+                + " ${property:default} for at least one, so it checked nothing for that job")
+        .isGreaterThanOrEqualTo(JOBS.size());
   }
 
   @Test

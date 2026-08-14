@@ -172,6 +172,16 @@ public class EveningChainCanary {
    * before 19:00. Pinned by {@link
    * in.arthayantra.marketdata.canary.EveningChainCanaryIntegrationTest#defaultCheckCronFiresAtTheEndOfThePreShutdownWindow}
    * so a future edit cannot silently drift it back outside the safe slot.
+   *
+   * <p>⚠️ This constant is a MIRROR of the literal spelled out in {@link #check()}'s scheduling
+   * annotation, never the source of it. Building that annotation by CONCATENATING this constant
+   * into the placeholder compiles to the same folded string and passes every reflective check, but
+   * {@code OperatingWindowTest} in strategy-signal-service walks the SOURCE TEXT of both services
+   * to prove no scheduled job is stranded outside the owner's 08:00-19:00 machine window — and a
+   * concatenation leaves it reading the cron as a bare placeholder prefix, truncated at the closing
+   * quote with no default in it, which it correctly refuses as a schedule it cannot enumerate. That
+   * guard's strictness is the point, so the literal lives in the annotation and {@code
+   * defaultCheckCronMatchesTheScheduledAnnotation} keeps the two copies from drifting apart.
    */
   static final String DEFAULT_CHECK_CRON = "0 59 18 * * MON-FRI";
 
@@ -244,7 +254,10 @@ public class EveningChainCanary {
    * gated. Bound to {@code monitorTaskScheduler} (MAJOR 4) rather than the shared default pool.
    */
   @Scheduled(
-      cron = "${artha.evening-chain.check-cron:" + DEFAULT_CHECK_CRON + "}",
+      // ⚠️ LITERAL, never `"${...:" + DEFAULT_CHECK_CRON + "}"` — see that constant's javadoc.
+      // strategy-signal's OperatingWindowTest reads this default out of the SOURCE TEXT, and a
+      // concatenation reads to it as a job that can never fire inside the operating window.
+      cron = "${artha.evening-chain.check-cron:0 59 18 * * MON-FRI}",
       zone = "Asia/Kolkata",
       scheduler = "monitorTaskScheduler")
   public void check() {

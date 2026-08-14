@@ -26,7 +26,10 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,6 +37,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 
 /**
@@ -58,6 +62,21 @@ import org.springframework.scheduling.support.CronExpression;
  * canary_runs} rows use the {@code EVENING_CHAIN} key, unique to this canary, so they cannot collide
  * with {@code IngestCoverageCanary} (key {@code INGEST_COVERAGE}) or {@code PlaneDivergenceProbe}
  * (key {@code MINERVINI_PLANE_DIVERGENCE}) regardless of date.
+ *
+ * <p>⚠️ <b>AND THAT REASONING WAS INCOMPLETE — {@link #removeSeededRuns()} is why this class now
+ * deletes what it writes (2026-08-13).</b> "Distinct synthetic day" isolates this class from other
+ * FIXTURES, but not from readers whose window is derived from the SYSTEM clock. {@code
+ * IngestHealthBoard.board(n)} evaluates the last {@code n} settled trading days strictly before
+ * {@code LocalDate.now(clock)}, and {@code FiiDigestService} gates {@code trustReasons} on that
+ * board — so the moment real time reached {@code day(0)}, these SUCCESS rows became the newest
+ * settled trading day's verdict for {@code NSE_FII_DII}, flipping it GREEN and silently deleting a
+ * reason {@code MarketContextI2IntegrationTest} asserts on. Measured: green while today was ≤
+ * 2026-08-11, red from 2026-08-13 onward with no code change in between — a calendar time bomb, not
+ * a regression, and it fails in a DIFFERENT class from the one that caused it.
+ *
+ * <p>Moving the anchor cannot fix this: a future date is safe only until today reaches it, and a
+ * past date passes back through the same window on its way out. The only date-independent property
+ * is that the class leaves the ledger as it found it, which is what the cleanup enforces.
  */
 @SpringBootTest(
     properties = {
@@ -82,6 +101,23 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   @Autowired JdbcTemplate jdbc;
+
+  /** One {@code ingest_runs} row this class wrote, so {@link #removeSeededRuns()} can take it back. */
+  private record SeededRun(LocalDate day, String source) {}
+
+  private final Set<SeededRun> seededRuns = new LinkedHashSet<>();
+
+  /**
+   * Hand every seeded {@code ingest_runs} row back — see the class javadoc for why a distinct
+   * synthetic day is NOT enough on its own. Deletes exactly the {@code (day, source)} pairs written,
+   * never a blanket day sweep, so it cannot take a neighbouring fixture's rows with it. Runs after
+   * EVERY attempt, so a surefire rerun-on-failure leaves nothing behind either.
+   */
+  @AfterEach
+  void removeSeededRuns() {
+    seededRuns.forEach(run -> deleteSource(run.day(), run.source()));
+    seededRuns.clear();
+  }
 
   // ---- report(): classification ----------------------------------------------------------------
 
@@ -246,6 +282,40 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
     assertThat(fire.toLocalTime())
         .as("after the jobs' 18:20-18:59 window closes, before the 19:00 hard shutdown")
         .isEqualTo(LocalTime.of(18, 59));
+  }
+
+  /**
+   * The annotation carries the cron as a LITERAL and this pins it to {@link
+   * EveningChainCanary#DEFAULT_CHECK_CRON}, so the two copies cannot drift.
+   *
+   * <p>⚠️ Why a LITERAL rather than the constant concatenated into the placeholder, which is a
+   * compile-time constant expression and therefore reflectively IDENTICAL: strategy-signal's {@code
+   * OperatingWindowTest#everyScheduledJobIsInsideTheWindowOrExplicitlyExcused} walks the SOURCE TEXT
+   * of both services to prove no scheduled job is stranded outside the owner's 08:00-19:00 machine
+   * window, and a concatenation leaves it reading the cron as a bare placeholder prefix truncated at
+   * the closing quote — a schedule it cannot enumerate, which it correctly refuses. Neither file was
+   * wrong on its own; the combination was.
+   *
+   * <p>⚠️ So read what THIS test does and does not prove, because the two are easy to conflate.
+   * Measured by re-running it against the concatenated form: it PASSES either way, because constant
+   * folding erases the difference before reflection ever sees it. It is a guard on the two copies of
+   * the VALUE, never on the source FORM. The form is guarded only by {@code OperatingWindowTest},
+   * in the other CI shard, which is why both copies also carry a comment.
+   */
+  @Test
+  void defaultCheckCronMatchesTheScheduledAnnotation() throws NoSuchMethodException {
+    Scheduled scheduled =
+        EveningChainCanary.class.getDeclaredMethod("check").getAnnotation(Scheduled.class);
+
+    assertThat(scheduled).isNotNull();
+    assertThat(scheduled.cron())
+        .as(
+            "the @Scheduled default and DEFAULT_CHECK_CRON are two copies of one schedule — a drift"
+                + " reschedules the live check while every test that reads the constant stays green")
+        .isEqualTo("${artha.evening-chain.check-cron:" + EveningChainCanary.DEFAULT_CHECK_CRON + "}");
+    assertThat(scheduled.zone())
+        .as("without the zone Spring schedules in the container's UTC and 18:59 becomes 00:29 IST")
+        .isEqualTo("Asia/Kolkata");
   }
 
   // ---- check(): the evaluate/claim/publish protocol --------------------------------------------
@@ -496,6 +566,9 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
         status.equals("SUCCESS") ? 10L : null,
         started,
         finished);
+    // Recorded at the ONE place rows are written, so a new fixture cannot be added without its
+    // cleanup: every seeder in this class funnels through here.
+    seededRuns.add(new SeededRun(day, source));
   }
 
   private void deleteSource(LocalDate day, String source) {

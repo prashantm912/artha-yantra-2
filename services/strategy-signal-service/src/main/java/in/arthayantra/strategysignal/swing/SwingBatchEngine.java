@@ -786,7 +786,7 @@ public class SwingBatchEngine {
         sessionDate
             + ": "
             + symbols.size()
-            + " (strategy, candidate) pair(s) refused — a material share of the window the entry"
+            + " symbol(s) refused — a material share of the window the entry"
             + " gate reads is missing, so the score would be computed off a stretched window. NOTE:"
             + " this is PER STRATEGY, and the family runs several with different depths in one pass,"
             + " so a name refused by one strategy may still have been entered by another. "
@@ -1264,16 +1264,6 @@ public class SwingBatchEngine {
   }
 
   /**
-   * Durable evidence + ops alert for a data-coverage event. Shares {@code swing_batch_refusals} with
-   * the mixed-lot refusal (same evidence shape, distinct reason prefix) rather than adding a table.
-   *
-   * <p>{@code refused} distinguishes the two halves of the 2026-08-03 coverage gate and is the whole
-   * point of the asymmetry: an ENTRY was refused (no money effect emitted), whereas an EXIT was
-   * evaluated ANYWAY and this row is a degradation marker, not a refusal. Fail-soft on both paths —
-   * this batch is each open position's only exit evaluator, so an accounting failure here must never
-   * propagate and skip a later position's stop.
-   */
-  /**
    * The ENTRY-scoped coverage reading for one strategy over one symbol's series. Single definition
    * so the emitting pass and the F3 admission probe can never disagree about which candidates the
    * coverage gate refuses — they were allowed to diverge in the first draft, and the probe then
@@ -1336,10 +1326,6 @@ public class SwingBatchEngine {
    */
   private static String coverageReason(String symbol, SwingCoverageProbe.Coverage coverage) {
     return (coverage.determinable() ? "INCOMPLETE_COVERAGE:" : "UNDETERMINABLE_COVERAGE:") + symbol;
-  }
-
-  private static String coverageReason(String symbol) {
-    return "INCOMPLETE_COVERAGE:" + symbol;
   }
 
   private static String coverageDegradedReason(String symbol) {

@@ -124,11 +124,24 @@ class SwingCoverageDepthRatchetTest {
     // For every other seeded strategy sma50 is exit-only (or declared-but-unread), so the entry
     // window must NOT be 50 — that was the Major: refusing entries on an indicator the entry never
     // reads. These read px/sma20/vol/pivot/cheat/thrust.
-    assertThat(actual.get("minervini-vcp")).isLessThan(50);
-    assertThat(actual.get("minervini-cheat-3c")).isLessThan(50);
-    assertThat(actual.get("minervini-power-play")).isLessThan(50);
-    assertThat(actual.get("manas-arora-vcp")).isLessThan(50);
-    assertThat(actual.get("manas-arora-breakout")).isLessThan(50);
+    // ⚠️ BOUNDED ON BOTH SIDES, and the lower bound is the load-bearing half. An upper-bound-only
+    // assertion is satisfied by 0 — and 0 is not a benign value here, it is the maximally
+    // destructive one. `entryLookbackBars` returns 0 on any internal failure (SwingCoverageProbe
+    // `catch (RuntimeException e) { return 0; }`) or when gate-alias collection finds nothing;
+    // `probeEntry` maps a declared depth <= 0 to `undeterminable`; and `notProvenSound()` is then
+    // TRUE. So a refactor that drops one of these strategies to 0 leaves an `isLessThan(50)` ratchet
+    // GREEN while, under the shipped OBSERVE_ONLY, every candidate of that strategy writes a
+    // WOULD_REFUSE row every night — corrupting the exact refusal-rate measurement the arming
+    // decision rests on — and under ARMED its whole funnel is refused silently, with firesEntry
+    // skipping it too so the F3 probe reports wouldEnter=0 and nothing looks anomalous.
+    //
+    // That is the success-shaped-nothing shape: a guard whose operand goes structurally zero,
+    // surviving review, tests and the runbook probe. Found by cross-vendor-fallback review, 2026-08-14.
+    assertThat(actual.get("minervini-vcp")).isBetween(1, 49);
+    assertThat(actual.get("minervini-cheat-3c")).isBetween(1, 49);
+    assertThat(actual.get("minervini-power-play")).isBetween(1, 49);
+    assertThat(actual.get("manas-arora-vcp")).isBetween(1, 49);
+    assertThat(actual.get("manas-arora-breakout")).isBetween(1, 49);
   }
 
   @Test

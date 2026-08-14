@@ -2122,6 +2122,35 @@ bars out of the `source='KITE'` population — the H18 doctrine gap, second inst
 guard entirely leaves its test GREEN — a red-proof broken by staying green), one **Minor** (javadoc
 wording on `compared()`). All three judged legitimate; fix in flight. **NOT merged.**
 
+⚠️ **N74 · CODEX IS OUT OF QUOTA UNTIL 2026-08-20 — THE CROSS-VENDOR GATE IS DOWN, AND THE ERROR THAT
+SAYS SO IS BURIED UNDER A DECOY.** Found 2026-08-14 10:24 IST. `codex exec` fails with
+`ERROR: You've hit your usage limit ... try again at Aug 20th, 2026 9:03 AM`. Every review resume
+after ~10:12 died on it: PR #1354's verdict round and TWO attempts at the H9 plan's round 3.
+
+**The decoy cost two wrong diagnoses and nearly a third.** The wrapper surfaced only
+`ERROR codex_models_manager::cache: failed to load models cache: missing field 'base_instructions' at
+line 94 column 5`, which is a **non-fatal warning** riding alongside the real failure. From it the
+Architect (a) inspected the cache, (b) found all 8 model entries DID carry `base_instructions` and a
+`fetched_at` 34 s AFTER the failure, and (c) concluded "transient, self-resolved, no fallback needed"
+— and was wrong. **One direct `codex exec` probe printed the real error immediately.** This is
+[[pattern-match-instead-of-distinguishing-check]] committed against my own tooling: a plausible cause
+was inspected instead of the cheap separating command being run.
+
+⚠️ **A SECOND trap in the same window, and it is the more dangerous one: a failed resume leaves the
+PREVIOUS round's `review.txt` in place, unchanged.** Reading it after a failed run yields a complete,
+confident, correctly-formatted review **of the previous revision**. The Architect began composing a
+round-3 report from the round-2 artifact; what caught it was that v3 had DELETED the text the review
+quoted — not any check on the file's age. Had the revision been smaller the stale verdict would have
+shipped. **Remedy, now standard: capture the review file's mtime BEFORE the run and compare after —
+`PRE_MTIME == POST_MTIME` means no review happened, whatever the file contains.** The wrapper exits 0
+even when codex fails, so exit code proves nothing either.
+
+**Consequence for this week (owner decision 2026-08-14): fall back to an Opus subagent reviewer on a
+FRESH thread.** Writer ≠ reviewer still holds through the separate context, but **cross-vendor is
+LOST and every affected PR's verdict line must say so** rather than claiming a cross-vendor pass.
+Builders are unaffected — they are Opus subagents already. #1373's round-2 review completed BEFORE
+the limit and is genuine cross-vendor; the H9 plan round 3 and #1354's verdict are not.
+
 **N72 · A ROUTINE POST-CLOSE DEPLOY DESTROYED THE SESSION'S FORENSICS, AND THE OBVIOUS REMEDY IS
 IMPOSSIBLE HERE.** 2026-08-13, and it was MINE. I recreated both strategy-signal and market-data at
 **15:44 IST — fourteen minutes after close and BEFORE the post-market routine ran**. `docker logs`

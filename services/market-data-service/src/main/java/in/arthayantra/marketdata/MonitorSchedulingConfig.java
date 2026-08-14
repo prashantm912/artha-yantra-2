@@ -159,11 +159,15 @@ public class MonitorSchedulingConfig {
    *
    * <p><b>The 16:05 cron is not the only caller of that pass.</b> {@code
    * BhavcopyCloseCanary.catchUpPopulation} replays a MISSED pass at boot, and it runs on {@code
-   * BhavcopyStartupCatchup}'s own one-shot thread rather than here — deliberately, because its
-   * whole job is to precede that bean's bhavcopy projection, and queueing it behind this
-   * single-thread scheduler would put a hung 16:05 cron in front of it. The two can only overlap
-   * on a boot landing inside the same second as the cron, and the pass is idempotent (cache-first
-   * upserts), so the overlap costs duplicate fetches and nothing else.
+   * BhavcopyStartupCatchup}'s own one-shot thread rather than here. ⚠️ The reason is NOT that it
+   * must precede that bean's bhavcopy projection — an earlier version of this note said so, and
+   * {@code BhavcopyStartupCatchup} (:50, :89-93) now says the opposite outright: nothing orders the
+   * two, any ordering is an accident of timing, and the wait that used to enforce it was deleted
+   * because the provenance CASE makes bhavcopy-first harmless. The surviving reason is the other
+   * half: queueing the replay behind this single-thread scheduler would put a hung 16:05 cron in
+   * front of it. The two can only overlap on a boot landing inside the same second as the cron, and
+   * the pass is idempotent (cache-first upserts), so the overlap costs duplicate fetches and
+   * nothing else.
    *
    * <p><b>The canary's own {@code sweep()} deliberately does NOT move here.</b> Serialising the
    * 18:58 evaluation behind the 16:05 fetch on one thread would guarantee a complete population —

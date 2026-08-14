@@ -149,9 +149,22 @@ public class BhavcopyCloseCanary {
   //
   // The `<>` form is the established idiom for exactly this distinction — see
   // CandleRepository.hasNonBhavcopyDaily, which the corporate-action job uses to tell a genuinely
-  // dual-sourced equity from a bhavcopy-only one. It is not a widening in practice: the only 1d
-  // writers are the fetch gateway (KITE / OPENALGO / MOCK) and the bhavcopy projection, since the
-  // tick aggregator emits 1m bars only (CandleBuilder:147).
+  // dual-sourced equity from a bhavcopy-only one.
+  //
+  // ⚠️ IT IS A REAL WIDENING, and an earlier draft of this comment claimed otherwise. The 1d
+  // writers are the fetch gateway (KITE / OPENALGO / MOCK), the bhavcopy projection, AND
+  // `EquityDailyBackfillService.toCandle` (:319-321), which writes `source = "BACKFILL"` over the
+  // whole active NSE cash universe through the same `upsertAuthoritativeAll`, with `to =
+  // LocalDate.now(IST)`. So an operator running `POST /market/admin/equity-daily-backfill` on a
+  // trading afternoon flips the seeded rows to BACKFILL (its `oi` is null, so the provenance CASE
+  // does not keep KITE), and the 18:58 sweep then compares UPSTOX daily closes against NSE bhavcopy
+  // closes in a field named `kiteClose`. TICK_AGG cannot appear — `CandleBuilder.closeBar`
+  // hardcodes 1m. EXPIRYTRACK / OPENCHART have no 1d writer in market-data at all.
+  //
+  // `<>` is still the right choice, because the alternative is worse in the SAME scenario: `=
+  // 'KITE'` would silently empty the population and report a blind coverage YELLOW, which reads as
+  // index erosion rather than as the backfill that caused it. Loud-and-wrong beats silent-and-empty
+  // here. But the reason is "the least bad predicate", not "no other writer exists".
   //
   // ⚠️ `b.series = 'EQ'` is KEPT, deliberately, and it was checked rather than assumed — an EQ-only
   // filter elsewhere in this repo once hid every BE-series symbol and manufactured a fake outage.

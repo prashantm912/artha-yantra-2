@@ -82,7 +82,16 @@ class BhavcopyStartupCatchupTest {
     // canary that THROWS, never one that is merely SLOW. The pass is ~202 sequential Kite fetches,
     // each retried up to 4 times over a 60 s read timeout, so a brown-out stretches it without
     // bound — and any wait in front of the pull spends that budget against a 19:00 machine-off. A
-    // mock that never returns is exactly that shape; re-add a join of any length and this reds.
+    // mock that never returns is exactly that shape.
+    //
+    // ⚠️ What this test actually detects, stated precisely because an earlier version of this
+    // comment claimed "re-add a join of any length and this reds" — which is FALSE. The only timing
+    // assertion is `elapsedMs < 5_000`, and the `replayFinished` isFalse check also survives a short
+    // join because the mock blocks 30 s. A `replay.join(4_000)` passes every assertion here. So this
+    // catches an UNBOUNDED or long wait, not any wait at all. The 5 s budget is deliberate — it has
+    // to clear a 2-core CI runner — and tightening it to catch a 4 s join would trade a real
+    // regression guard for flakiness. A comment that overstates its own test is the failure mode
+    // this PR guards against elsewhere (see LiveHistoricalCandleGatewayTest:139-140).
     CountDownLatch entered = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
     AtomicBoolean replayFinished = new AtomicBoolean();

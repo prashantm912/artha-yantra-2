@@ -757,7 +757,48 @@ Run in order; each answers one question. Canned SQL in §6.
     the future may be recorded, labelled PROXY, but must not enter G11's chop-day count), and
     never evidence for or against any tuning row. The in-stack canaries cannot see this class —
     they were down too; only an off-stack heartbeat (the unbuilt batch-liveness third layer) can.
-36. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+36. **Reconcile `fired` eval-outcomes against emitted signals — the difference is a RISK-GATE-SUPPRESSED
+    class with no rejection row, no signal row and no shadow position** (added 2026-08-12, the first
+    `daily_profit_target` trip day) — `RiskService.entryVeto` sits DOWNSTREAM of the confluence gate, so
+    a fired eval that the risk gate suppresses increments `outcome='fired'` but persists NOTHING else:
+    on 2026-08-12, 24 fired evals = 7 emitted signals + **17 suppressions** (`risk cap
+    scalper/daily_profit_target tripped — ENTRY emission paused for 2026-08-12`, then one
+    `ENTRY suppressed by scalper risk gate (daily_profit_target): <slug> <contract>` line each). Three
+    consequences: (a) **the fired count in `signal_eval_outcomes` is NOT the signal count** — reconcile
+    them every session and attribute the difference to logged suppressions before suspecting a defect;
+    (b) the suppressed fires are a **counterfactual class the shadow book structurally skips** (like
+    §3.27's strike-pick class): no `wouldBeLeg` exists, so reconstruct legs from the suppression log
+    lines + picker-consistent strikes (nearby shadow rows pin what the picker was choosing) and price
+    via §4.2 — the LOG LINES ARE THE ONLY RECORD and die with the container, so grep them the same day;
+    (c) the pause is entry-only — open positions run to their own exits (measured: pos 63 ran to its
+    TIME_STOP +₹4,454.56 eighteen minutes after the trip). Distinguish from the §3.31 discipline
+    freeze: the risk gate is upstream of the §12.7 discipline check, so a risk-gate pause leaves
+    `discipline-paused` at 0 while suppressing everything — the two shutdowns are separable in
+    telemetry. Trip mechanics: `dayPnl = realizedOn(today) + unrealizedTotal` (`PaperAccountService`),
+    i.e. the target can trip on MARK-TO-MARKET while realized is negative (measured 11:01 IST:
+    realized −₹1,338.42, target ₹2,250 = 1.5% of the ₹150k book).
+    ```bash
+    docker logs ay-strategy-signal-service --since <open-UTC> 2>&1 \
+      | grep -E "risk cap .* tripped|ENTRY suppressed by scalper risk gate" | head -30
+    ```
+37. **Log-dependent checks DIE with the container — inventory the DB fallbacks before reading a
+    recreated stack, and snapshot logs BEFORE any post-close recreate** (added 2026-08-13) — a
+    ROUTINE post-close deploy at 15:44 IST (14 minutes after close, before the EOD forensics run)
+    recreated both strategy-signal and market-data and permanently destroyed every log-derived
+    check for that session. The log-dependent set, with its DB substitute where one exists:
+    | check | log form | DB fallback |
+    |---|---|---|
+    | §3.10 boot line | `loaded N published` | `strategy.engine_reloads` (loaded/unresolved/load_errors — the honest signal `unresolved==0` survives) |
+    | §3.18 contract | `NFO:<contract>` rail lines | `strategy.signals.tradingsymbol` on any fired day; the §3.18 range test otherwise |
+    | §3.17 canary WARNs/straddles | `canary:`/`shortfall` grep | **NONE — unknowable for that session; report it as such, never as "0 WARNs"** |
+    | §3.34 heat-grep | `heat call failed|heat unassessable` | `paper_positions.margin_snapshot`/`margin_pct` populated on the funded rows = weak evaluability proxy (unpriced-path column semantics unverified) |
+    | §3.36 suppression lines | `ENTRY suppressed by scalper risk gate` | **NONE — the legs are unreconstructable; only the fired-vs-emitted COUNT survives** (`signal_eval_outcomes` vs `signals`) |
+    Process rule (proposal NEW-4, 2026-08-13): snapshot `docker logs` of both services to a file
+    BEFORE any post-close recreate — the standing incident rule (memory `live-mode-findings`)
+    extended to routine deploys — or hold the deploy until after ~19:00 when the post-market run
+    has grepped them. A findings file written after a log-loss must carry the caveat prominently:
+    absence of log evidence is not evidence of a quiet session.
+38. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

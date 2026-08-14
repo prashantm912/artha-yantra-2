@@ -90,6 +90,17 @@ public class RiskService {
   private final java.util.Map<String, LocalDate> trippedOn = new java.util.concurrent.ConcurrentHashMap<>();
 
   /**
+   * Per-day, per-cap, <b>per-SYMBOL</b> dedup for the pyramid-cap {@code risk_audit} ROW only — the
+   * measurement substrate, deliberately a FINER grain than {@link #trippedOn}'s per-book ntfy key
+   * (2026-08-13; see {@link #recordPyramidRiskCapBreach} for why the two are now split).
+   *
+   * <p>Bounded to a single IST day: {@link #recordPyramidRiskCapBreach} drops every entry whose date
+   * is not today before inserting, so this cannot grow without limit across a long uptime the way a
+   * never-pruned per-symbol map would. Re-armed alongside {@link #trippedOn} on an {@code update}.
+   */
+  private final java.util.Map<String, LocalDate> auditedOn = new java.util.concurrent.ConcurrentHashMap<>();
+
+  /**
    * Composite dedup-key delimiter (audit M34). A space would let {@code ("a b", "c")} and
    * {@code ("a", "b c")} collide; a NUL char never appears in a book slug or a limit-key constant.
    * Written as the integer literal {@code 0} so the source stays plain ASCII (no NUL byte / no
@@ -99,6 +110,15 @@ public class RiskService {
 
   private static String tripKey(String book, String key) {
     return book + DEDUP_DELIM + key;
+  }
+
+  /**
+   * The per-symbol audit-dedup key. NUL-delimited like {@link #tripKey}, and a strict extension of
+   * it, so a 3-part key can never collide with the 2-part alert key it extends (a symbol is never
+   * empty, and no book slug, limit-key constant or tradingsymbol contains a NUL).
+   */
+  private static String auditKey(String book, String key, String symbol) {
+    return book + DEDUP_DELIM + key + DEDUP_DELIM + symbol;
   }
 
   /** Wires the risk inputs. */
@@ -527,11 +547,35 @@ public class RiskService {
   }
 
   /**
-   * Audits + ntfy-alerts a Manas pyramid ADD or FRESH entry blocked by the portfolio open-risk cap
-   * (deduped per IST day per book, like {@link #recordHeatTrip} — a same-day add-breach and
-   * fresh-entry-breach on the same book therefore dedupe against EACH OTHER, since both share this one
-   * {@code (book, PYRAMID_RISK_CAP)} key; only the first trip of the day is audited/alerted, whichever
-   * kind it was). <b>Reserved for a GENUINELY CALCULATED breach only</b> (round 7, owner-approved,
+   * Audits + ntfy-alerts a Manas pyramid ADD or FRESH entry blocked by the portfolio open-risk cap.
+   *
+   * <p><b>The audit ROW and the ntfy ALERT are deduped at DIFFERENT grains (2026-08-13) — they are
+   * different artifacts with different jobs, and sharing one key made the ledger's refusal counts
+   * wrong.</b> Until now both rode ONE {@code (book, PYRAMID_RISK_CAP)} per-IST-day key, so the
+   * SECOND and every later refusal of the day vanished at INFO in {@code SwingBatchEngine} with no
+   * durable trace. Measured on the live stack (2026-08-13 08:35 IST catch-up for session 2026-08-12):
+   * the manas-arora entry pass refused BIRLACABLE, HAPPYFORGE, BLUSPRING and AUTOIND — batch summary
+   * {@code would-enter 4, admitted 0, cap-exceedance 4} — and {@code strategy.risk_audit} recorded
+   * exactly ONE TRIP row, for BIRLACABLE. A 4:1 undercount in the table the owner reads to tune the
+   * cap. The audit row is the MEASUREMENT SUBSTRATE and must be complete; the ntfy push is a
+   * NOTIFICATION and must not storm.
+   *
+   * <p>So: the ROW dedupes on {@code (book, PYRAMID_RISK_CAP, symbol)} per IST day — one row per
+   * distinct name the cap refused, which is exactly the quantity "how many entries did the cap cost
+   * us today" asks, and is naturally bounded by the candidate universe. The ALERT keeps the ORIGINAL
+   * {@code (book, PYRAMID_RISK_CAP)} per-IST-day key, unchanged: ntfy volume after this change is
+   * identical to before, one push per book per day, whichever refusal came first. Deliberately NOT
+   * the "aggregate one aggregated alert per run" shape — that needs an end-of-run flush hook (in a
+   * file PR #1368 is concurrently editing) which must itself be fail-soft, for zero measurement gain
+   * over a per-day push that already exists and already works. A same-day add-breach and
+   * fresh-entry-breach on the SAME symbol still collapse to one row; on DIFFERENT symbols they no
+   * longer collapse into each other.
+   *
+   * <p>Each refusal remains its OWN independently fail-soft call (the try/catch below is per-call, not
+   * per-run), so going from 1 write to N does not widen the escape surface: N writes are N separately
+   * caught writes, and a failure of any one neither propagates nor consumes its dedup key.
+   *
+   * <p><b>Reserved for a GENUINELY CALCULATED breach only</b> (round 7, owner-approved,
    * 2026-08-02) — {@link ManasRiskOutcome#CALCULATED_BREACH}, never a cannot-calculate refusal
    * ({@link ManasRiskOutcome#UNSUPPORTED_SIDE} / {@link ManasRiskOutcome#UNDEFINED_GOVERNING_STOP} /
    * {@link ManasRiskOutcome#NON_POSITIVE_EQUITY}), which would consume this SAME per-day dedup key
@@ -562,13 +606,20 @@ public class RiskService {
    */
   public void recordPyramidRiskCapBreach(String book, String symbol, String detail) {
     LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
-    String dedupKey = tripKey(book, PYRAMID_RISK_CAP);
-    if (today.equals(trippedOn.get(dedupKey))) {
+    String auditDedupKey = auditKey(book, PYRAMID_RISK_CAP, symbol);
+    if (today.equals(auditedOn.get(auditDedupKey))) {
       return;
     }
+    String alertDedupKey = tripKey(book, PYRAMID_RISK_CAP);
+    boolean alert = !today.equals(trippedOn.get(alertDedupKey));
     try {
-      pyramidRiskCapAuditor.record(book, PYRAMID_RISK_CAP, detail);
-      trippedOn.put(dedupKey, today);
+      pyramidRiskCapAuditor.record(book, PYRAMID_RISK_CAP, detail, alert);
+      // Bound the per-symbol map to ONE IST day (see the field javadoc) before inserting today's key.
+      auditedOn.values().removeIf(day -> !today.equals(day));
+      auditedOn.put(auditDedupKey, today);
+      if (alert) {
+        trippedOn.put(alertDedupKey, today);
+      }
       log.warn("risk pyramid-cap {} tripped for {} ({})", book, symbol, detail);
     } catch (RuntimeException e) {
       log.warn("risk_audit not written for pyramid-cap trip {}/{}: {}", book, symbol, e.getMessage());
@@ -635,6 +686,11 @@ public class RiskService {
     settings.upsert(book, key, valueJson);
     settings.audit(book, key, "UPDATE", valueJson);
     trippedOn.remove(tripKey(book, key)); // re-arm this cap's per-day trip dedup on a limit change
+    // ...and the pyramid rail's per-SYMBOL audit keys, which extend that same key (2026-08-13). A
+    // limit change is exactly when a name already refused today deserves a FRESH row: it was refused
+    // against a different cap value, so the second refusal is a genuinely different measurement.
+    String symbolPrefix = tripKey(book, key) + DEDUP_DELIM;
+    auditedOn.keySet().removeIf(k -> k.startsWith(symbolPrefix));
   }
 
   private boolean boolFlag(String book, String key) {

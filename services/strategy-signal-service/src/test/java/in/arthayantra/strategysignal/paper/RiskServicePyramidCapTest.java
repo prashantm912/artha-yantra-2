@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.paper;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -73,16 +74,54 @@ class RiskServicePyramidCapTest {
     verify(h.notifier()).send(eq("NTFY"), any(), any());
   }
 
+  /**
+   * The 2026-08-13 fix, pinned against the LIVE measurement that motivated it. On the 08:35 IST
+   * catch-up for session 2026-08-12 the manas-arora entry pass refused exactly these four names
+   * (batch summary {@code would-enter 4, admitted 0, cap-exceedance 4}) and {@code
+   * strategy.risk_audit} recorded ONE TRIP row, for BIRLACABLE — a 4:1 undercount in the table the
+   * owner tunes the cap from. Each distinct refused symbol must now leave its own row.
+   *
+   * <p>The ALERT half is asserted in the same test on purpose: the fix must NOT convert a 4-refusal
+   * run into 4 ntfy pushes. Row count and push count move independently, which is the whole point of
+   * splitting the two dedup keys, so a test that pinned only one of them would pass while the other
+   * regressed.
+   */
   @Test
-  void secondBreachSameBookSameDayIsDeduped() {
+  void everyDistinctSymbolRefusedTheSameDayGetsItsOwnAuditRowButOnlyOneAlert() {
     Harness h = harness();
 
-    h.risk().recordPyramidRiskCapBreach(BOOK, "RELIANCE", "first breach");
-    h.risk().recordPyramidRiskCapBreach(BOOK, "TCS", "second breach, same book, same IST day");
+    h.risk().recordPyramidRiskCapBreach(BOOK, "BIRLACABLE", "fresh entry for BIRLACABLE blocked");
+    h.risk().recordPyramidRiskCapBreach(BOOK, "HAPPYFORGE", "fresh entry for HAPPYFORGE blocked");
+    h.risk().recordPyramidRiskCapBreach(BOOK, "BLUSPRING", "fresh entry for BLUSPRING blocked");
+    h.risk().recordPyramidRiskCapBreach(BOOK, "AUTOIND", "fresh entry for AUTOIND blocked");
 
-    // Matches the existing per-(book,key)-per-day dedup convention (recordTrip/recordHeatTrip) — only
-    // the FIRST breach of the day for this book is audited/alerted.
-    verify(h.settings(), times(1)).audit(eq(BOOK), eq(RiskService.PYRAMID_RISK_CAP), eq("TRIP"), any());
+    verify(h.settings(), times(4))
+        .audit(eq(BOOK), eq(RiskService.PYRAMID_RISK_CAP), eq("TRIP"), any());
+    for (String symbol : new String[] {"BIRLACABLE", "HAPPYFORGE", "BLUSPRING", "AUTOIND"}) {
+      verify(h.settings())
+          .audit(
+              eq(BOOK),
+              eq(RiskService.PYRAMID_RISK_CAP),
+              eq("TRIP"),
+              eq("fresh entry for " + symbol + " blocked"));
+    }
+    verify(h.notifier(), times(1)).send(eq("NTFY"), any(), any());
+  }
+
+  /**
+   * The row grain is per SYMBOL per IST day, not per call: a repeat refusal of the same name the same
+   * day (the 20:05 run and a later catch-up both refusing it) is one measurement, not two, and must
+   * not inflate the count the owner reads.
+   */
+  @Test
+  void theSameSymbolRefusedTwiceTheSameDayIsStillDeduped() {
+    Harness h = harness();
+
+    h.risk().recordPyramidRiskCapBreach(BOOK, "BIRLACABLE", "first refusal");
+    h.risk().recordPyramidRiskCapBreach(BOOK, "BIRLACABLE", "same name, same IST day");
+
+    verify(h.settings(), times(1))
+        .audit(eq(BOOK), eq(RiskService.PYRAMID_RISK_CAP), eq("TRIP"), any());
     verify(h.notifier(), times(1)).send(eq("NTFY"), any(), any());
   }
 
@@ -117,7 +156,7 @@ class RiskServicePyramidCapTest {
     doThrow(new RuntimeException("simulated connection/commit failure"))
         .doNothing()
         .when(auditor)
-        .record(eq(BOOK), eq(RiskService.PYRAMID_RISK_CAP), any());
+        .record(eq(BOOK), eq(RiskService.PYRAMID_RISK_CAP), any(), anyBoolean());
     RiskService risk =
         new RiskService(
             settings, positions, account, margin, notifier, CLOCK, false, new BigDecimal("6.0"),
@@ -129,6 +168,55 @@ class RiskServicePyramidCapTest {
 
     risk.recordPyramidRiskCapBreach(BOOK, "RELIANCE", "retry, same day");
     verify(auditor, times(2))
-        .record(eq(BOOK), eq(RiskService.PYRAMID_RISK_CAP), any());
+        .record(eq(BOOK), eq(RiskService.PYRAMID_RISK_CAP), any(), anyBoolean());
+  }
+
+  /**
+   * The failed write must consume NEITHER dedup key (2026-08-13). The pre-existing test above proves
+   * the SYMBOL key survives a failure; this one proves the ALERT key does too. Without it, a first
+   * refusal whose write failed could mark the book as "already alerted" and silently downgrade the
+   * day's only surviving ntfy push — the alert half of the same "never consume a key on a write that
+   * did not durably land" rule the method's javadoc states.
+   */
+  @Test
+  void aFailedWriteConsumesNeitherTheSymbolNorTheAlertDedupKey() {
+    RiskSettingsRepository settings = mock(RiskSettingsRepository.class);
+    PaperPositionRepository positions = mock(PaperPositionRepository.class);
+    PaperAccountService account = mock(PaperAccountService.class);
+    PaperMarginClient margin = mock(PaperMarginClient.class);
+    NotifierClient notifier = mock(NotifierClient.class);
+    PyramidRiskCapAuditor auditor = mock(PyramidRiskCapAuditor.class);
+    doThrow(new RuntimeException("simulated connection/commit failure"))
+        .doNothing()
+        .when(auditor)
+        .record(eq(BOOK), eq(RiskService.PYRAMID_RISK_CAP), any(), anyBoolean());
+    RiskService risk =
+        new RiskService(
+            settings, positions, account, margin, notifier, CLOCK, false, new BigDecimal("6.0"),
+            new ManasGoverningStopCache(), auditor);
+
+    risk.recordPyramidRiskCapBreach(BOOK, "BIRLACABLE", "first attempt, write fails");
+    risk.recordPyramidRiskCapBreach(BOOK, "HAPPYFORGE", "a DIFFERENT name, same day");
+
+    // The second call must still request the alert: the first never landed, so the day owes one push.
+    verify(auditor).record(eq(BOOK), eq(RiskService.PYRAMID_RISK_CAP), eq("a DIFFERENT name, same day"), eq(true));
+  }
+
+  /**
+   * A limit change re-arms the per-SYMBOL audit keys as well as the per-book alert key. After the
+   * owner edits the cap, a name already refused today was refused against a DIFFERENT cap value, so
+   * its next refusal is a genuinely new measurement and must get its own row — the same reasoning the
+   * pre-existing {@code trippedOn.remove} in {@code update} already applies to the alert.
+   */
+  @Test
+  void aLimitUpdateReArmsThePerSymbolAuditDedup() {
+    Harness h = harness();
+
+    h.risk().recordPyramidRiskCapBreach(BOOK, "BIRLACABLE", "before the cap change");
+    h.risk().update(BOOK, RiskService.PYRAMID_RISK_CAP, "{\"value\":8.0,\"enabled\":true}");
+    h.risk().recordPyramidRiskCapBreach(BOOK, "BIRLACABLE", "after the cap change");
+
+    verify(h.settings(), times(2))
+        .audit(eq(BOOK), eq(RiskService.PYRAMID_RISK_CAP), eq("TRIP"), any());
   }
 }

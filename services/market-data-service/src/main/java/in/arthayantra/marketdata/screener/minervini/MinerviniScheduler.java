@@ -67,7 +67,7 @@ public class MinerviniScheduler {
   }
 
   /** Fallback cron (bhavcopy backfill failed → no event). 19:50, before the 20:00 swing batch. */
-  @Scheduled(cron = "${artha.minervini.cron:0 50 19 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.minervini.cron:0 47 18 * * MON-FRI}", zone = "Asia/Kolkata")
   void scheduled() {
     runQuietly("scheduled");
   }
@@ -167,14 +167,14 @@ public class MinerviniScheduler {
       }
       ledger.succeed(runId, written);
     } catch (Exception e) {
-      // Audit P0-4/H10: a failed screen leaves the 20:00 swing batch on yesterday's funnel — the
+      // Audit P0-4/H10: a failed screen leaves the NEXT swing batch on yesterday's funnel — the
       // owner must hear about it, not find it in a log next week. NtfyClient never throws.
       ledger.fail(runId, e.getMessage());
       log.warn("minervini screen failed ({}) — non-fatal", trigger, e);
       ntfy.send(
           "Minervini screen FAILED", "high",
           "Trigger " + trigger + ": " + e.getMessage()
-              + " — the 20:00 swing batch will read a stale funnel.");
+              + " — the next swing batch will read a stale funnel.");
     }
   }
 

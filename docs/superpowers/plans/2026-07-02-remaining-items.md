@@ -800,12 +800,12 @@ than carried.
 | H8 | `task_f624fca7-empty-contracts` | Chip **`task_f624fca7`** — should an empty `contracts` array on an INDEX ladder be a FAULT? (#877 residue). **It has NO §4b row**, so the register's own awk cannot see it | shard C Part 1 #8; ledger §0 prose "Open chips:" list, 2026-07-17 (now at §0 lines ~442/452) | clean (design first) | **DONE 2026-08-11 — [#1340](https://github.com/prashantm912/artha-yantra-2/pull/1340) @ `4cf3fb5d`, all three ranked parts of the 2026-08-03 investigation's §7.1. ✅ **DEPLOYED 2026-08-11 ~18:00 IST (post-close), riding the same recreate as #1344 — evidence at the end of this cell.** Design was already DONE (`docs/signal-analysis/2026-08-03-h8-empty-index-contracts.md`) and its verdict is implemented unchanged: producer-side pin (new `FuturesTermStructureServiceTest` — the class did not exist), the empty-array branch made a fault on the INDEX path via the SAME `missingInstrumentIsEmpty` asymmetry the 404 already had, and the two byte-identical log strings split. No live behaviour change: unreachable from the current producer, 0 occurrences, 0 of 108 engine reloads. ⚠️ Its own §4b row is STILL not written — the H8 row's instruction ("give it a §4b row when it is next touched") is now overdue twice. Backtest half CLOSED 2026-08-11 via chip `task_9f670780` — [#1344](https://github.com/prashantm912/artha-yantra-2/pull/1344) @ `c8262964` — **and the chip's premise was FALSE.** It claimed an empty pin makes a `futures_of_underlying` backtest run to completion with zero instruments; `BacktestRunner.signalInstrument:757` GATES pinned-array routing to `futures_screener` + the two funnel modes, so that mode signals on the underlying SPOT and never reads the pin. The pin is inert. ⚠️ **A submission-time 422 guard was built, tested, red-proofed and PUSHED on that false premise before cross-vendor review falsified it — and it would have refused EVERY `futures_of_underlying` submission**, because of the real defect underneath: `resolveFutures` read `universe.underlying` (a REQUIRED instrumentRef OBJECT, `strategy-schema-v1.json:162`) with a bare `.asText()`, yielding an empty string, so every schema-valid config asked market-data for an empty underlying, got a 404, and never pinned. The guard is fully reverted; what shipped is the tradingsymbol extraction plus three schema-valid tests asserting the OUTBOUND QUERY (items-only assertions pass with an empty underlying, since a stub answers whatever it is asked). Invisible until now because nothing consumes the pin for that mode; the only user-visible symptom was the preview route returning 503 for a valid config, and no published strategy uses the mode. `sourced` — explicitly routed around by a design doc six days later: `docs/superpowers/plans/2026-07-26-t9-strategy-coverage-watchdog-design.md` §3.7 — *"(Whether an empty `contracts` array on an INDEX ladder should be a FAULT is chip `task_f624fca7`'s question, owned by the resolver, untouched here.)"* — which is what proves it live rather than forgotten. **Give it a §4b row when it is next touched**; it is deliberately NOT given one here, because the register is for chips that exist and this one's card is long gone. **DEPLOY EVIDENCE, 2026-08-11 ~18:00 IST** — both PRs shipped in ONE `build strategy-signal-service market-data-service` + `up -d` from the REAL checkout on `main` @ `22203ecb` (both `4cf3fb5d` and `c8262964` confirmed in HEAD's history before building; working tree grepped for the new symbols first). `computed` — jar fingerprint inside the RUNNING container (`docker exec ay-strategy-signal-service` → extract `BOOT-INF/classes/.../FuturesUniverseResolver.class`): `strings … | grep -c "empty futures contracts array for INDEX"` = **1** (#1340's split log string), and the same probe on `registry/UniverseResolver.class` for `underlyingSymbol` = **1** (#1344's tradingsymbol extraction; the constant pool dedupes the source's 2 occurrences). Health: 11/11 containers healthy, **0 ERROR lines** in either service over the deploy window, `strategy.engine_reloads` id 193/194 = **38 loaded / 0 unresolved / 0 load_errors** (the usual `installed` t-then-f pair, 38 s apart). ⚠️ One transient worth recording: row 192 (12:30:24 UTC) read **2 loaded / 36 unresolved** — strategy-signal came up while market-data was still mid-recreate, so instrument resolution briefly failed; it self-healed at row 193, 82 s later, with no intervention. Neither PR carries a migration, so flyway-init was not forced; the probes were run anyway |
 | H9 | `cas-close-in-kite-daily-bar` | **The 16:00 IST swing settle prices exits off Kite's DAILY bar, and nobody has checked that bar carries the CLOSING AUCTION close.** Since 2026-08-03 continuous trading in Category-I stocks ends 15:15 and a 15:15–15:30 call auction sets the official close (row G18). If Kite's 1d candle at 16:00 still holds the 15:15 continuous price, every exit that session prices at the wrong close — silently, because the number is entirely plausible. Owner was told and chose to arm 16:00 immediately rather than shadow a session (2026-08-10). **Check: on the first live settle, compare each exited symbol's 16:00 close against that evening's `nse_eod_bhavcopy` close.** | N46e, this file; [#1333](https://github.com/prashantm912/artha-yantra-2/pull/1333) | verify-only (money path) | **OPEN — due on the FIRST trading day after the 16:00 settle deploys.** |
 | H10 | `minervini-funnel-empties` | **The minervini swing batch reported `candidates = 0` on 5 of the last 6 sessions (08-04/05/06/07/10) while manas ran 93–111 each — and the screen itself wrote ~1,780 rows on every one of those days.** So the screen is producing and the funnel between screen and batch is emptying. Found while measuring H4; NOT diagnosed. Distinguish first: a legitimately strict SEPA stage-2 filter in a chop tape vs a gate whose operand went dead — the second is this codebase's most common defect shape (N44) | `strategy.swing_batch_runs` + `marketdata.minervini_screen_results`, measured 2026-08-10 | data (answerable from live rows) | **DONE 2026-08-11 — not a funnel defect, a REPORTING defect already fixed by #1324 @ 2a53b5cc, deployed 2026-08-11 ~01:40 IST.** The tell the original write-up missed: `would_enter` read 17–21 on the very same zero-candidate rows, and the admission probe walks the SAME list the counter reports, so the list was never empty. `SwingBatchEngine.entryPass` zeroed the counter on the start-of-run governor early-out only (#751 refactor residue); every other return path reported `candidates.size()`. Underneath it the book state is real and correct: minervini is FULL at 12/12 open, so the entry governor binds and `entries = 0` is doctrine, not breakage. Jar fingerprint `entry governor bound:` present in the running `SwingBatchEngine.class`; first honest counter lands at tonight's 20:00 batch. |
-| H11 | `market-context-never-runs-before-19` | **`MARKET_CONTEXT_DAY` is the ONE evening job that cannot finish before 19:00, and it is UNWIRED rather than waiting.** `MarketContextEodJob:59` carries `@Scheduled(cron = "${artha.context.eod-cron:0 45 19 * * MON-FRI}")` and `docker inspect ay-market-data-service` shows NO `ARTHA_CONTEXT_*` override, so the 19:45 code default is live -- 45 min after the owner closes the app. It is also the only market-data evening job with NEITHER an `ApplicationReadyEvent` listener (`BhavcopyStartupCatchup`, `DataQualityEodJob`, `MorningCanaryCatchUp`, `SyncBootstrap` all have one) NOR a `bhavcopy-complete` listener (`ManasScheduler:62`, `MinerviniScheduler:66` have those) -- so it has neither of the two paths that pulled every other job forward on 2026-08-11. Downstream impact NOT investigated: which readers consume `market_context_days`, and how they behave on a missing day | 18:55 check, `docs/signal-analysis/2026-08-11-session-findings.md` §9.1 | clean | **OPEN -- blocks the owner's 19:00 finish-line (decision 2026-08-11).** Last run of ANY date: 2026-08-10 19:44:59 IST |
-| H12 | `ingest-run-stuck-running` | **`marketdata.ingest_runs` id=101046 (`MANAS_SCREEN`) is stuck `RUNNING`, `finished_at` NULL** -- started 18:00:05, killed 28 s later by the 18:00:33 container recreate. Any coverage/health check asking "is the latest run terminal" reads it as in-flight FOREVER. Self-inflicted: the Architect deployed at 18:00 IST, inside the evening-chain window. TWO parts: clear the row, and decide whether a run orphaned by a restart should be reaped on boot (no reaper exists) | 18:55 check §9.1 | clean | **OPEN -- data hygiene plus a latent false-healthy operand (N44 shape).** |
-| H13 | `evening-chain-double-run` | **The whole evening chain ran TWICE on 2026-08-11** -- BHAVCOPY, the three NSE feeds, `MANAS_SCREEN` x2 SUCCESS, plane-divergence x2 -- a pre-deploy wave plus the new container's `ApplicationReadyEvent` catch-up. Harmless that day (the 2nd BHAVCOPY wrote 0 rows, manas rewrote the same 2271), but there is **no "already done today" guard**, so the chain double-runs on EVERY evening deploy | 18:55 check §9.1 | clean | **OPEN.** Cost is wasted work and duplicate rows, not wrong data -- so far |
-| H14 | `evening-schedule-compression` | Compress the evening chain so everything finishes before 19:00 (owner decision 2026-08-11: "both -- compress everything", chained-after-screens shape). **The 2026-08-11 measurement is CONFOUNDED and must not be used as the baseline**: a deploy landed 18:00:13-18:01:03 IST inside the measured window, so what was measured is "what a ~18:00 deploy triggers", not "when the chain converges on its own". The one usable number: **once bhavcopy lands the dependent chain completes in ~2 minutes**, and NSE's bhavcopy was fetchable at 17:59 | 18:55 check §9.1; owner decision 2026-08-11 | clean | **OPEN -- needs one clean (no-deploy) evening to derive the times.** BLOCKED on H15 |
-| H15 | `what-1333-actually-shipped` | **Re-resolve whether the evening-chain POLLING shipped.** The Architect asserted repeatedly on 2026-08-11 that "#1333 changed the evening chain to poll from 18:00, deployed today". The 18:55 check found **no polled chain in `main`** -- `BhavcopyBackfillService:156` is `0 30 19`, `DataQualityEodJob:92` `0 50 19`, `EquityBreadthEodJob:69` `0 55 19`, `MinerviniScheduler:70` `0 50 19`, `ManasScheduler:66` `0 55 19`. #1333's squash body DOES open with "poll the evening chain from 18:00...", so either the polling shipped and those cron literals are vestigial, or the body describes a commit whose behaviour did not survive the squash. **H14 must NOT be built until this is settled** -- the compression design depends on which is true | 18:55 check §9.6; `git show 989d63e8` | clean (investigate first) | **OPEN -- and it invalidates a premise stated to the owner several times.** |
-| H16 | `settle-open-at-start-zero` | **`swing_batch_runs.open_at_start` reads 0 on EVERY 16:00 settle** while the batch demonstrably evaluates the book (2026-08-11: 0 recorded vs **21** `sell_decisions` rows -- 15 minervini + 6 manas). Cause: `AdmissionProbe.empty()` is used whenever `entriesEnabled` is false, and the settle always runs entries-disabled -- the same defect shape #1324 fixed for `candidates`, inherited by the new #1333 path. Reporting-only (exits genuinely ran), but it is the field an operator reads to answer "did the settle see the book?", so it is a structurally-zero operand -- N44 | 18:55 check §9.3; `SwingBatchEngine` AdmissionProbe | clean | **OPEN -- small, fix ready to write.** |
+| H11 | `market-context-never-runs-before-19` | **`MARKET_CONTEXT_DAY` is the ONE evening job that cannot finish before 19:00, and it is UNWIRED rather than waiting.** `MarketContextEodJob:59` carries `@Scheduled(cron = "${artha.context.eod-cron:0 45 19 * * MON-FRI}")` and `docker inspect ay-market-data-service` shows NO `ARTHA_CONTEXT_*` override, so the 19:45 code default is live -- 45 min after the owner closes the app. It is also the only market-data evening job with NEITHER an `ApplicationReadyEvent` listener (`BhavcopyStartupCatchup`, `DataQualityEodJob`, `MorningCanaryCatchUp`, `SyncBootstrap` all have one) NOR a `bhavcopy-complete` listener (`ManasScheduler:62`, `MinerviniScheduler:66` have those) -- so it has neither of the two paths that pulled every other job forward on 2026-08-11. Downstream impact NOT investigated: which readers consume `market_context_days`, and how they behave on a missing day | 18:55 check, `docs/signal-analysis/2026-08-11-session-findings.md` §9.1 | clean | **FIX BUILT, NOT YET MERGED -- PR #1358, review round 2 in flight.** ⚠️ This row said "**DONE** 2026-08-11 -- PR #1351" for a day and BOTH halves were wrong: **#1351 is CLOSED, not merged**, and writing DONE against an open PR number is N62 committed inside the ledger whose job is to catch it. It also described market-context as POLLING at :05/:20/:35/:50 -- #1351 had a poll, #1358 does not: it is a SINGLE SHOT at **18:49**, after bhavcopy at 18:45. A missed publish is recovered by `BhavcopyStartupCatchup` on the next boot, not by polling. Flip this to DONE only when #1358 shows MERGED with its squash SHA. |
+| H12 | `ingest-run-stuck-running` | **`marketdata.ingest_runs` id=101046 (`MANAS_SCREEN`) is stuck `RUNNING`, `finished_at` NULL** -- started 18:00:05, killed 28 s later by the 18:00:33 container recreate. Any coverage/health check asking "is the latest run terminal" reads it as in-flight FOREVER. Self-inflicted: the Architect deployed at 18:00 IST, inside the evening-chain window. TWO parts: clear the row, and decide whether a run orphaned by a restart should be reaped on boot (no reaper exists) | 18:55 check §9.1 | clean | ✅ **CLOSED 2026-08-13 — PR #1361 (`086b2a6d`), deployed 15:44, live-verified.** The reaper exists and ran on boot: `ingest_runs reaper: no stranded RUNNING rows at boot` — the correct answer on a clean start, and proof the path is live. Boundary is sampled at **bean construction**, not inside the `ApplicationReadyEvent` handler: cross-vendor review found that `BhavcopyStartupCatchup` listens to the SAME event with no ordering, so its async `RUNNING` row could be reaped by the very process that started it. Construction strictly precedes every such listener AND scheduler start-up, so a `@Scheduled` job firing during startup lands after the boundary — the safe direction. `IngestRunLedger.succeed()` now also clears `error`, so a falsely-reaped row that later finished cannot keep `REAPED_ON_BOOT` for life. Prior state, kept for the record: **HALF DONE 2026-08-11.** The row is cleared: id=101046 set `FAILURE`, `finished_at` = `started_at + 28s`, with the cause in `error`. `SELECT count(*) WHERE status='RUNNING'` is now **0**. The SECOND half is still OPEN and is the part that matters: **no reaper exists**, so the next deploy inside a job's execution window strands another row the same way, and any check asking "is the latest run terminal" reads it as in-flight forever. Note the schedule change (#1358) makes this MORE likely, not less -- the evening chain now occupies 18:20-18:59, so the post-close deploy slot and the chain window are closer together than when the chain ran 19:00-21:20 |
+| H13 | `evening-chain-double-run` | **The whole evening chain ran TWICE on 2026-08-11** -- BHAVCOPY, the three NSE feeds, `MANAS_SCREEN` x2 SUCCESS, plane-divergence x2 -- a pre-deploy wave plus the new container's `ApplicationReadyEvent` catch-up. Harmless that day (the 2nd BHAVCOPY wrote 0 rows, manas rewrote the same 2271), but there is **no "already done today" guard**, so the chain double-runs on EVERY evening deploy | 18:55 check §9.1 | clean | **STILL OPEN, and #1358 does not fix it.** Re-confirmed live 2026-08-11: the evening chain ran TWICE again (BHAVCOPY 17:59 and 18:00, `MANAS_SCREEN` x2 SUCCESS 2271 rows each, the three NSE feeds x2), because the 18:00 deploy fired `BhavcopyStartupCatchup` on `ApplicationReadyEvent` on top of the wave already in flight. Still harmless (the 2nd BHAVCOPY wrote 0 rows), still unguarded. ⚠️ But the SAME mechanism is now load-bearing in the other direction: #1358's single-shot design relies on that startup catch-up to replay a chain missed by a late NSE publish. So this is no longer purely waste -- **the double-run and the recovery path are the same code**, and an "already done today" guard must not disarm the morning replay |
+| H14 | `evening-schedule-compression` | Compress the evening chain so everything finishes before 19:00 (owner decision 2026-08-11: "both -- compress everything", chained-after-screens shape). **The 2026-08-11 measurement is CONFOUNDED and must not be used as the baseline**: a deploy landed 18:00:13-18:01:03 IST inside the measured window, so what was measured is "what a ~18:00 deploy triggers", not "when the chain converges on its own". The one usable number: **once bhavcopy lands the dependent chain completes in ~2 minutes**, and NSE's bhavcopy was fetchable at 17:59 | 18:55 check §9.1; owner decision 2026-08-11 | clean | **FIX BUILT, NOT YET MERGED -- PR #1358** (this row also said "DONE ... #1351", which is CLOSED -- see H11 for why both halves of that were wrong), and it did NOT need the clean no-deploy evening this row asked for. H15's resolution supplied the missing measurement instead (NSE publish 17:52 / 17:59 / 18:47 / 19:31 across four days), which says the answer is a POLL, not a set of times -- so a confounded convergence measurement stopped being load-bearing. |
+| H15 | `what-1333-actually-shipped` | **Re-resolve whether the evening-chain POLLING shipped.** The Architect asserted repeatedly on 2026-08-11 that "#1333 changed the evening chain to poll from 18:00, deployed today". The 18:55 check found **no polled chain in `main`** -- `BhavcopyBackfillService:156` is `0 30 19`, `DataQualityEodJob:92` `0 50 19`, `EquityBreadthEodJob:69` `0 55 19`, `MinerviniScheduler:70` `0 50 19`, `ManasScheduler:66` `0 55 19`. #1333's squash body DOES open with "poll the evening chain from 18:00...", so either the polling shipped and those cron literals are vestigial, or the body describes a commit whose behaviour did not survive the squash. **H14 must NOT be built until this is settled** -- the compression design depends on which is true | 18:55 check §9.6; `git show 989d63e8` | clean (investigate first) | **RESOLVED 2026-08-11, and the premise was wrong in a way neither branch of this row anticipated.** The polling shipped in NEITHER sense: `989d63e8` (#1333 on main) is *settle the swing book at 16:00, take entries at 08:35* -- the swing-batch split, not an evening-chain change at all. The commit whose subject reads *poll the evening chain from 18:00* is `ae2ca115`, and it is **ORPHANED**: `git branch -a --contains` names no branch, it is an ancestor of neither `origin/main` nor any live branch. So the 19:xx cron literals the 18:55 check found were never changed -- correct, not vestigial. Two different commits, one conflated subject line. Its design was recovered and shipped as PR #1358 (#1351 carried it first and was closed unmerged). See N62. |
+| H16 | `settle-open-at-start-zero` | **`swing_batch_runs.open_at_start` reads 0 on EVERY 16:00 settle** while the batch demonstrably evaluates the book (2026-08-11: 0 recorded vs **21** `sell_decisions` rows -- 15 minervini + 6 manas). Cause: `AdmissionProbe.empty()` is used whenever `entriesEnabled` is false, and the settle always runs entries-disabled -- the same defect shape #1324 fixed for `candidates`, inherited by the new #1333 path. Reporting-only (exits genuinely ran), but it is the field an operator reads to answer "did the settle see the book?", so it is a structurally-zero operand -- N44 | 18:55 check §9.3; `SwingBatchEngine` AdmissionProbe | clean | **MOSTLY MOOT 2026-08-12, measured — do NOT build the fix that was approved.** The scheduled verification found the morning ENTRY run records real values: manas-arora **6**, minervini **15**. `swing_batch_runs` upserts on `(batch, run_date)`, so the entry run overwrites the settle's row and whether the 16:00 settle wrote 0 first is **no longer observable in the table**. The `AdmissionProbe.empty()` zero is still real in the settle's own write path, but the field an operator reads now carries a true number by the time they read it. Remaining value is small: a same-day reader between 16:00 and the next 08:35 still sees 0. Owner approved a fix on 2026-08-11 when this looked permanent — re-decide before spending on it | `docs/signal-analysis/2026-08-12-session-findings.md` §5 | clean | **OPEN but downgraded** |
 | H17 | `h9-evidence-strengthened` | **H9's hypothesis now has 21 measured data points and they support it.** No exit fired 2026-08-11, so H9 stays formally open -- but the settle persisted the price an exit WOULD have used (`strategy.sell_decisions`, 21 rows). Against that evening's `nse_eod_bhavcopy` (series-agnostic; the 21 span EQ **and** BE and an EQ-only filter drops 5): **0 of 21 match the official `close_price`; 13 of 21 match `last_price` EXACTLY** (the pre-auction last trade). Mean absolute divergence **0.95%**, 9 of 21 exceed 0.5%, max **4.04%** (KANORICHEM 154.13 vs 160.62). For every `source='KITE'` daily bar the `candles`@1d close EQUALS the settle price, and the bhavcopy projection is DO-NOTHING against a Kite-owned bar -- **so the value is never corrected later**. Treat as live money-path risk; confirm on the first session an exit fires | 18:55 check §9.2 | verify-only (money path) | **OPEN -- feeds H9, does not close it.** |
 
 ⚠️ **Deliberately NOT promoted, twice checked (shard C, and again at closeout):** `task_019321d3` and
@@ -1857,6 +1857,487 @@ exist; (3) when a test fixture has to depart from the schema to make the code pa
 defect talking, not a fixture detail.** The brief said reporting a wrong premise is a successful
 outcome; it was — but the REVIEWER reported it, one round after the code was already pushed.
 Related: N44 (an armed gate whose operand cannot represent the failure it guards).
+
+**N64 · A REVIEWER'S "PARTIALLY ADDRESSED" IS THE MOST DANGEROUS VERDICT — IT READS AS PROGRESS
+AND SHIPS AS A HOLE.** 2026-08-12, across three PRs in one night. On #1352 two Majors came back
+"Partially addressed": the three-way parity check had been fixed to `startsWith("${ENV:")`, which
+still lets the YAML default drift to any value; and the comment filter had been made per-line, which
+still misses a BLOCK comment because the annotation line inside one starts with neither `//` nor
+`*`. Both LOOKED done in the diff and in the commit message. On the same night's #1353 the same
+shape appeared as a claim rather than a check: "byte-identical for a once-a-day caller" was the
+stated reason it was safe to deploy, and it was FALSE for every production row, because `seedMissing`
+leaves `claimed_at` NULL and `NULL < today` is NULL, not true — the test had claimed a row that did
+not exist yet, exercising the upsert's INSERT arm, which is the EXCEPTIONAL path. **Rule: when a
+review says PARTIAL, re-derive the invariant from scratch instead of patching toward the words of
+the finding — and when a fix rests on a claim about the NORMAL path, write the test that drives the
+normal path first.** Corollary that cost forty minutes the same night: a Java string literal
+containing the block-comment close sequence breaks this repo's checkstyle parser, which reports
+`mismatched input '(' expecting ';'` at a line of valid Java several lines from the cause — build
+such delimiters from constants. Sibling of the catalogue's "a test that supplies its own input".
+
+**DECISION 2026-08-12 · THE OWNERSHIP-TOKEN-QUALIFIED UPDATE IS NOT BUILT, DELIBERATELY.** The
+#1353 reviewer proposed qualifying the swing catch-up's claim-release UPDATE with an ownership token,
+so a release could never touch a row another invocation owns. The owner asked for it over the
+Architect's objection, then HELD once round 5 produced an independent judgement: *"not required for
+this patch while the documented invariant that a live run never approaches the 30-minute stale lease
+holds — defense against lease overrun or future drift, not a currently reachable input."* Recorded
+here rather than left in a PR thread because the condition is a live invariant, not a preference:
+**if the catch-up ever gains work that can approach 30 minutes, or the stale-lease window is
+shortened, this becomes reachable and should be built.** The structural guard that IS shipped (#1353)
+is narrower: the exception handler sits below the successful claim, so a pre-claim throw can no
+longer release another invocation's row.
+
+**OWNER DECISIONS 2026-08-12 (evening) — three, all applied the same session.**
+
+1. **The machine is WEEKDAY-ONLY.** This had been an open question blocking two jobs, and the answer
+   makes both of them *jobs that had never run at all*: `CrossSourceOiCanary` (Sunday 07:00 — outside
+   the window on BOTH counts, weekend AND before the 08:00 start) and the `InsightSweeper` quality
+   report (Saturday 08:00). Moved into weekday evening slots in #1358. ⚠️ The canary went to **Friday**
+   18:16, not Monday: it selects `expiry < today`, and a holiday PREPONES weekly expiries EARLIER, so
+   Monday and Wednesday can host one (the bundled calendar carries 2026-10-20 Tuesday preponed to
+   Monday 2026-10-19). A Monday slot would have skipped that expiry's check for a week. Cross-vendor
+   review caught it. Residual, unfixed: `expiry < today` still excludes a same-day expiry whatever day
+   it runs, so a preponed FRIDAY expiry would wait a week — closing that needs a selection change
+   gated on both source datasets being complete, not a cron move.
+
+2. **`budget_inr` → ₹25,000, not the ₹20,000 the PR proposed** (#1075, retargeted). The concurrency
+   cost is ALREADY fully paid at ₹20,000: allocation is ₹30,000 per sub-account, so ₹20,000 and
+   ₹25,000 both hold exactly ONE position — the cliff is at ₹15,000, which holds two. So ₹25,000 buys
+   25% more premium headroom for zero additional concurrency cost. ⚠️ **And the Architect's own hold
+   review understated the risk**: it said the 15 measured refusals were all comfortably below ₹20,000
+   and "none is a near-miss", but 2026-08-12 saw NIFTY ATM PE at **289.55** against a ₹20,000 ceiling
+   of **₹307.69** — 6% of headroom. Cost, stated: a bigger budget can buy 2 lots where ₹15,000 bought
+   1, on legs under ~₹192 premium; `max_lots: 5` still bounds it. This is a patch fitted to today's
+   premium regime, not a fix — the underlying asymmetry is LOT SIZE (NIFTY 65 vs SENSEX 20).
+
+3. **Build queue, all four approved:** H12 reaper (**DONE — PR #1361**), bhavcopy close-canary
+   persisted-watermark recovery, the pre-open entry watchdog, and the T10 stale-position
+   investigation. The middle two are the features WITHDRAWN from #1358 after they generated a fresh
+   defect in every review round; they are scoped as their own work precisely because doing them as
+   riders is what kept failing.
+
+**THE 2026-08-12 EVENING SESSION EVIDENCE, which decided (2) independently.** The scheduled
+post-market analysis measured, without reference to the PR: **all three NIFTY entry signals
+zero-sized** (premium 250.95–289.55, lot 65, budget 15000, `computedLots=0`). ₹15,000/65 = a max
+fundable premium of **₹230.77** and ATM NIFTY PE never traded below 250 all morning, so the entire
+funded day was SENSEX. The counterfactual is measured, not argued: the 09:48 NIFTY leg's shadow twins
+closed **TAKE_PROFIT +89.85 pts each**. On the biggest fire day the book has had — 24 fired evals
+against a prior max of 3 — the BUDGET, not the entry gate, kept NIFTY out. Also first live
+`daily_profit_target` trip (11:01 IST, 17 fires suppressed, counterfactual neutral-to-protective) and
+a SIXTH consecutive measured loss from loosening the entry gate (challengers 0/5 each,
+−₹11,446.78 each) — the standing prior holds.
+
+**RESOLVED 2026-08-12 · THE 09:15 DEADLINE-ATOMICITY CRITICAL IS REAL IN CODE BUT NOT REACHABLE AT
+08:35 — AND THE POLL IT WAS BLOCKING IS ALSO SAFE.** It had sat "unverified, live, money path" and was
+the stated blocker on restoring the morning poll. Resolved by reading the gate and MEASURING the run,
+rather than by reasoning about it.
+
+*The defect is real.* `SwingBatchCatchUp.marketOpenDeadlinePassed()` has six call sites, but the LAST
+one before a session actually runs is `SwingBatchCatchUp.java:377`, ahead of `repairPendingEffects`
+and ahead of the engine call. `SwingBatchEngine.runDaily` knows nothing about the deadline, so a
+session run that begins before 09:15 and finishes after it **does** emit entries into a live session,
+pricing off a daily bar that is now partial. There is no in-engine abort.
+
+*It is bounded much more tightly than "a pass may cross 09:15", though.* `SwingBatchCatchUp.java:259`
+re-checks the deadline **per session** inside the sweep loop and returns, explicitly leaving the
+remaining sessions retryable. So the exposure is never "the whole multi-day replay" — it is ONE
+session for ONE family, beginning at worst in the final moments before the open.
+
+*Measured, live, 2026-08-12* (`strategy.swing_catchup_runs`, claimed_at to updated_at): minervini
+**44.1 s**, manas-arora **37.1 s**; both families end-to-end 08:34:59 to 08:36:20 = **81 s**. Against
+an 08:35 start that is ~39 minutes of headroom — a ~29x margin, so **the deployed single-shot cannot
+reach the defect**.
+
+*And it does not block the poll either.* The proposed tick set is :05/:20/:35/:50, so the last tick
+before the open is **09:05**, finishing ~09:06 on measured durations; the 09:20 tick is refused by the
+entry gate. **The condition to state is not "no poll" but "no tick within one session-run of 09:15"**
+— keep every tick at least ~5 minutes clear and the shape stays unreachable. What WOULD make it
+reachable: a tick placed near 09:15, or a single session's run growing past the last tick's headroom
+(a slow market-data leg, not more sessions — sessions are re-gated individually).
+
+*Residual, not fixed here:* the engine still has no deadline of its own, so this is a reachability
+argument about the current schedule, not containment. A headroom precondition at the call site
+("refuse to START unless the deadline is more than N minutes away") is the cheap real fix and is not
+built.
+
+**2026-08-13 CLOSEOUT — WHAT SHIPPED, AND WHAT IS LEFT.**
+
+| # | what | state |
+|---|---|---|
+| #1075 | scalper `budget_inr` ₹15,000 → ₹25,000 | ✅ merged `101dc847`, deployed, **36 republished**; first LIVE day is 2026-08-14 |
+| #1358 | every scheduled job inside 08:00–19:00; reconcilers to morning | ✅ `34a7d39c`, deployed, **chain ran 18:04–18:50, 10 jobs, all SUCCESS** |
+| #1361 | `ingest_runs` boot reaper (H12 second half) | ✅ `086b2a6d`, boot line observed live |
+| #1363 | swing catch-up `DISARMED` was unreachable | ✅ `9c2e9358` |
+| #1364 | index-snapshot window bounded both sides | ✅ `d114a0cd` |
+| #1366 | screener coverage judged by screen output, not run wall-clock | ✅ `5168159c`, **08-12 RED→GREEN live with `LATE, T+1 catch-up`** |
+| #1367 | close-canary coverage floor | ✅ `29807106`, **first-ever scheduled run said YELLOW, 1 of 22, "too small to certify"** |
+| #1369 | pre-open reconciler waits for the entry pass, bounded + loud | ✅ `c7ff4c6c` |
+| #1370 | one `risk_audit` row per distinct refused symbol per IST day | ✅ `c5773706`; **first live test is 2026-08-14 08:35** |
+| #1362 · #1365 | ledger | ✅ merged |
+
+**STILL OPEN, and why — none of these are merely un-merged:**
+- **#1368** (equity mark cache, all-or-nothing) — HOLD, owner's. One Critical accepted-and-recorded:
+  withholding reports 0, so a book whose AGGREGATE unrealized is negative still reports above truth.
+  Only refusing to compute bounds the sign, and that was declined. Lever (D) withdrawn (see above).
+- **#1373** (close-canary own population, NIFTY-200 sample, 16:05) — **needs its cross-vendor review**;
+  would take `compared` 14 → 215. Until it lands the nightly YELLOW is correct but permanent.
+- **#1354** (18:59 "can I shut down yet") — **DIRTY**, needs a real rebase over #1358's compose block.
+  ⚠️ Its own defaults `POLL_CRON 0 */5 18-21` and `FINAL_CHECK_TIME 21:55` both reach PAST the 19:00
+  shutdown and would never fire — a decision, not a merge resolution.
+- **#1283** (swing coverage gate) — owner decided **fix the mode gating first**: `coverageGateMode`
+  has three consumption sites and `exitPass` references NONE, so merging turns the exit probe, its
+  rows, its ERROR log and its ntfy alert on in EVERY mode including `DISABLED`. Refusal rate
+  re-measured at **0%** (0/102 manas, 0/118 minervini, 0/21 exits).
+- **Governing-stop SIDE TABLE** — scoped as a document-first item, explicitly permitted to conclude
+  the item should not exist (the trail is unenforceable intraday; `stop_loss` is polled every 15 s).
+
+**2026-08-13 EVENING DEPLOY — ELEVEN PRs, AND THE FIRST TIME THE EVENING CHAIN EVER RAN INSIDE THE
+WINDOW.** Deployed 15:44 IST from the real checkout on `main`. market-data + strategy-signal; **no
+migrations anywhere in the wave**, so no flyway force-recreate. Merged: #1075 · #1362 · #1364 · #1361
+· **#1358** · #1365 · #1363 · #1366 · #1367 · #1370 · #1369.
+
+Verified on the artifact, not on exit codes: all eleven SHAs ancestors of HEAD · six source
+fingerprints present · jar carried **60 YAMLs at `budget_inr: 25000`, 0 at 15000** while the running
+container still read 15000 (clean before/after) · engine reload 216→218 **38 loaded / 0 unresolved /
+0 load_errors** · **0 ERROR lines** in either service · the new reaper logged `no stranded RUNNING
+rows at boot` · 36 scalpers republished (0 failures), hero-zero pair correctly left at ₹2,000 ·
+0 pending republish afterwards.
+
+**The measure of what #1358 was worth, taken from the pre-deploy container env: TEN jobs were
+scheduled past the 19:00 shutdown and therefore were not running at all** — Upstox canary 19:30,
+bhavcopy 19:30, NSE 19:00, Minervini 19:50, Manas 19:55, close canary 20:10, swing heartbeat 20:15,
+graduation 21:00, paper reconciliation 21:15, past-expiry 21:20. All ten moved and were confirmed
+changed in the running containers, and `ARTHA_BHAVCOPY_CLOSE_MIN_COMPARED` appeared where it had been
+absent. ⚠️ **This was also the first deploy on which that check could ever have failed meaningfully**:
+every pre-existing cron passthrough carried a value byte-identical to its code default, so a broken
+placeholder name was indistinguishable from a working one. Ten values now differ from their defaults,
+which proves the wiring end to end.
+
+**THE CHAIN RAN — 2026-08-13, 10 jobs, all SUCCESS, first time inside the window.** Measured live:
+`OPTIONS_SNAPSHOT_PRUNE` 18:04:59 (0) · **`BHAVCOPY` 18:44:59 (8279)** · `MANAS_SCREEN` **18:45:47**
+(2275) · `NSE_FII_DII` 18:45:59 (60) · `NSE_PARTICIPANT_OI` 18:45:59 (5) · `NSE_FII_DERIVATIVE`
+18:46:00 (120) · `MINERVINI_SCREEN` **18:46:18** (1793) · `MARKET_CONTEXT_DAY` 18:48:59 (1) ·
+`DATA_QUALITY` 18:49:59 (11) · `EQUITY_BREADTH` 18:50:59 (2). Every cron within a second of its time.
+
+**N70 CONFIRMED LIVE:** manas ran at **18:45:47 — 48 s after bhavcopy STARTED, not at its 18:48
+cron** — and minervini chained 31 s later. The `BhavcopyBackfillCompleted` event is the mechanism;
+the screen crons are the redundant safety net, exactly as measured this morning.
+
+**#1366 PROVEN LIVE.** `/api/v1/market/health/ingest` now returns for 2026-08-12:
+`MINERVINI_SCREEN GREEN missing=0 — screen stored 1785 rows for this trading day, computed
+2026-08-13 08:04:50 IST — LATE, T+1 catch-up` (manas identically, 2270 rows). Was RED/`missingDays 1`
+this morning on the same data. Zero non-green sources board-wide. Late-but-done stays distinguishable
+from never-done, which was the point.
+
+**#1367 PROVEN LIVE**, first-ever scheduled execution: `bhavcopy-close canary YELLOW: 1 of 22 symbols
+diverge > 1.00% on 2026-08-13: PRECOT (bhav 771.4000 vs kite 748.0000, 3.13%) — and only 22 symbols
+were comparable (floor 100), so this rate is measured on a population too small to certify.` Before
+today it would have said GREEN. ⚠️ The 22 is PERTURBED: #1373's live probes wrote 8 NIFTY-200 KITE
+bars, taking today's count 15→23; unperturbed it would read ~14. Verdict unchanged (both ≪ 100).
+⚠️ Also note **PRECOT is an OPEN swing position in both books** — a 3.13% close divergence on a held
+name is worth its own look, not just a canary line.
+
+⚠️ **N73 · I DIAGNOSED THE DEAD-MAN'S SWITCH FROM INSIDE THE SYSTEM AND GOT BOTH SIDES WRONG. THE
+EXTERNAL DASHBOARD SETTLED IT IN ONE LOOK.** 2026-08-13 18:54: `swing batch heartbeat ping failed
+(external monitor may alert): java.net.ConnectException`. From that plus `ARTHA_HEARTBEAT_URL` being
+SET, I asserted two things to the owner and **both were false**:
+
+- ❌ *"The switch has never worked."* It worked fine. healthchecks.io logs **23 successful pings,
+  Jul 22 → Aug 11 20:15**, all `Java-http-client/21.0.11`. It went `up ➔ down` on **Aug 12 22:15** —
+  exactly when the 19:00 shutdown policy started killing the 20:15 job. The silence had a cause, and
+  the cause was two days old, not permanent.
+- ❌ *"No integration → it notifies nobody."* Email notification was **ON** to the owner's address the
+  whole time. I inferred "no alerts" from an empty `Integrations` column in a list view that simply
+  does not render it.
+
+Also already true before I kept recommending it: the check's schedule was **already** `54 18 * * 1-5`
+in `Asia/Kolkata`.
+
+**The lesson is about method, not about heartbeats. This system has an EXTERNAL OBSERVER that holds
+the ground truth — a ping log with timestamps and outcomes. I theorised from container logs, env
+vars, DNS and TCP probes for several turns and reached two confident wrong conclusions, when one look
+at the dashboard was decisive. When a component's whole job is to be watched from outside, ASK THE
+WATCHER FIRST.** Related: the one probe I could safely run from inside (DNS + TCP 443, deliberately
+NOT the ping URL, since a GET registers a ping and would falsely satisfy the alarm) came back healthy
+and therefore proved nothing about the app's HTTP client.
+
+**What is actually open.** Tonight's 18:54 `ConnectException` is **the only ping attempted since the
+15:44 container recreate** — Session Liveness' last success was 15:20, before the deploy — so there
+is no successful post-recreate ping yet. **Tomorrow's 18:54 is the discriminator: success ⇒ tonight
+was transient; failure ⇒ the fault is in the recreated container's HTTP client.** Note the check
+shows **56.98% uptime in July and 81.86% in August across 12 downtimes**, so it was flapping long
+before any of this and that predates the shutdown policy. Owner paused the check at 19:10 on 08-13
+and has since unpaused it; owner declined to rotate the ping URLs (their call, recorded).
+Session Liveness is healthy — 10:30→15:20 today, every 10 minutes, unbroken — which also confirms
+that this session's "0 pings today" reading was purely N72's log destruction, not a failure.
+
+⚠️ **TOMORROW MORNING (2026-08-14) — THREE FIRST-EVER LIVE TESTS. Verify at ~09:00 IST, after the
+pre-open window closes and before the open. This list is written here because the machine is off
+overnight and the session that shipped these will not exist to remember them.**
+1. **#1370's audit grain — the discriminator is the ROW COUNT.** `SELECT count(*) FROM
+   strategy.risk_audit WHERE action='TRIP' AND created_at >= timestamptz '2026-08-14T00:00:00+05:30'`
+   against the refusals in `strategy.swing_batch_runs` for the pinned session. **1 row = still
+   broken; N rows matching N refusals = fixed.** Today's run made 4 refusals and wrote 1 — the bug,
+   seen one last time, since #1370 only deployed at 15:44.
+2. **₹25,000 sizing, first live day.** Today still ran ₹15,000 (republish was post-close). Expect
+   SENSEX legs up to 3 lots at ~₹410 premium; NIFTY 1 lot to ₹384 or 2 lots to ₹192.30. Check
+   `paper_positions.qty` against premium on any fresh scalper entry.
+3. **The reconcilers at 08:50 / 08:52 — these have NEVER run.** They sat at 21:15/21:20, past
+   shutdown. Confirm both executed and that the reconciliation's window anchored to the PREVIOUS
+   TRADING SESSION rather than an empty morning (the #1358 Critical 1 shape: every bounded query
+   returns zero rows and the run row records a clean reconciliation of an empty set).
+
+**N72 · A ROUTINE POST-CLOSE DEPLOY DESTROYED THE SESSION'S FORENSICS, AND THE OBVIOUS REMEDY IS
+IMPOSSIBLE HERE.** 2026-08-13, and it was MINE. I recreated both strategy-signal and market-data at
+**15:44 IST — fourteen minutes after close and BEFORE the post-market routine ran**. `docker logs`
+follows the container, so the session's logs went with it. Permanently lost for 2026-08-13: the
+§3.17 canary WARN/straddle counts, §3.34 heat-grep, the §3.10 boot line, §3.18 log confirmation, and
+any §3.36 suppression line. Third log-loss this month (07-17 boot line, 08-10 outage) but **the
+first caused by a ROUTINE DEPLOY rather than an incident** — which is why the standing rule did not
+catch it: memory says *"snapshot docker logs BEFORE any post-incident recreate"*, and this was not an
+incident. **Extend it: snapshot before ANY recreate on a session day.**
+⚠️ **The routine's alternative remedy — "deploy after ~19:00 once the post-market run has grepped
+them" — is IMPOSSIBLE on this machine**, because the machine is off at 19:00 and #1358 narrowed the
+safe window to *before 18:05 or after 18:58* (no `already-done-today` guard, so a deploy inside the
+chain double-runs it). That leaves a ~2-minute slot. So the snapshot is not the cheaper option, it is
+**the only one**. Concretely, before `up -d`:
+`docker logs ay-strategy-signal-service > <path>/ss-<date>.log 2>&1` and the same for market-data.
+The general shape: **a deploy is not just a code change, it is a DESTRUCTIVE ACT on whatever
+observability lives in container-local state** — enumerate what dies before recreating, not after.
+
+**⚠️ CORRECTION to the 2026-08-13 session-findings doc (#1371 §6.6):** it records
+*"`risk_audit` wrote exactly 1 row today (08:35, the swing pyramid-cap refusal — **#1370's one-row
+semantics** on its first live morning)"*. **#1370 was not live at 08:35** — it merged 14:47 and
+deployed 15:44. And the direction is backwards: that run made **4** manas cap refusals
+(`swing_batch_runs` 2026-08-12: `would_enter 4, admitted 0, cap_exceedance 4`) and wrote **1** row,
+which is precisely the 4:1 undercount #1370 exists to fix, observed one last time. Read as written it
+would certify the fix from a sighting of the bug. **The real first test is 2026-08-14 08:35, and the
+discriminator is the row COUNT: 1 = still broken, N = fixed.**
+
+**2026-08-13 · THE SWING BOOKS ARE LOCKED, AND IT IS NOT AN EXIT DEFECT.** Owner-triggered
+measurement; full findings in `docs/signal-analysis/2026-08-13-swing-exit-stickiness.md`. 18 open
+positions, 20 would-enter candidates on the 08:35 catch-up, **0 admitted**. Verdict: **HOLD is
+correct on all 18** — zero NULL stops, `exit_skipped = 0`, 16 of 18 profitable, **+₹27,214** marked,
+median ~12% above the effective exit; only minervini INOXINDIA is close, at 0.78%. Neither book
+declares a `take_profit` or `time_stop` in its PUBLISHED config, so nothing should have fired at 37
+days. Two framing corrections to my own question: the 6% open-risk cap is **manas-only** (minervini
+is blocked by a 12-slot cap, at 12/12), and `strategy.sell_decisions` is a **survivor log** written
+after the passes — all 498 rows ever written are HOLD, so a 100%-HOLD table carries no signal at all.
+
+Three structural findings, all on the RISK side:
+- **manas sits at 99.91% of cap — ₹7.55 of headroom** (₹8,569.23 vs ₹8,576.78), and it is arithmetic:
+  sizing is 1%/trade against a 6% cap, so **1% × 6 = 6% exactly and the 7th declared slot is
+  unreachable by construction.** ⚠️ **CORRECTION, same day, by the builder sent to fix it:** I wrote
+  here that growing equity cannot help because "both terms are percentages of equity, so the ratio is
+  scale-invariant". **That is wrong.** Already-open risk is ABSOLUTE — banked in rupees at entry —
+  so only the FUTURE lot scales with equity. Restoring the missing ₹27,214 moves headroom
+  ₹7.55 → **₹553**, which is real but still short of a 1% lot. The conclusion (the 7th slot does not
+  open) survives; the reasoning that produced it did not. **A ratio argument is only scale-invariant
+  if BOTH operands actually scale — check that the one you are dividing by is not already banked.**
+- **`openRiskInr` measures `avgEntry − stop`**, so appreciation never releases budget. The one
+  release valve (`ManasGoverningStopCache`) was *provably* inert on 2026-08-13: entries run before
+  exits (`SwingBatchEngine.java:316` vs `:321`) and the container booted 08:03 before the 08:35 run.
+  The arithmetic confirms rather than assumes it — a warm cache would have dropped risk to 3.05% and
+  **admitted** the entry that was refused.
+- **The equity denominator cannot see the ₹27,214 of unrealized gain.** `unrealizedTotal` marks via
+  Redis `ticks:last`, verified independently: `HLEN` = 307, every entry an NFO/BFO option contract,
+  and `HEXISTS ticks:last NSE:<sym>` = 0 for every swing equity. The term silently evaluates to
+  **₹0.00**, so the cap binds tighter than designed. Another N44/#14.
+
+**Owner decision 2026-08-13: fix the blind denominator AND the unreachable 7th slot; leave
+`avgEntry − stop` alone for now** (that one is doctrine, not a bug). HOLD tier — built as #1368, PR
+left OPEN.
+
+⚠️ **AND THEN THE BUILD MEASURED THE FIX AND FOUND IT CHANGES NOTHING TODAY: 0 of 20 admitted
+before, 0 of 20 after — neither fix, nor both together.** Two independent reasons, both of which the
+investigation above missed. **(1) 16 of the 20 candidates are minervini, which has NO RISK CAP AT
+ALL** (`PyramidPolicy.NONE`) — it is locked purely by its 12/12 slot cap, so no equity or sizing
+change can touch it. The finding above correctly said the 6% cap is manas-only, then failed to carry
+that through to "so fixing the cap cannot help the 16". **(2) Shrinking the NEXT lot to 0.8% does not
+refund the ₹8,569 already banked by six positions sized at 1.0%** — the 7th manas slot opens after
+**four position turnovers**, not on deploy. **The lesson is the one this ledger keeps relearning:
+measure the FIX against the real population before shipping it, not just the DEFECT.** Both defects
+were real; the remedy was inert.
+
+**A fourth lever LOOKED like it would work immediately and changes no declared parameter: warming
+`ManasGoverningStopCache`.** Open risk drops to ₹4,356 — 2.87% against the 6% cap (⚠️ the
+doc-of-record says **3.05%** for the same ₹4,356; one of the two is wrong and it is unresolved).
+Inert today only because entries run before exits (`SwingBatchEngine.java:316` vs `:321`) and the
+cache is cold on every boot.
+
+⚠️⚠️ **WITHDRAWN 2026-08-13, TWICE OVER — DO NOT BUILD IT. This paragraph recommended it for
+several hours after it had been withdrawn, which is exactly the drift this ledger exists to stop.**
+
+**(a) It is infeasible as specified.** Built once, cross-vendor review found FOUR Criticals, all in
+the exit path; reverted. A feasibility pass then produced two independent impossibility results.
+*Criterion 3 is the negation of the warm's own precondition*: the warm needs the daily series BEFORE
+`entryPass`, the exit pass fetches it AFTER, and exactly two reconciliations exist — a separate fetch
+(built; ≤180 s exit delay, deadline consumption, two samples that can disagree) or sharing
+`seriesCache` (one sample, but the exit then consumes a series sampled at warm time). **There is no
+third option.** The withdrawn attempt avoided the shared cache *deliberately to protect the exit*,
+and that separate fetch is what broke it. *Criterion 4 guarantees the equity mark fails open*: an
+unmarked position falls back to `avgEntryPrice`, erasing its unrealized **in whichever direction it
+sits**, so an unmarked LOSER overstates equity and loosens every `pct`-mode rail. Fail-soft ⇒ partial
+marks ⇒ unbounded-sign error; correct semantics is all-or-nothing, which is not fail-soft.
+**Corollary worth keeping: the two caches must NOT be warmed by one mechanism — stop-cache
+partiality is monotonically conservative, equity-mark partiality is not.**
+
+**(b) It would have been WRONG even if feasible, and this is the part that matters.** The published
+manas trail carries `breakeven_floor: true` with `arm_pct: 9` (**verified**: both
+`manas-arora-breakout` and `manas-arora-vcp`). An ARMED trail therefore sits at or above entry, so
+the warm would collapse counted open risk almost to fill slippage — **the warm does not adjust the
+cap, it very nearly switches it off.** Measured 2026-08-13 on the 4 open manas positions (persisted
+stops total **₹5,708.50**): peak gains **8.08 / 11.97 / 13.84 / 18.01%**, so **3 of 4 armed** and
+roughly **74% of counted risk released**. ⚠️ The feasibility doc claims 4 of 4 and ~99.4%
+(₹5,708.50 → ≤₹32.19) from a 10.25% low-end; KANORICHEM measures **8.08%** here, below the arm
+threshold. Direction agrees, magnitude does not — **unresolved, and worth settling before anyone
+acts on either figure.** Above all: **the warm swaps an ENFORCEABLE stop (`stop_loss`, polled every
+15 s by the bracket sweep) for an UNENFORCEABLE one (the trail, run once daily and explicitly
+exit-neutral) at the one moment it decides money.**
+
+**The cheapest correct fix is a SIDE TABLE written at the existing `cacheGoverningStop` call site** —
+already inside the no-exit branch, already downstream of the mixed-lot refusal, no fetch, no ordering
+change, already inside the fail-soft try. It satisfies all four criteria trivially. ⚠️ **The settled
+rejection may not actually cover it:** that ruling was against writing to `stop_loss` and against a
+new column on `paper_positions`, and a side table is neither. Owner's call. If it stays closed, the
+fallback is the **degraded-mode signal** — the rail's own report says it is running blind rather
+than quietly under-reporting.
+
+⚠️ **`ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT` DOES NOT DRIVE SIZING.** It feeds exactly one site — the
+advisory `advised_lots` DISPLAY column. Real sizing comes from the published config's
+`risk_pct_equity`. Both currently read `1.0`, which is precisely why the error was invisible:
+**flipping that env var to retune sizing would have changed nothing but a display field**, and the
+books would have looked mysteriously unmoved. The 2026-08-13 exit-stickiness doc cites it wrongly;
+this is the correction.
+
+**N71 · A COVERAGE BOARD THAT BUCKETS BY WHEN A JOB RAN CANNOT SEE WORK DONE BY CATCH-UP — AND IT
+FAILS IN THE ALARMING DIRECTION.** 2026-08-13, owner-reported: `/api/v1/market/health/ingest` showed
+MINERVINI_SCREEN and MANAS_SCREEN **RED** for exactly one day, 2026-08-12, detail *"no ingest run
+recorded for the trading day"*. **No data was missing.** `screen_date = 2026-08-12` holds 2270 manas
+and 1785 minervini rows, matching the `rows_written` of runs that finished 08:04 IST the next
+morning. `IngestCoverageCanary.java:606` selects by `started_at`, so the catch-up's work stamped
+08-13, fell outside the 07-30→08-12 window, and left 08-12 looking empty. **The board asks "did a run
+START on this calendar day" when the meaningful question is "does output EXIST for this trade
+date"** — and those diverge precisely when catch-up saves you, i.e. every day under a 19:00 shutdown
+with a 19:30 chain head. 08-10 and 08-11 read GREEN only by luck: deploy-triggered boot catch-ups
+happened to land at 18:48 and 18:01, same calendar day. The precedent for the fix already exists in
+the same file — `BHAVCOPY_BOTH_EXCHANGES_ADVANCED` queries `nse_eod_bhavcopy` by `trade_date`
+(`:629`), and `CAPTURE` keys on `window_start` rather than `started_at`. Same family as the
+`series='EQ'` filter artifact: **it is the rare trap that fails LOUD, which makes it burn
+investigation time rather than hide a defect.**
+
+**N70 · THE SCREENS DO NOT RUN ON THEIR CRON, AND I ASSERTED A CRON TIME TWICE BEFORE CHECKING.**
+2026-08-13. `ManasScheduler` has THREE entry points — `@EventListener(ApplicationReadyEvent)` at
+`:54`, `@EventListener(BhavcopyBackfillCompleted.class)` at `:60`, and `@Scheduled` at `:66` — and
+the one that fires is the **event**. Every observed run is bhavcopy-chained, with Minervini starting
+the same second Manas finishes (08-07 19:31:11→19:31:41→19:32:21; 08-10 18:48:38→…; 08-11 18:00:47→…;
+08-13 08:04:06→…). The 19:50/19:55 crons have not fired since the shutdown policy began, because
+`ARTHA_BHAVCOPY_EOD_CRON=0 30 19` is itself past 19:00. **Consequence for #1358: the lever is the
+BHAVCOPY move to 18:45; the 18:47/18:48 screen cron moves are a redundant safety net, not the
+mechanism.** My own errors, both corrected: I first told the owner "19:31 cron" (that was an OBSERVED
+run time, not a schedule), then read the env `0 50 19` as authoritative without asking why observed
+runs disagreed with it. **A schedule and a fire time are different measurements; when they disagree,
+something else is driving the job — enumerate every trigger on the class before naming a cause.**
+
+**N69 · A GUARD AGAINST CROSS-TEST BLEED BOUNDED ON ONE SIDE IS HALF A GUARD.** 2026-08-13, CI red on
+#1361's market-data shard in a test that PR does not touch: `IndexConstituentsIntegrationTest`
+expected `[2026-06-10, 2026-06-11]` and got `[2026-03-02, 2026-06-10, 2026-06-11]`. The assertion
+**already knew** about shared-singleton-DB bleed and filtered for it — `!d.isAfter(2026-06-11)` — and
+its comment names the reasoning: *"another IT's context boot can accrue a TODAY-dated snapshot"*. The
+reasoning was right and stopped at one edge. A sibling with a PAST-dated `@Primary` Clock
+(`ContinuousFuturesBackfillIntegrationTest` pins 2026-03-02) walks straight underneath.
+**Contamination has no preferred direction: scope to a WINDOW, never a ceiling.** Fixed in #1364 by
+bounding both sides AND seeding the contaminant through the real accrual path, so the isolation is
+deterministic rather than dependent on surefire ordering — the red-proof then reproduces CI's message
+verbatim. Third instance of this family after #1357 and #405.
+
+**N68 · A GATE'S OPERAND CAN BE DESTROYED BY A CHANGE IN A DIFFERENT JOB, AND SEVERITY KEYED ON THE
+NUMERATOR WILL NEVER NOTICE.** 2026-08-13. `BhavcopyCloseCanary` compares NSE bhavcopy closes against
+Kite 1d candles. Its denominator collapsed **165 → 15** on 2026-08-11 (`computed`: 08-05=176,
+08-06=164, 08-07=165, 08-10=165, 08-11=15, 08-12=15) — landing exactly on #1333, which moved the
+swing batch from a ~20:00 full-universe evening run to a 16:00 exits-only settle. **The canary never
+had its own bar population**; it was reading a side effect of whatever the swing batch happened to
+fetch, a dependency `MinerviniSwingScheduler`'s javadoc documents outright. Against 3308 NSE EQ
+bhavcopy rows it now checks ~0.4% of the universe and reports **GREEN**, because status is driven
+only by `divergent` vs `redFloor` and never by `compared` being small. Pure N44/#14. ⚠️ **And note
+which direction I got wrong:** I had raised this as a false-ALARM risk on #1358. It is the opposite —
+a success-shaped nothing. **When you predict a gate will misfire, check which way: an operand that
+shrinks makes a numerator-keyed gate quieter, not louder.** Floor being built; the real fix is giving
+the comparison its own population.
+
+**N67 · A CRON MINUTE EXPRESSES ONLY WHEN A JOB STARTS — NOT WHAT WINDOW IT READS, WHAT IT WAITS
+FOR, OR WHICH THREAD IT BLOCKS.** 2026-08-12, #1358: moving three jobs across the 19:00 boundary
+produced three Criticals, and all three were the same mistake in different clothes. (1) The paper
+reconciler's window was `today 00:00 -> now`; correct at 21:15, and at 08:50 it covers a morning on
+which nothing has traded — every bounded query returns zero rows, every check passes, and the run row
+records **a clean reconciliation of an empty set**. (2) The bhavcopy close canary at 18:52 sits seven
+minutes after an ASYNCHRONOUS 18:45 submit against a publish time measured at 17:52 / 17:59 / 18:47 /
+19:31 — and its skip is permanent, because by the next firing that session is no longer today. (3)
+Past-expiry recovery at 08:52 shares the DEFAULT pool with the 15-second bracket sweep, so an overrun
+past 09:15 stalls stop-loss evaluation. A fourth, rated Major, is the same shape: reconciliation at
+08:50 was only *starting* after the 08:35 catch-up, never waiting for it. **The rule: when you retime
+a job, enumerate what its old time was silently supplying — a settled day, a landed file, an idle
+pool, a finished predecessor — and re-express each one explicitly.** The fix for (3) and (4) was one
+line: both onto the catch-up's size-1 pool, which supplies ordering *and* isolation. Note (1) is a
+pure N44/#14 — an armed check whose operand is structurally empty — reached by a one-line cron edit,
+which is how cheaply that failure mode can be created.
+
+**N66 · A BACKGROUND TASK CAN REPORT "completed (exit code 0)" WHEN THE COMMAND DIED BEFORE IT
+STARTED.** 2026-08-12, measured: a cross-vendor review round was launched with its output redirected
+to `"$SCR/rev2.out"`, but `SCR` was unset in that shell, so bash failed the redirect
+(`/rev2.out: Permission denied`) and killed the line before Codex ran. The task notification still
+said **completed, exit code 0**, and the review state file was 3.5 hours stale — the round simply had
+not happened. The tell is the DURATION: an `xhigh` review of a 1,500-line diff returning in two
+minutes is not a fast review, it is no review. Same family as the `mvnw | Out-File` pipeline-exit
+trap: **read the artifact's mtime, never the launcher's exit code.** Cheap habit: `ls -l` the state
+file and check its timestamp moved before reading its contents as fresh.
+
+**N65 · CHECK WHETHER THE DEFECT ACTUALLY FIRED BEFORE CLAIMING URGENCY.** 2026-08-12: the swing
+entry-forfeiture fix was written, reviewed and framed as closing a LIVE money-path hole — the
+catch-up is armed (`ARTHA_SWING_CATCHUP_ENABLED=true`, verified by `docker inspect`), so the path
+was genuinely reachable. Then the morning's scheduled verification showed the first complete
+two-phase cycle ran with `entriesReady` TRUE and **no screen-mismatch, arming-unknown or deadline
+skip firing at all**; the zero entries were every candidate refused by an ADMISSION rail (the 6%
+portfolio open-risk cap, the 12/12 book governor). So the fix is PREVENTIVE, not stanching a bleed.
+Reachable is not the same as firing, and armed is not the same as exercised. **Both belong in the
+verdict sentence, because the difference decides whether something deploys tonight or tomorrow.**
+Related: the same run disproved the previous day's "entries permanently broken" conclusion for the
+second time — see N60.
+
+**N63 · "WAS IT MERGED?" IS THE WRONG QUESTION. ASK WHAT HAPPENED TO IT IN REVIEW.** 2026-08-11,
+hours after writing N62 and while acting on it. Having established that `ae2ca115` ("poll the evening
+chain from 18:00") was not in `main`, the Architect concluded it was LOST WORK, rebuilt the schedule
+PR on its polling design, and shipped a commit describing the design as "recovered". It was not lost.
+It is an INTERMEDIATE commit on the branch that became #1333, and the review state still sitting in
+`.claude/skills/codex-code-review/state/evening-chain.*` shows an **8-round cross-vendor review that
+took the polling apart and only reached APPROVED after every poll was DELETED** -- six Majors, all
+consequences of polling the alerting and observability jobs, one of which ("early ingestion polls can
+manufacture false-green evidence") the Architect then re-derived from scratch and documented as an
+ACCEPTED COST in the very commit that reintroduced it. Another ("bhavcopy canary re-pages on every
+poll") was rediscovered independently an hour later, and it was that rediscovery -- not the merge
+check -- that finally surfaced the prior review. **A commit that is absent from `main` has at least
+three very different explanations: never finished, lost, or REJECTED. The merge check cannot tell
+them apart, and the rejected case is the one where resurrecting it does damage.** The evidence is
+cheap and local: `.claude/skills/codex-*/state/` retains every review thread, verbatim, indefinitely.
+Rule: before reviving any unmerged commit, grep the review state for its branch or target name.
+N62 said resolve the SHA; N63 says resolve its FATE.
+
+**N62 · A COMMIT SUBJECT IS NOT EVIDENCE THE WORK IS IN MAIN -- AND AN ORPHANED COMMIT READS
+EXACTLY LIKE A MERGED ONE.** 2026-08-11: the Architect asserted four times, to the owner, that "#1333
+changed the evening chain to poll from 18:00, deployed this morning". Every word of the subject line
+was real; none of the work was in `main`. **`989d63e8` (the actual #1333 squash) is *settle the swing
+book at 16:00, take entries at 08:35*.** The polling commit is `ae2ca115` -- present in the local
+object store, visible at the top of `git log` in one checkout, and belonging to **no branch at all**
+(`git branch -a --contains` returns empty; it is an ancestor of neither `origin/main` nor `HEAD`).
+A pruned branch leaves its commits reachable through the reflog for weeks, so they keep appearing in
+casual `git log` output long after the work is gone. The tell that was available and unused: the
+18:55 check found the 19:xx cron literals INTACT in `main`, and that was rationalised as "vestigial
+literals under a poll" rather than read as "the poll is not here". **Rule: before citing a PR number
+as shipped, resolve the SHA -- `git log origin/main --grep`, then `git merge-base --is-ancestor
+<sha> origin/main`. A subject line proves someone wrote it, never that it landed.** Cost: four wrong
+statements to the owner over a day, plus a schedule PR built on the wrong design (single-shot cron
+shift) that had to be rebuilt on the orphan's own argument. The compensating mercy is that the
+orphan's reasoning was recovered before merge, not after a lost trading session.
 
 **N60 · "NO CALLER PASSES TRUE" IS NOT PROOF A PATH IS DEAD -- READ THE GATE THAT ADMITS WORK TO IT.**
 2026-08-11: the Architect concluded swing ENTRIES could never run, from three correct observations --

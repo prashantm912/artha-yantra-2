@@ -57,7 +57,7 @@ public class NseEodScheduler {
   }
 
   /** Daily after close (default 19:00 IST). */
-  @Scheduled(cron = "${artha.nse.eod-cron:0 0 19 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.nse.eod-cron:0 46 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void scheduledPull() {
     pullAll();
   }

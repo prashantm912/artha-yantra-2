@@ -71,6 +71,15 @@ import org.springframework.stereotype.Component;
  * publish until the next morning (08-13 08:03 IST), so there was no output for 08-12 EITHER, and a
  * date-keyed check would have reported the same never-resolving PENDING.
  *
+ * <p><b>⚠️ And that carve-out is only sound once the BHAVCOPY leg is terminal</b> (review Major A,
+ * 2026-08-14) — see {@link #bhavcopyIsTerminal}. "The screen has consumed the watermark" means "no
+ * more screen work tonight" only while the watermark can no longer MOVE tonight, and applying it
+ * unconditionally made that false every day until ~18:45: at 10:00 both screens are current with
+ * YESTERDAY's watermark, so both read DONE from IST midnight onward for jobs that had not run and
+ * demonstrably would. The consequential case is the 18:59 one — with BHAVCOPY still PENDING the push
+ * said {@code still pending: BHAVCOPY} while THREE legs were outstanding, which is LESS accurate,
+ * in the moment it matters most, than the run-row-only check it replaced.
+ *
  * <p><b>Never derives completion from the clock.</b> "Is source X done" is answered from ledger and
  * artifact state, never from wall-clock time — a change to when the evening jobs fire needs no
  * change here.
@@ -362,7 +371,12 @@ public class EveningChainCanary {
 
     List<SourceProgress> sources = new ArrayList<>();
     for (String source : EXPECTED) {
-      sources.add(withScreenerArtifact(classify(source, bySource.get(source), generatedAt)));
+      sources.add(classify(source, bySource.get(source), generatedAt));
+    }
+    // The screener carve-out reads the bhavcopy watermark, so it may only be applied once that
+    // watermark is FINAL for the night — i.e. once BHAVCOPY itself is terminal (review Major A).
+    if (bhavcopyIsTerminal(sources)) {
+      sources.replaceAll(this::withScreenerArtifact);
     }
     // Only DONE counts as finished — STUCK is outstanding, exactly like PENDING (review Critical 1:
     // an orphaned RUNNING row must never read as "safe to shut down").
@@ -390,10 +404,39 @@ public class EveningChainCanary {
   }
 
   /**
+   * Whether tonight's BHAVCOPY leg has reached a terminal row, which is exactly when the watermark
+   * the screener carve-out reads can no longer move tonight — the precondition that makes {@link
+   * #withScreenerArtifact} sound (review Major A, 2026-08-14).
+   *
+   * <p>Terminal, not SUCCESS: a {@code FAILURE} row also means no more bhavcopy is coming tonight,
+   * and the screeners' fallback crons (18:47/18:48, after the 18:45 backfill) still settle their own
+   * state against the unmoved watermark before the 18:59 check. PENDING and STUCK both leave the
+   * watermark live — a bhavcopy that has not finished may yet publish (NSE has published as late as
+   * 19:31) — so the carve-out is withheld and the screeners stay outstanding, which is the fail-safe
+   * direction: the cost is a "still pending" push, never a "safe to shut down" on a live chain.
+   *
+   * <p>Only the SCHEDULED {@code runLocked} publishes {@code BhavcopyBackfillCompleted} and thereby
+   * drives the screens; {@code BhavcopyBackfillService#refetchDate} does not, so a manual re-fetch
+   * after the leg closed cannot silently start screen work behind a DONE bhavcopy row. If it moved
+   * the watermark, the screens simply read behind it and the carve-out returns false anyway.
+   */
+  private static boolean bhavcopyIsTerminal(List<SourceProgress> classified) {
+    return classified.stream()
+        .anyMatch(
+            s ->
+                IngestRunLedger.SOURCE_BHAVCOPY.equals(s.source())
+                    && s.state() == SourceState.DONE);
+  }
+
+  /**
    * The screener carve-out (review Critical 1). A screener whose {@link #classify} verdict is "no
    * run row at all today" is re-asked of its ARTIFACT, and reads DONE when the screen has already
    * consumed everything the bhavcopy watermark offers — the schedulers' own dedup-skip condition, and
    * therefore exactly "no further screen work will happen tonight".
+   *
+   * <p>⚠️ Applied ONLY when {@link #bhavcopyIsTerminal} — the caller's gate, not this method's, and
+   * the difference between "the screen is current" and "the screen is current and will stay that
+   * way".
    *
    * <p>⚠️ It can only ever promote PENDING→DONE, never demote, and only from the NO-ROW shape
    * ({@code status == null}). Two deliberate consequences:
@@ -420,8 +463,15 @@ public class EveningChainCanary {
 
   /**
    * Whether {@code source}'s persisted screen output has caught up with the bhavcopy watermark it
-   * screens against — {@code max(screen_date) >= max(trade_date)}, the same two reads {@code
+   * screens against — {@code max(screen_date) == max(trade_date)}, the same two reads {@code
    * MinerviniScheduler}/{@code ManasScheduler} compare to decide whether to run at all.
+   *
+   * <p>⚠️ {@code equals}, deliberately, NOT {@code >=} (review minor m-2, 2026-08-14). The producers
+   * skip iff {@code persisted.equals(watermark)} ({@code MinerviniScheduler:117}, {@code
+   * ManasScheduler:80}), so a {@code screen_date} AHEAD of the watermark — reachable through {@code
+   * runOnce(asOf)} behind {@code POST /run} with a forward {@code asOf} — is a state in which the
+   * scheduler WOULD still run while a {@code >=} carve-out reported DONE permanently. Mirroring the
+   * producers keeps this answering their question rather than a looser one of its own.
    *
    * <p>Fail-SAFE in the blocking direction: an unreadable watermark, a watermark with no screen
    * output behind it, or an empty equity table all return false, leaving the source outstanding. The
@@ -441,7 +491,7 @@ public class EveningChainCanary {
       LocalDate screened =
           jdbc.queryForObject(
               "SELECT max(screen_date) FROM " + ScreenOutputTables.tableFor(source), LocalDate.class);
-      return screened != null && !screened.isBefore(bhavcopy);
+      return bhavcopy.equals(screened);
     } catch (RuntimeException unreadable) {
       log.warn(
           "evening-chain: could not read {}'s screen watermark ({}) - leaving it outstanding",

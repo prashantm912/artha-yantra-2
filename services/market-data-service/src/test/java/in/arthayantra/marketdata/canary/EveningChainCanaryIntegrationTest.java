@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.canary;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
@@ -18,19 +19,30 @@ import in.arthayantra.marketdata.canary.EveningChainCanary.SourceProgress;
 import in.arthayantra.marketdata.canary.EveningChainCanary.SourceState;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase;
+import java.io.IOException;
+import java.lang.reflect.Constructor;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.env.MockEnvironment;
@@ -58,9 +70,10 @@ import org.springframework.scheduling.support.CronExpression;
  * "last run" and break it — caught exactly this way once already while writing this file. {@code
  * canary_runs} rows use the {@code EVENING_CHAIN} key, unique to this canary, so they cannot collide
  * with {@code IngestCoverageCanary} (key {@code INGEST_COVERAGE}) or {@code PlaneDivergenceProbe}
- * (key {@code MINERVINI_PLANE_DIVERGENCE}) regardless of date. The band is {@code day(0..17)} =
- * 2026-08-12 → 2026-09-04 (2026-09-14 Ganesh Chaturthi is the only NSE holiday in the span and falls
- * after it); the sibling's earliest fixture is 2026-09-11, so the two do not meet.
+ * (key {@code MINERVINI_PLANE_DIVERGENCE}) regardless of date. The band is {@code day(0..19)} =
+ * 2026-08-12 → 2026-09-08 (2026-09-14 Ganesh Chaturthi is the only NSE holiday in the span and falls
+ * after it); the sibling's earliest fixture is 2026-09-10, so the two do not meet — but that is now
+ * ONE trading day of margin, so a further {@code day(n)} must re-check the sibling, not just add one.
  *
  * <p>⚠️ <b>AND THAT REASONING WAS INCOMPLETE — the cleanup below is why this class now deletes what
  * it writes (2026-08-13).</b> "Distinct synthetic day" isolates this class from other FIXTURES, but
@@ -82,12 +95,20 @@ import org.springframework.scheduling.support.CronExpression;
  * rows this class INSERTS; it did not cover the rows it DELETED on the way in. {@link
  * #clearWindow(LocalDate)} was an unfiltered {@code DELETE FROM ingest_runs WHERE started_at >= ? AND
  * started_at < ?} with no {@code source} predicate, called by most methods here — and {@code
- * day(0..17)} spans 2026-08-12 → 2026-09-04, which CONTAINS the real current date. So on any run
+ * day(0..19)} spans 2026-08-12 → 2026-09-08, which CONTAINS the real current date. So on any run
  * after 2026-08-12 it destroyed rows other Spring contexts had written TODAY: {@code
  * MinerviniScheduler.onStartup}/{@code ManasScheduler.onStartup} fire on every {@code @SpringBootTest}
  * {@code ApplicationReadyEvent}, and {@code IngestRunReaperIntegrationTest} inserts at {@code now()}.
  * The javadoc on the cleanup asserted "never a blanket day sweep" while the pre-clean was exactly
  * that. It is now source-scoped, and {@code canary_runs} is cleaned as well as {@code ingest_runs}.
+ *
+ * <p>⚠️ <b>Source-scoped is NARROWER, not SAFE (2026-08-14, review minor m-3).</b> The two sources
+ * those {@code onStartup} listeners write, {@code MINERVINI_SCREEN} and {@code MANAS_SCREEN}, are IN
+ * {@code EXPECTED} — so the scoped pre-clean, and the direct {@link #deleteSource} calls several
+ * methods make, still delete a concurrent context's screen rows for whichever {@code day(n)} is the
+ * real current date. That residual is inherent to seeding on real calendar dates and is documented
+ * at {@link #clearWindow(LocalDate)} rather than papered over; the guard test can only pin the
+ * source-scoping itself, since a source inside {@code EXPECTED} would make it red.
  *
  * <p><b>Screen-output fixtures are a different hazard again</b>, because the rule under test compares
  * two GLOBAL maxima ({@code max(screen_date)} vs {@code max(trade_date)}), not day-scoped rows. A
@@ -111,6 +132,11 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
 
   private static final String MINERVINI_TABLE = "minervini_screen_results";
   private static final String MANAS_TABLE = "manas_arora_screen_results";
+
+  /** Compose's passthrough for the aged-RUNNING threshold — the value the live container gets. */
+  private static final String STALE_MINUTES_ENV = "ARTHA_EVENING_CHAIN_RUNNING_STALE_MINUTES";
+
+  private static final String SERVICE = "market-data-service";
 
   /** The {@code n}-th trading day at-or-after {@link #ANCHOR} (0-indexed); each test gets a distinct one. */
   private static LocalDate day(int n) {
@@ -242,6 +268,12 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
    * writers fires at 18:45 (compose {@code ARTHA_BHAVCOPY_EOD_CRON}) and the check at 18:59, so any
    * threshold at or above 14 minutes can NEVER classify anything as STUCK. A future edit that
    * "harmonises" this back with the 120-minute ingest-canary knob reds here, with the reason.
+   *
+   * <p>⚠️ This bites only because the two tests below pin the constant to what production actually
+   * reads (review Major B, 2026-08-14). On its own it asserted a bound on a constant NOTHING in the
+   * running service consumed — the {@code @Value} default and compose's passthrough are the two
+   * values that decide {@code runningStale}, and either could have been set back to 120 with this
+   * ratchet still green.
    */
   @Test
   void theStaleThresholdIsReachableInsideThePreShutdownWindow() {
@@ -251,6 +283,59 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
                 + " here is at most 14 minutes old; a larger threshold makes SourceState.STUCK"
                 + " unreachable in production while its tests stay green on impossible fixtures")
         .isLessThan(14);
+  }
+
+  /**
+   * MAJOR B (review, 2026-08-14), first half: the constant is what the ratchet above bounds, and the
+   * {@code @Value} default is what the service actually starts with. They were two unlinked copies —
+   * the constant was referenced by its own javadoc, that ratchet, and this class's constructor call,
+   * and by NOTHING on a production path. Because the IT passes the constant explicitly ({@link
+   * #canary}), no test exercised the annotation default either, so the two could drift in both
+   * directions in silence.
+   *
+   * <p>Modelled on {@link #defaultCheckCronMatchesTheScheduledAnnotation}, which pins the cron's two
+   * copies the same way and for the same reason.
+   */
+  @Test
+  void theStaleThresholdAnnotationDefaultIsTheConstantTheRatchetPins() {
+    Constructor<?>[] constructors = EveningChainCanary.class.getDeclaredConstructors();
+    assertThat(constructors)
+        .as("one constructor is assumed below; an overload makes 'the' @Value default ambiguous")
+        .hasSize(1);
+
+    List<String> placeholders =
+        Arrays.stream(constructors[0].getParameters())
+            .map(p -> p.getAnnotation(Value.class))
+            .filter(Objects::nonNull)
+            .map(Value::value)
+            .toList();
+
+    assertThat(placeholders)
+        .as(
+            "DEFAULT_RUNNING_STALE_MINUTES is only meaningful if it IS the running service's"
+                + " default. Without this, harmonising the annotation back to :120 recreates the"
+                + " unreachable-STUCK defect with every test in this file still green")
+        .contains(
+            "${artha.evening-chain.running-stale-minutes:"
+                + EveningChainCanary.DEFAULT_RUNNING_STALE_MINUTES
+                + "}");
+  }
+
+  /**
+   * MAJOR B, second half: compose carries a THIRD copy, and it is the one production actually runs
+   * with (the env var wins over the annotation default). Same shape and same reason as {@code
+   * CronPassthroughParityTest#composeMirrorsTheCodeDefaultExactly}, which pins this canary's cron —
+   * that catalogue is cron-only, so this knob had no equivalent.
+   */
+  @Test
+  void composeMirrorsTheStaleThresholdCodeDefault() throws IOException {
+    assertThat(composeEnvironmentDefault(STALE_MINUTES_ENV))
+        .as(
+            "%s drifted from DEFAULT_RUNNING_STALE_MINUTES. Compose's value is what the live"
+                + " container gets, so a drift here silently changes the STUCK threshold with"
+                + " nothing in the code to diff it against",
+            STALE_MINUTES_ENV)
+        .isEqualTo(String.valueOf(EveningChainCanary.DEFAULT_RUNNING_STALE_MINUTES));
   }
 
   /**
@@ -406,19 +491,119 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
     assertThat(report.complete()).isFalse();
   }
 
+  /**
+   * Minor m-2 (review, 2026-08-14): the carve-out must mirror the PRODUCERS' condition, and {@code
+   * >=} is strictly weaker than the {@code equals} they use ({@code MinerviniScheduler:117}, {@code
+   * ManasScheduler:80}). A {@code screen_date} AHEAD of the watermark — reachable through {@code
+   * runOnce(asOf)} behind {@code POST /run} with a forward {@code asOf} — is a state in which the
+   * scheduler WOULD still run, while a {@code >=} carve-out reported the source DONE permanently.
+   */
+  @Test
+  void aScreenDateAheadOfTheWatermarkIsNotTreatedAsCaughtUp() {
+    LocalDate day = day(19);
+    clearWindow(day);
+    seedAllHealthy(day);
+    deleteSource(day, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    LocalDate watermark = beyondEveryWatermark();
+    seedBhavcopyDay(watermark);
+    seedScreenOutput(MINERVINI_TABLE, watermark.plusDays(1)); // a forward asOf screened ahead
+
+    ChainReport report = canary(fixedAt(day, 18, 59), true).report();
+
+    assertThat(find(report, IngestRunLedger.SOURCE_MINERVINI_SCREEN).state())
+        .as(
+            "the schedulers dedup on equals, so a screen ahead of the watermark still runs — a >="
+                + " carve-out answers a looser question than the one the producers ask")
+        .isEqualTo(SourceState.PENDING);
+    assertThat(report.complete()).isFalse();
+  }
+
+  /**
+   * MAJOR A (review, 2026-08-14): the carve-out answers "no more screen work tonight" from the
+   * bhavcopy WATERMARK, so it holds only once that watermark is final for the night — and nothing
+   * enforced that. Applied unconditionally it is false every day until ~18:45: at 10:00 IST both
+   * screens are current with YESTERDAY's watermark, so both read DONE (and the Data-Ops panel paints
+   * two green screener chips) from IST midnight onward, for jobs that have not run and demonstrably
+   * will.
+   *
+   * <p>This fixture is the CONSEQUENTIAL shape — 18:59 with BHAVCOPY itself still outstanding, which
+   * is reachable in production (NSE has published as late as 19:31). The push named ONE leg while
+   * THREE were outstanding: in the single moment the outstanding list matters most, the carve-out
+   * made the message LESS accurate than the run-row-only check it replaced.
+   *
+   * <p>⚠️ No existing test could reach this, and that was part of the finding: every other carve-out
+   * fixture calls {@link #seedAllHealthy}, which seeds BHAVCOPY {@code SUCCESS} first, so the
+   * outstanding-bhavcopy shape was unexercised.
+   */
+  @Test
+  void screenersAreNotWavedThroughWhileTheBhavcopyLegIsStillOutstanding() {
+    LocalDate day = day(18);
+    clearWindow(day);
+    clearCanaryRun(day);
+    seedAllHealthy(day);
+    deleteSource(day, IngestRunLedger.SOURCE_BHAVCOPY); // still outstanding at the 18:59 check
+    deleteSource(day, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    deleteSource(day, IngestRunLedger.SOURCE_MANAS_SCREEN);
+    // Both screens ARE current with the watermark as it stands right now — the carve-out's own
+    // condition, satisfied here, and still not enough: tonight's bhavcopy can still move it.
+    LocalDate watermark = beyondEveryWatermark();
+    seedBhavcopyDay(watermark);
+    seedScreenOutput(MINERVINI_TABLE, watermark);
+    seedScreenOutput(MANAS_TABLE, watermark);
+
+    NtfyClient ntfy = mock(NtfyClient.class);
+    when(ntfy.trySend(any(), any(), any())).thenReturn(true);
+    EveningChainCanary canary = canary(fixedAt(day, 18, 59), true, ntfy);
+
+    ChainReport report = canary.report();
+
+    assertThat(find(report, IngestRunLedger.SOURCE_MINERVINI_SCREEN).state())
+        .as(
+            "a watermark the bhavcopy leg can still move says nothing about whether the screens have"
+                + " work left tonight — the carve-out must be withheld until BHAVCOPY is terminal")
+        .isEqualTo(SourceState.PENDING);
+    assertThat(find(report, IngestRunLedger.SOURCE_MANAS_SCREEN).state())
+        .isEqualTo(SourceState.PENDING);
+    assertThat(report.done()).isEqualTo(EveningChainCanary.EXPECTED.size() - 3);
+    assertThat(report.complete()).isFalse();
+
+    canary.check();
+
+    verify(ntfy)
+        .trySend(
+            contains("evening chain still pending"),
+            eq("default"),
+            contains(
+                "still pending: "
+                    + IngestRunLedger.SOURCE_BHAVCOPY
+                    + ", "
+                    + IngestRunLedger.SOURCE_MINERVINI_SCREEN
+                    + ", "
+                    + IngestRunLedger.SOURCE_MANAS_SCREEN));
+  }
+
   // ---- the fixture harness itself (Major 7) -----------------------------------------------------
 
   /**
-   * MAJOR 7 (review, 2026-08-14): the per-method pre-clean must not destroy rows this class did not
-   * write. It used to be an unfiltered {@code DELETE FROM ingest_runs} over the whole synthetic day,
-   * and {@code day(0..17)} contains the real current date — so on any run from 2026-08-12 onward it
-   * deleted rows other live Spring contexts had written TODAY.
+   * MAJOR 7 (review, 2026-08-14): the per-method pre-clean must not be a day-wide sweep. It used to
+   * be an unfiltered {@code DELETE FROM ingest_runs} over the whole synthetic day, and {@code
+   * day(0..19)} contains the real current date — so on any run from 2026-08-12 onward it deleted rows
+   * other live Spring contexts had written TODAY.
    *
-   * <p>{@code INSTRUMENT_SYNC} at 08:29 is that exact shape: a real source this class never seeds,
-   * on a day it does. It must survive the sweep.
+   * <p>{@code INSTRUMENT_SYNC} at 08:29 is a real source this class never seeds, on a day it does: it
+   * must survive the sweep.
+   *
+   * <p>⚠️ Read what this does NOT prove (review minor m-3, 2026-08-14). It was named and documented
+   * as covering the {@code MinerviniScheduler}/{@code ManasScheduler} {@code onStartup} hazard it
+   * cites, and it cannot: those write {@code MINERVINI_SCREEN}/{@code MANAS_SCREEN}, which are IN
+   * {@code EXPECTED} and therefore still deleted for whichever {@code day(n)} is the real current
+   * date. A test written on those sources would FAIL; this one passes by construction because {@code
+   * INSTRUMENT_SYNC} is outside {@code EXPECTED}. So the claim moved to {@link #clearWindow} rather
+   * than the test: what is pinned here is only that the pre-clean is source-scoped, which is a real
+   * ratchet against a revert to the day sweep.
    */
   @Test
-  void theWindowPreCleanNeverTouchesAForeignSourcesRowOnTheSameDay() {
+  void theWindowPreCleanIsSourceScopedNotADaySweep() {
     LocalDate day = day(17);
     clearWindow(day);
     seedRunRange(day, IngestRunLedger.SOURCE_INSTRUMENT_SYNC, "SUCCESS", 8, 29, 8, 30);
@@ -832,12 +1017,22 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
    * Pre-clean for one synthetic day, so a crashed prior attempt cannot leave a row behind.
    *
    * <p>⚠️ SOURCE-SCOPED, never a day sweep (review Major 7). This used to be an unfiltered {@code
-   * DELETE FROM ingest_runs} over the whole day, and {@code day(0..17)} contains the real current
+   * DELETE FROM ingest_runs} over the whole day, and {@code day(0..19)} contains the real current
    * date from 2026-08-12 onward — so it deleted rows OTHER Spring contexts had written today ({@code
    * MinerviniScheduler}/{@code ManasScheduler} {@code onStartup} fire on every {@code @SpringBootTest}
-   * ready event; {@code IngestRunReaperIntegrationTest} inserts at {@code now()}). Scoping it to the
-   * sources this class actually seeds cannot touch a foreign row, and the canary ignores every source
-   * outside {@code EXPECTED} anyway.
+   * ready event; {@code IngestRunReaperIntegrationTest} inserts at {@code now()}).
+   *
+   * <p>⚠️ It NARROWS that blast radius; it does NOT eliminate it, and this javadoc used to claim
+   * otherwise (review minor m-3, 2026-08-14). {@code EXPECTED} contains {@code MINERVINI_SCREEN} and
+   * {@code MANAS_SCREEN} — exactly the two sources those {@code onStartup} listeners write — so on
+   * whichever {@code day(n)} equals the real current date this still deletes a concurrent context's
+   * screen rows for today. Several methods also call {@link #deleteSource} on those same sources
+   * directly, so the residual is a property of seeding on REAL calendar dates, not of this helper:
+   * scoping the pre-clean to {@link #seededRuns} would not close it and would make the pre-clean
+   * inert besides (nothing is seeded yet when it runs, and its whole purpose is removing what a
+   * crashed EARLIER run left behind). What it does buy is every source OUTSIDE {@code EXPECTED} —
+   * {@code INSTRUMENT_SYNC}, the reaper's fixtures, the capture rows — which is what {@link
+   * #theWindowPreCleanIsSourceScopedNotADaySweep} pins.
    */
   private void clearWindow(LocalDate day) {
     EveningChainCanary.EXPECTED.forEach(source -> deleteSource(day, source));
@@ -901,6 +1096,73 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
           screenDate);
     }
     seededScreens.add(new SeededScreen(table, screenDate));
+  }
+
+  /**
+   * The default compose gives {@code name} under {@code services.market-data-service.environment} —
+   * what the container runs with when {@code .env} carries no override.
+   *
+   * <p>Scoped to that block, never a whole-file search: the same name under ANOTHER service's
+   * environment, or under this service's {@code labels}/{@code build.args}, is indistinguishable from
+   * absent because this container never sees it. Mirrors {@code
+   * CronPassthroughParityTest#serviceEnvironment}/{@code #composeDefault}, which pin the cron
+   * passthroughs this way; that catalogue is cron-shaped ({@code codeDefault} parses a {@code
+   * @Scheduled} annotation), so this knob could not simply be added to it.
+   */
+  private static String composeEnvironmentDefault(String name) throws IOException {
+    List<String> compose =
+        Files.readAllLines(repoRoot().resolve("deploy/docker-compose.yml"), StandardCharsets.UTF_8);
+    int from = compose.indexOf("  " + SERVICE + ":");
+    if (from < 0) {
+      return fail("no '  " + SERVICE + ":' block in deploy/docker-compose.yml — did it get renamed?");
+    }
+    boolean inEnvironment = false;
+    for (int i = from + 1; i < compose.size(); i++) {
+      String line = compose.get(i);
+      if (line.isBlank() || line.trim().startsWith("#")) {
+        continue;
+      }
+      int indent = line.length() - line.stripLeading().length();
+      if (indent <= 2) {
+        break; // next service
+      }
+      if (indent == 4) {
+        inEnvironment = "environment:".equals(line.trim());
+        continue;
+      }
+      if (!inEnvironment || indent != 6 || !line.trim().startsWith(name + ":")) {
+        continue;
+      }
+      String raw = line.trim().substring(name.length() + 1).trim();
+      // Literal `:-`, never `-`: `${NAME-default}` substitutes only when the variable is UNSET, so an
+      // explicitly blank one would reach Spring empty. Different contracts — see the same note in
+      // CronPassthroughParityTest#composeDefault.
+      Matcher m = Pattern.compile("^\"?\\$\\{" + name + ":-(.*?)}\"?$").matcher(raw);
+      if (!m.matches()) {
+        return fail(name + " must be written exactly `${" + name + ":-<value>}`, but reads: " + raw);
+      }
+      return m.group(1);
+    }
+    return fail(
+        name
+            + " is not under services."
+            + SERVICE
+            + ".environment — the passthrough is missing and the container falls back to the"
+            + " annotation default with no error (#653)");
+  }
+
+  /** Walks up from the working directory to the repo root. FAILS rather than skipping if absent. */
+  private static Path repoRoot() {
+    Path dir = Paths.get("").toAbsolutePath();
+    for (int i = 0; i < 6 && dir != null; i++, dir = dir.getParent()) {
+      if (Files.exists(dir.resolve("deploy/docker-compose.yml"))) {
+        return dir;
+      }
+    }
+    return fail(
+        "could not locate the repo root from "
+            + Paths.get("").toAbsolutePath()
+            + " — this must FAIL rather than skip, or it becomes a guard that checks nothing");
   }
 
   private static SourceProgress find(ChainReport report, String source) {

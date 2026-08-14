@@ -213,16 +213,16 @@ class BhavcopyClosePopulationPrefetchTest {
    *
    * <p>This machine is off overnight and the live stack has already spent a whole afternoon down
    * (2026-08-10: no batch 08:29→18:47 IST). On a boot after 16:05 the scheduled pass is simply
-   * skipped for that session — and {@code BhavcopyStartupCatchup} fires immediately, so the
-   * bhavcopy projection claims today's 1d buckets first and the perfectly-agreeing bars keep
-   * {@code source='BHAVCOPY'}. That is the exact ordering inversion the 16:05 hour exists to
-   * prevent, arriving through the one door the cron cannot cover.
+   * skipped for that session, so the canary spends the evening on a borrowed population — measured
+   * 14 symbols against a 202-symbol seed and a floor of 100, and it reported GREEN on those 14.
+   * That is the collapse this whole change exists to end, arriving through the one door the cron
+   * cannot cover.
    */
   @Test
   @DisplayName("a boot after the scheduled slot replays the missed population pass")
   void aLateBootReplaysTheMissedPass() {
-    // NOW is 17:40 IST: past the 16:05 pass, and still ahead of NSE's earliest measured 17:52
-    // publish — the window where a replay can still win the race against tonight's projection.
+    // NOW is 17:40 IST: past the 16:05 pass, and with 78 minutes still in hand before the 18:58
+    // sweep reads the population — comfortably more than the ~71 s the pass needs.
     when(calendar.isTradingDay(DAY)).thenReturn(true);
     when(constituents.symbols("NIFTY 200")).thenReturn(List.of("RELIANCE", "TCS"));
 
@@ -297,18 +297,25 @@ class BhavcopyClosePopulationPrefetchTest {
   }
 
   /**
-   * ⚠️ The population pass must land its Kite bars BEFORE any bhavcopy projection claims the same
-   * 1d buckets, and nothing except this test says so.
+   * ⚠️ The population pass must be scheduled with the whole evening in front of it, and nothing
+   * except this test says so.
    *
-   * <p>{@code source} is not in the {@code candles} PK, and {@code upsertAuthoritativeAll} keeps the
-   * EXISTING source when every OHLCV field matches. So if bhavcopy writes first, the bars that agree
-   * PERFECTLY are precisely the ones that stay {@code source='BHAVCOPY'} and fall out of the
-   * canary's population — a sample biased against agreement, judging agreement. Measured
-   * 2026-08-05..08-12: bhavcopy close equals Kite close exactly in 22 of 682 dual-sourced rows.
+   * <p>It is ~202 SEQUENTIAL Kite fetches — ~71 s nominal, but each fetch retries up to 4 times
+   * over a 60 s read timeout, so a brown-out stretches it without bound. The bars have to be in
+   * {@code candles} before {@link BhavcopyCloseCanary#sweep()} reads them, and the ingest cron is
+   * the head of the evening chain the sweep tails 13 minutes later. A pass scheduled at or after
+   * the ingest is therefore racing the sweep with an unbounded runtime — and it would lose
+   * SILENTLY, because an unfinished pass and an eroded index both surface as the same coverage
+   * YELLOW.
+   *
+   * <p>It is NOT about write ORDER against the projection: bhavcopy-first is safe, because {@code
+   * upsertAuthoritativeAll}'s keep-the-source branch also compares {@code oi} and only Kite encodes
+   * "no open interest" as 0 (pinned by {@code
+   * CandleCaggIntegrationTest#kiteOverBhavcopyTakesTheKiteSourceBecauseOnlyOneSideEncodesNoOiAsZero}).
    *
    * <p>Asserted against compose because compose is what production runs ({@code
    * CronPassthroughParityTest} separately pins compose to the {@code @Scheduled} defaults). Nothing
-   * here can see a {@code .env} override, so this catches a committed inversion, not an operator's.
+   * here can see a {@code .env} override, so this catches a committed regression, not an operator's.
    */
   @Test
   @DisplayName("the population fetch is scheduled ahead of the bhavcopy ingest")
@@ -322,8 +329,8 @@ class BhavcopyClosePopulationPrefetchTest {
     assertThat(prefetch)
         .as(
             "the close canary's population fetch (%02d:%02d) must run before the bhavcopy ingest"
-                + " (%02d:%02d), or the bars that agree perfectly keep source='BHAVCOPY' and drop"
-                + " out of the very population used to judge agreement",
+                + " (%02d:%02d) — the ingest heads the evening chain the 18:58 sweep tails, and a"
+                + " ~202-fetch pass with no upper bound cannot be started inside it",
             prefetch / 60, prefetch % 60, ingest / 60, ingest % 60)
         .isLessThan(ingest);
   }

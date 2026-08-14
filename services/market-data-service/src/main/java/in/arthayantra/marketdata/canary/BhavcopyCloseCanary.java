@@ -274,37 +274,28 @@ public class BhavcopyCloseCanary {
    * Fetches this canary's OWN comparison population — the 1d Kite bar for every symbol in the
    * {@code populationIndex} reference list — at 16:05 IST. Live-only, trading-days-only.
    *
-   * <p><b>⚠️ Why 16:05 and not "just before the 18:45 ingest".</b> {@code source} is NOT part of
-   * the {@code candles} PK, so a BHAVCOPY 1d row and a KITE 1d row collide on the same bucket.
-   * Whichever lands FIRST decides what the canary can see:
+   * <p><b>⚠️ Why 16:05 and not "just before the 18:45 ingest".</b> Because the pass has no upper
+   * bound on its duration and the deadline it must beat is {@link #sweep()} at 18:58, not the
+   * ingest. It is ~202 SEQUENTIAL Kite fetches; nominal is ~71 s (below), but each fetch retries up
+   * to 4 times over a 60 s read timeout, so a Kite brown-out stretches the pass arbitrarily. Five
+   * minutes of slack in front of the ingest is therefore not slack at all, while 16:05 buys 2 h
+   * 53 m for a pass that normally needs 71 s — a badly degraded pass still lands in time. Getting
+   * that wrong would also fail QUIETLY: a pass that has not finished when the sweep reads the
+   * population is indistinguishable from an eroded index, both surfacing as a coverage YELLOW.
    *
-   * <ul>
-   *   <li><b>KITE first</b> — bhavcopy's projection uses {@code insertIgnoreAll} (ON CONFLICT DO
-   *       NOTHING), so the Kite bar is safe forever. This is the state we want, and it is
-   *       PERMANENT once achieved.
-   *   <li><b>BHAVCOPY first</b> — our later {@code upsertAuthoritativeAll} keeps the EXISTING
-   *       source whenever every OHLCV field matches. So the bars that agree PERFECTLY are exactly
-   *       the ones that stay {@code source='BHAVCOPY'} and fall out of the population, while
-   *       bars that differ in any field flip to KITE and stay in. The leak is small — measured
-   *       2026-08-05..08-12, bhavcopy close equals Kite close exactly in 22 of 682 dual-sourced
-   *       rows (3.2%), and requiring open/high/low/volume to match too makes it rarer still — but
-   *       it is biased precisely AGAINST agreement: it removes the cleanest bars from the sample
-   *       used to judge cleanliness.
-   * </ul>
-   *
-   * <p>Five minutes before the 18:45 cron would not buy that ordering, which is the actual reason
-   * for 16:05. The bhavcopy ingest does not only run on its cron — {@code BhavcopyStartupCatchup}
-   * fires on every boot, and {@code marketdata.ingest_runs} records BHAVCOPY runs at 00:55, 03:24,
-   * 06:26, 07:54, 08:03, 12:50, 15:45, 16:37, 17:59, 18:00, 18:47, 19:30 and 23:45 IST across a
-   * single week. A restart at 18:10 on a night NSE published at 17:52 puts the projection first. It
-   * cannot, however, publish before it publishes: the earliest measured NSE bhavcopy is 17:52, so a
-   * 16:05 pass is ahead of ANY same-day write rather than ahead of one particular cron.
+   * <p><b>It is NOT scheduled early to beat the bhavcopy projection to these buckets.</b> That was
+   * the original rationale and it is FALSE, measured. {@code upsertAuthoritativeAll}'s
+   * keep-the-existing-source branch requires {@code oi} to match as well as OHLCV, and the two 1d
+   * producers encode "no open interest" differently — {@code BhavcopyCandles} writes {@code null},
+   * Kite historical returns a literal {@code 0} for cash equities — so a Kite write over a bhavcopy
+   * bar ALWAYS takes {@code source='KITE'} and the bar stays in this population. Bhavcopy-first is
+   * safe; {@code CandleCaggIntegrationTest#kiteOverBhavcopyTakesTheKiteSourceBecauseOnlyOneSideEncodesNoOiAsZero}
+   * pins it, because that safety turns on an encoding difference neither producer promises.
    *
    * <p><b>The 16:05 bar is already final</b> — this was measured, not assumed, because fetching a
    * partial bar would manufacture divergence out of nothing. Three symbols' 1d bars captured at
    * 16:00 IST on 2026-08-13 were byte-identical in close AND volume when re-fetched at 17:43, and
-   * the write kept {@code source='KITE'}, which is the same value-identical branch of the
-   * provenance rule described above.
+   * the value-identical write kept {@code source='KITE'}.
    *
    * <p><b>Timing and margin.</b> 202 symbols, one Kite call each (the B-4 recency rule makes
    * today's in-progress 1d bucket always re-fetch, so exactly one page per symbol), paced by the
@@ -330,9 +321,9 @@ public class BhavcopyCloseCanary {
    * <p><b>A cron alone is not enough, and that is what {@link #catchUpPopulation()} is for.</b> This
    * fires only while the service is UP at 16:05. The machine is off overnight and the stack has
    * been down for a whole afternoon before (2026-08-10: no batch 08:29→18:47 IST), so a boot after
-   * 16:05 skips this pass entirely — and then the boot's own {@code BhavcopyStartupCatchup} claims
-   * today's 1d buckets first, which is the exact inversion the hour above exists to prevent. The
-   * catch-up replays the missed pass ahead of that projection.
+   * 16:05 skips this pass entirely for that session and the evening's population falls back to
+   * whatever other jobs left behind — measured 14, against a 202-symbol seed and a floor of 100.
+   * The catch-up replays the missed pass.
    */
   // ⚠️ `cron` and `zone` stay on ONE line: CronPassthroughParityTest matches the @Scheduled site by
   // a single-line `cron = "${...:` needle and then asserts THAT line carries the IST zone. Split
@@ -352,17 +343,17 @@ public class BhavcopyCloseCanary {
 
   /**
    * Replays a MISSED {@link #prefetchPopulation()} at boot, synchronously, and returns the symbols
-   * attempted (0 when there was nothing to replay). Called by {@code BhavcopyStartupCatchup}
-   * BEFORE it submits the bhavcopy pull — see that class for why the ordering is expressed as a
-   * direct call rather than two independent {@code ApplicationReadyEvent} listeners.
+   * attempted (0 when there was nothing to replay). Called by {@code BhavcopyStartupCatchup} ahead
+   * of the bhavcopy pull, under a HARD DEADLINE — see that class for why the call is a direct one
+   * rather than two ordered {@code ApplicationReadyEvent} listeners, and why the caller stops
+   * waiting on this method after 90 s rather than letting a slow pass hold up the feed.
    *
    * <p><b>Why this is not optional polish.</b> {@link #prefetchPopulation()} is cron-only, so it
    * fires only while the service is up at 16:05 IST. On a boot after that hour the pass is simply
-   * never run for that session, while the boot's bhavcopy catch-up runs immediately — so the
-   * evening's population is back to whatever other jobs left behind (measured: 14), and the very
-   * ordering the 16:05 hour was chosen to guarantee is inverted. It is not a rare shape: this
-   * machine is off overnight, and the live stack has already spent an entire afternoon down
-   * (2026-08-10, no batch 08:29→18:47 IST).
+   * never run for that session, so the evening's population is back to whatever other jobs left
+   * behind — measured 14 against a 202-symbol seed, with the canary reporting GREEN on those 14.
+   * It is not a rare shape: this machine is off overnight, and the live stack has already spent an
+   * entire afternoon down (2026-08-10, no batch 08:29→18:47 IST).
    *
    * <p><b>Due, not "always on boot".</b> Replaying on an 08:00 boot would fetch 202 IN-PROGRESS 1d
    * bars — 71 s of {@code kite-historical} budget for a partial bar that the 16:05 pass then
@@ -371,9 +362,10 @@ public class BhavcopyCloseCanary {
    * property the annotation uses, so retuning the cron moves both.
    *
    * <p>Note the catch-up is still LATE by construction: it happens whenever the service comes up,
-   * which on a bad night can be after NSE has published. It cannot beat a bhavcopy write that
-   * landed while the stack was down — nothing running inside the stack can. What it does guarantee
-   * is that THIS boot's projection does not get in first.
+   * which on a bad night is after the evening chain has already started. What it guarantees is that
+   * the session gets a seeded population at all; what it cannot guarantee is that the population is
+   * complete before {@link #sweep()} reads it at 18:58. A boot at 18:57 seeds nothing the sweep can
+   * see — the pass takes ~71 s — and that is a coverage YELLOW, correctly reported.
    */
   public int catchUpPopulation() {
     if (!live || !enabled) {
@@ -386,7 +378,7 @@ public class BhavcopyCloseCanary {
     }
     log.info(
         "bhavcopy-close population pass missed its scheduled slot (cron '{}', service not up) —"
-            + " replaying it for {} now, ahead of this boot's bhavcopy projection",
+            + " replaying it for {} now so tonight's comparison population is this canary's own",
         prefetchCron, today);
     return prefetchNow(today);
   }

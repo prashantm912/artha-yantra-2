@@ -391,17 +391,17 @@ services:
       # upstox contract canary
       ARTHA_UPSTOX_CANARY_CRON: "${ARTHA_UPSTOX_CANARY_CRON:-0 20 18 * * MON-FRI}"
       # The close canary fetching its OWN comparison population (NIFTY 200 1d bars from Kite).
-      # ⚠️ MUST stay ahead of ANY same-day bhavcopy write — which is why it is 16:05 and not simply
-      # a few minutes before ARTHA_BHAVCOPY_EOD_CRON. `source` is not in the candles PK, and
-      # upsertAuthoritativeAll KEEPS the existing source when every OHLCV field matches, so if the
-      # bhavcopy projection claims these buckets first the bars that agree PERFECTLY are the ones
-      # that stay BHAVCOPY and fall out of the canary's source='KITE' population — biasing the
-      # sample against agreement. The ingest does not only run on its cron (BhavcopyStartupCatchup
-      # fires on every boot; ingest_runs shows BHAVCOPY runs from 00:55 to 23:45 IST in one week),
-      # so "5 minutes early" guarantees nothing. NSE's earliest measured publish is 17:52, so 16:05
-      # is ahead of every same-day write. The 16:00 Kite daily bar is already final (measured
-      # byte-identical on re-fetch at 17:43 IST, 2026-08-13). Retuning this moves BOTH triggers: a
-      # boot after this time replays the missed pass ahead of that boot's bhavcopy projection.
+      # ⚠️ 16:05, not "a few minutes before ARTHA_BHAVCOPY_EOD_CRON", because the pass has NO upper
+      # bound on its runtime: ~202 SEQUENTIAL Kite fetches, ~71 s nominal at the 3 req/s historical
+      # limiter, but each fetch retries up to 4× over a 60 s read timeout, so a Kite brown-out
+      # stretches it arbitrarily. The bars must be in `candles` before the 18:58 sweep reads them,
+      # and 16:05 leaves 2h53m of slack for a pass that normally needs 71 s. It fails QUIETLY if
+      # this is set too late — an unfinished pass looks exactly like an eroded index (coverage
+      # YELLOW). Not a write-ordering knob: bhavcopy-first is safe, because the keep-the-source
+      # branch of upsertAuthoritativeAll also compares `oi` and only Kite encodes "no open
+      # interest" as 0. The 16:00 Kite daily bar is already final (measured byte-identical on
+      # re-fetch at 17:43 IST, 2026-08-13). Retuning this moves BOTH triggers: a boot after this
+      # time replays the missed pass (bounded at 90 s, see BhavcopyStartupCatchup).
       ARTHA_BHAVCOPY_CLOSE_PREFETCH_CRON: "${ARTHA_BHAVCOPY_CLOSE_PREFETCH_CRON:-0 5 16 * * MON-FRI}"
       # the bhavcopy fetch the chain waits on
       ARTHA_BHAVCOPY_EOD_CRON: "${ARTHA_BHAVCOPY_EOD_CRON:-0 45 18 * * MON-FRI}"

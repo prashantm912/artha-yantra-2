@@ -497,62 +497,55 @@ class MinerviniSwingEngineTest {
    */
   @Test
   void exitStillFiresWhenCoverageIsIncomplete() throws IOException {
-    ExitHarness h = new ExitHarness();
-    // drop 2026-06-18 — a real NSE trading day, and one of the sessions actually missing from
-    // marketdata.candles on 2026-08-03
-    List<EngineCandle> holed = new ArrayList<>(h.series);
-    // three sessions, not one: materiality requires >~4.76% of the probed span, so a single hole is
-    // deliberately BELOW the refusal/alert bar (that is the Critical fix, not an oversight)
-    holed.removeIf(
-        b ->
-            java.util.Set.of(
-                    java.time.LocalDate.of(2026, 6, 16),
-                    java.time.LocalDate.of(2026, 6, 18),
-                    java.time.LocalDate.of(2026, 6, 19))
-                .contains(b.bucketStart().toLocalDate()));
-    assertThat(holed).hasSize(h.series.size() - 3);
-    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(holed);
+    // ⚠️ Asserted under ALL THREE MODES, because the doctrine is UNCONDITIONAL: the mode flag may
+    // change what the exit half OBSERVES, never whether the held stop is EVALUATED. This is also the
+    // standing answer to "what does ARMED mean on the exit side" — it means ALERT LOUDLY, never
+    // REFUSE. If a future change ever mirrors the entry refusal onto the exit path to make the enum
+    // look symmetric, the ARMED iteration below reddens.
+    for (SwingBatchEngine.CoverageGateMode mode : SwingBatchEngine.CoverageGateMode.values()) {
+      ExitHarness h = new ExitHarness();
+      // drop 2026-06-18 — a real NSE trading day, and one of the sessions actually missing from
+      // marketdata.candles on 2026-08-03. Three sessions, not one: materiality requires >~4.76% of
+      // the probed span, so a single hole is deliberately BELOW the refusal/alert bar (that is the
+      // Critical fix, not an oversight).
+      List<EngineCandle> holed = holed(h.series, 6, 16, 18, 19);
+      assertThat(holed).hasSize(h.series.size() - 3);
+      when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(holed);
 
-    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine());
+      SwingBatchEngine.SwingRun run = h.engine(mode).runDaily(h.doctrine());
 
-    assertThat(run.exits())
-        .as("an incomplete window must DEGRADE the exit, never block it")
-        .isEqualTo(1);
-    assertThat(run.exitSkipped())
-        .as("a coverage hole is not a skip — the stop WAS evaluated")
-        .isZero();
-    assertThat(h.coverageRows)
-        .as("exit coverage must persist the exact durable evidence row")
-        .containsExactly("minervini|2026-08-04|TESTCO|EXIT_DEGRADED_COVERAGE:TESTCO");
+      assertThat(run.exits())
+          .as("%s: an incomplete window must DEGRADE the exit, never block it", mode)
+          .isEqualTo(1);
+      assertThat(run.exitSkipped())
+          .as("%s: a coverage hole is not a skip — the stop WAS evaluated", mode)
+          .isZero();
+      if (mode == SwingBatchEngine.CoverageGateMode.DISABLED) {
+        assertThat(h.coverageRows).as("DISABLED must leave no trace").isEmpty();
+      } else {
+        assertThat(h.coverageRows)
+            .as("%s: exit coverage must persist the exact durable evidence row", mode)
+            // ⚠️ NO WOULD_REFUSE_ prefix, unlike the entry side under OBSERVE_ONLY. The exit fires
+            // in every mode, so there is no counterfactual to distinguish and the row states the
+            // same true fact whichever mode wrote it.
+            .containsExactly("minervini|2026-08-04|TESTCO|EXIT_DEGRADED_COVERAGE:TESTCO");
+      }
+    }
   }
 
-  /** The degraded exit is not silent: ops gets a per-position alert beside the evaluation. */
+  /**
+   * The degraded exit is not silent WHEN ARMED: ops gets a per-position alert beside the evaluation.
+   * Paging is precisely what arming buys on this half — the exit fires either way.
+   */
   @Test
-  void degradedExitPublishesAnOpsAlert() throws IOException {
+  void degradedExitPublishesAnOpsAlertWhenArmed() throws IOException {
     ExitHarness h = new ExitHarness();
-    List<EngineCandle> holed = new ArrayList<>(h.series);
-    // three sessions, not one: materiality requires >~4.76% of the probed span, so a single hole is
-    // deliberately BELOW the refusal/alert bar (that is the Critical fix, not an oversight)
-    holed.removeIf(
-        b ->
-            java.util.Set.of(
-                    java.time.LocalDate.of(2026, 6, 16),
-                    java.time.LocalDate.of(2026, 6, 18),
-                    java.time.LocalDate.of(2026, 6, 19))
-                .contains(b.bucketStart().toLocalDate()));
-    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(holed);
-    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any()))
+        .thenReturn(holed(h.series, 6, 16, 18, 19));
 
-    new SwingBatchEngine(
-            h.registry, h.candles, h.signals, mock(SignalPublisher.class), events,
-            Optional.empty(), passthroughTx(), new ObjectMapper(), Clock.systemUTC())
-        .runDaily(h.doctrine());
+    h.engine(SwingBatchEngine.CoverageGateMode.ARMED).runDaily(h.doctrine());
 
-    org.mockito.ArgumentCaptor<Object> captor = org.mockito.ArgumentCaptor.forClass(Object.class);
-    verify(events, org.mockito.Mockito.atLeastOnce()).publishEvent(captor.capture());
-    assertThat(captor.getAllValues())
-        .filteredOn(in.arthayantra.strategysignal.signals.SwingBatchAlert.class::isInstance)
-        .map(in.arthayantra.strategysignal.signals.SwingBatchAlert.class::cast)
+    assertThat(alerts(h.events))
         .anySatisfy(
             a -> {
               assertThat(a.title()).contains("exit DEGRADED");
@@ -562,25 +555,97 @@ class MinerviniSwingEngineTest {
             });
   }
 
-  /** A gap-free series must not alert — otherwise the signal is noise. */
+  /**
+   * OBSERVE_ONLY — THE SHIPPED DEFAULT — accrues the evidence without paging. The identical fixture
+   * that pages under ARMED must write the row, fire the exit, and NEVER publish the alert: "an
+   * observation must never page", the same rule the entry half already follows.
+   */
+  @Test
+  void observeOnlyRecordsTheDegradedExitButNeverPages() throws IOException {
+    ExitHarness h = new ExitHarness();
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any()))
+        .thenReturn(holed(h.series, 6, 16, 18, 19));
+
+    SwingBatchEngine.SwingRun run =
+        h.engine(SwingBatchEngine.CoverageGateMode.OBSERVE_ONLY).runDaily(h.doctrine());
+
+    assertThat(run.exits()).as("OBSERVE_ONLY must not change exit behaviour").isEqualTo(1);
+    assertThat(h.coverageRows)
+        .as("the durable evidence is exactly what OBSERVE_ONLY is for")
+        .containsExactly("minervini|2026-08-04|TESTCO|EXIT_DEGRADED_COVERAGE:TESTCO");
+    assertThat(alerts(h.events))
+        .as("an observation must never page")
+        .noneSatisfy(a -> assertThat(a.title()).contains("DEGRADED"));
+  }
+
+  /**
+   * ⚠️ THE INERTNESS PROOF, and the reason this whole change exists. Before it, the exit half was
+   * NOT mode-gated at all: the probe ran, an ERROR was logged, a swing_batch_refusals row was
+   * written and an ntfy page fired in EVERY mode including DISABLED — so a flag sold as "ships
+   * inert" turned a durable-row-writing, paging detector on for every book the moment it merged.
+   *
+   * <p>Asserts all three traces are absent — no row, no log line, no alert — on the SAME holed
+   * fixture that produces all three when observed. The OBSERVE_ONLY positive control at the end is
+   * load-bearing: without it this test would keep passing if the fixture stopped being degraded at
+   * all, which is the "guard that checks nothing" shape.
+   */
+  @Test
+  void disabledExitProbesNothingAndLeavesNoTrace() throws IOException {
+    ExitHarness h = new ExitHarness();
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any()))
+        .thenReturn(holed(h.series, 6, 16, 18, 19));
+
+    ch.qos.logback.classic.Logger engineLog =
+        (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(SwingBatchEngine.class);
+    ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> logs =
+        new ch.qos.logback.core.read.ListAppender<>();
+    logs.start();
+    engineLog.addAppender(logs);
+    SwingBatchEngine.SwingRun run;
+    String logged;
+    try {
+      run = h.engine(SwingBatchEngine.CoverageGateMode.DISABLED).runDaily(h.doctrine());
+      logged =
+          logs.list.stream()
+              .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+              .collect(java.util.stream.Collectors.joining("\n"));
+    } finally {
+      engineLog.detachAppender(logs);
+    }
+
+    assertThat(run.exits()).as("DISABLED must still evaluate the held stop").isEqualTo(1);
+    assertThat(run.exitSkipped()).isZero();
+    assertThat(h.coverageRows).as("DISABLED must write no swing_batch_refusals row").isEmpty();
+    assertThat(logged)
+        .as("DISABLED must emit no coverage log line at any level")
+        .doesNotContain("INCOMPLETE or UNKNOWN coverage");
+    assertThat(alerts(h.events))
+        .as("DISABLED must page nobody")
+        .noneSatisfy(a -> assertThat(a.title()).contains("DEGRADED"));
+
+    // ⚠️ POSITIVE CONTROL on the identical fixture. Without it, every assertion above would still
+    // pass if the holed series simply stopped being degraded — a guard that checks nothing.
+    ExitHarness observed = new ExitHarness();
+    when(observed.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any()))
+        .thenReturn(holed(observed.series, 6, 16, 18, 19));
+    observed.engine(SwingBatchEngine.CoverageGateMode.OBSERVE_ONLY).runDaily(observed.doctrine());
+    assertThat(observed.coverageRows)
+        .as("the fixture must genuinely be degraded, or the DISABLED assertions prove nothing")
+        .isNotEmpty();
+  }
+
+  /** A gap-free series must not alert even when ARMED — otherwise the signal is noise. */
   @Test
   void completeCoverageRaisesNoDegradationAlert() throws IOException {
     ExitHarness h = new ExitHarness();
     when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
-    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
 
     SwingBatchEngine.SwingRun run =
-        new SwingBatchEngine(
-                h.registry, h.candles, h.signals, mock(SignalPublisher.class), events,
-                Optional.empty(), passthroughTx(), new ObjectMapper(), Clock.systemUTC())
-            .runDaily(h.doctrine());
+        h.engine(SwingBatchEngine.CoverageGateMode.ARMED).runDaily(h.doctrine());
 
     assertThat(run.exits()).isEqualTo(1);
-    org.mockito.ArgumentCaptor<Object> captor = org.mockito.ArgumentCaptor.forClass(Object.class);
-    verify(events, org.mockito.Mockito.atLeastOnce()).publishEvent(captor.capture());
-    assertThat(captor.getAllValues())
-        .filteredOn(in.arthayantra.strategysignal.signals.SwingBatchAlert.class::isInstance)
-        .map(in.arthayantra.strategysignal.signals.SwingBatchAlert.class::cast)
+    assertThat(h.coverageRows).isEmpty();
+    assertThat(alerts(h.events))
         .noneSatisfy(a -> assertThat(a.title()).contains("DEGRADED"));
   }
 
@@ -784,6 +849,7 @@ class MinerviniSwingEngineTest {
     final MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
     final MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
     final SwingBatchRefusalRepository refusals = mock(SwingBatchRefusalRepository.class);
+    final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     final List<String> coverageRows = new ArrayList<>();
     final List<EngineCandle> series = craftDecline();
     final UUID versionId;
@@ -815,8 +881,18 @@ class MinerviniSwingEngineTest {
       when(funnel.buyableAndOnDeck()).thenReturn(List.of());
     }
 
+    /**
+     * ⚠️ Takes the PRODUCTION default (OBSERVE_ONLY), unlike {@link EntryHarness#engine} which arms
+     * deliberately — the non-coverage exit tests below must exercise the mode the live stack runs.
+     * Every COVERAGE test states its mode explicitly via {@link #engine(SwingBatchEngine.CoverageGateMode)}.
+     */
     SwingBatchEngine engine() {
-      return MinerviniSwingEngineTest.this.engineWithRefusals(registry, candles, signals, refusals);
+      return engine(SwingBatchEngine.CoverageGateMode.OBSERVE_ONLY);
+    }
+
+    SwingBatchEngine engine(SwingBatchEngine.CoverageGateMode mode) {
+      return MinerviniSwingEngineTest.this.engineWithRefusals(
+          registry, candles, signals, refusals, events, mode);
     }
 
     MinerviniDoctrine doctrine() {
@@ -835,11 +911,11 @@ class MinerviniSwingEngineTest {
 
   private SwingBatchEngine engineWithRefusals(
       StrategyRepository registry, MarketDataCandlesClient candles, SignalRepository signals,
-      SwingBatchRefusalRepository refusals) {
+      SwingBatchRefusalRepository refusals, ApplicationEventPublisher events,
+      SwingBatchEngine.CoverageGateMode mode) {
     return new SwingBatchEngine(
-        registry, candles, signals, mock(SignalPublisher.class),
-        mock(ApplicationEventPublisher.class), Optional.empty(), passthroughTx(),
-        new ObjectMapper(), fixedTestClock(), null, refusals);
+        registry, candles, signals, mock(SignalPublisher.class), events, Optional.empty(),
+        passthroughTx(), new ObjectMapper(), fixedTestClock(), null, refusals, mode.name());
   }
 
   private static Clock fixedTestClock() {

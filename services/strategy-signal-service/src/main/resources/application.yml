@@ -109,10 +109,13 @@ artha:
     strategy-coverage-watchdog:
       mode: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_MODE:DISABLED}
       grace-ms: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_GRACE_MS:180000}
-    # Entry-side swing data-coverage gate (#1283). DISABLED skips the probe; OBSERVE_ONLY records
-    # and logs would-be refusals as WOULD_REFUSE_* rows while the entry PROCEEDS; ARMED refuses.
-    # Ships OBSERVE_ONLY (owner, 2026-08-11) so the refusal rate can be measured in production
-    # before arming. Names MUST match the compose passthrough exactly (#653).
+    # Swing data-coverage gate (#1283) — governs BOTH halves. DISABLED skips the probe entirely on
+    # both. ENTRY: OBSERVE_ONLY records/logs would-be refusals as WOULD_REFUSE_* rows while the entry
+    # PROCEEDS; ARMED refuses. EXIT: an exit NEVER refuses in any mode (doctrine — you cannot decline
+    # to leave), so OBSERVE_ONLY writes the EXIT_DEGRADED_COVERAGE row + a WARN, and ARMED adds the
+    # ERROR line and the per-position ntfy page. Ships OBSERVE_ONLY (owner, 2026-08-11; exit half
+    # 2026-08-14) so the rate can be measured in production before arming. Names MUST match the
+    # compose passthrough exactly (#653).
     swing-coverage-gate:
       mode: ${ARTHA_SIGNALS_SWING_COVERAGE_GATE_MODE:OBSERVE_ONLY}
     # EOD swing missed-batch detector. Ship dormant; the owner arms paging deliberately after

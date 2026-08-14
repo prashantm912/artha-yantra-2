@@ -82,22 +82,47 @@ public class SwingBatchEngine {
   private static final MarketCalendar calendar = MarketCalendar.nse();
 
   /**
-   * How the entry-side data-coverage gate behaves. Mirrors the T9 coverage watchdog's three-state
-   * shape (`strategy-coverage-watchdog.mode`) because this is the same situation: a detector whose
-   * refusal rate must be OBSERVED in production before anyone arms it.
+   * How the data-coverage gate behaves — BOTH halves, entry and exit. Mirrors the T9 coverage
+   * watchdog's three-state shape (`strategy-coverage-watchdog.mode`) because this is the same
+   * situation: a detector whose rate must be OBSERVED in production before anyone arms it.
+   *
+   * <p>ENTRY half ({@link #entryPass}, and the F3 admission probe that must model it):
    *
    * <ul>
    *   <li>{@code DISABLED} — the probe never runs. No rows, no logs, no cost.
-   *   <li>{@code OBSERVE_ONLY} — the probe runs and every would-be refusal is RECORDED and LOGGED,
-   *       but the entry PROCEEDS. Live behaviour is byte-identical to a build without the gate.
+   *   <li>{@code OBSERVE_ONLY} — the probe runs and every would-be refusal is RECORDED (as a
+   *       {@code WOULD_REFUSE_*} row) and LOGGED, but the entry PROCEEDS. Live behaviour is
+   *       byte-identical to a build without the gate.
    *   <li>{@code ARMED} — a candidate whose coverage is not proven sound is REFUSED.
    * </ul>
    *
-   * <p>Ships {@code OBSERVE_ONLY} (owner decision, 2026-08-11). Arming is a one-word env change once
-   * the observed refusal rate justifies it — the same path `dot-coverage-floor`, the T9 watchdog and
-   * the F9 heat caps all took. ⚠️ The seam constructor defaults to the SAME value as production
-   * deliberately: a test seam that armed by default would let the suite pass against behaviour the
-   * live stack does not have.
+   * <p>EXIT half ({@link #exitPass}) — ⚠️ the SAME three states, read DIFFERENTLY, and the asymmetry
+   * is FORCED by doctrine rather than chosen. An exit may never refuse in ANY mode ("entries need
+   * fresh truth — you can always NOT enter; exits need the best available truth — you cannot refuse
+   * to leave forever"), so the axis that varies is OBSERVATION, not admission:
+   *
+   * <ul>
+   *   <li>{@code DISABLED} — the probe never runs. No rows, no logs, no alerts, no cost. The stop is
+   *       still evaluated, exactly as in a build with no gate at all.
+   *   <li>{@code OBSERVE_ONLY} — the probe runs, a durable {@code EXIT_DEGRADED_COVERAGE:*} row is
+   *       written and the degradation is logged at WARN, but ops is NOT paged. The stop is
+   *       evaluated.
+   *   <li>{@code ARMED} — the row and an ERROR line as above, PLUS the per-position ntfy page. The
+   *       stop is evaluated. ARMED on this half means <em>alert loudly</em>; it can never mean
+   *       <em>refuse</em>.
+   * </ul>
+   *
+   * <p>⚠️ The exit row is NOT prefixed {@code WOULD_REFUSE_} the way the entry row is, and that is
+   * deliberate. The prefix exists because an entry row would otherwise claim a refusal for a
+   * candidate that then FIRED. On the exit side there is no counterfactual to distinguish: the exit
+   * fires under every mode, so {@code EXIT_DEGRADED_COVERAGE} states the same true fact — "this stop
+   * was evaluated on degraded coverage" — whichever mode wrote it.
+   *
+   * <p>Ships {@code OBSERVE_ONLY} (owner decision, 2026-08-11; extended to the exit half 2026-08-14).
+   * Arming is a one-word env change once the observed rate justifies it — the same path
+   * `dot-coverage-floor`, the T9 watchdog and the F9 heat caps all took. ⚠️ The seam constructor
+   * defaults to the SAME value as production deliberately: a test seam that armed by default would
+   * let the suite pass against behaviour the live stack does not have.
    */
   public enum CoverageGateMode {
     DISABLED,
@@ -203,16 +228,34 @@ public class SwingBatchEngine {
   private final SwingBatchRefusalRepository refusals;
   private final CoverageGateMode coverageGateMode;
 
-  /** Unknown / blank values fall back to the shipped default rather than throwing at boot. */
+  /**
+   * ABSENT and INVALID are not the same thing, and the first cut of this method conflated them
+   * (cross-vendor review, Critical). An absent property takes the shipped default; an explicitly-set
+   * value that does not parse REFUSES THE BOOT.
+   *
+   * <p>Falling back on a typo fails OPEN: an operator who writes {@code ARMD} intending {@code ARMED}
+   * gets a silently inert gate and every coverage-unsafe entry keeps being admitted, with a warn line
+   * as the only trace. The mirror case is no better — a typo meant as {@code DISABLED} would leave
+   * the probe running and writing rows. Either way the operator's stated intent is discarded, which
+   * is exactly what a safety gate must not do quietly. Crashing is loud, immediate and trivially
+   * fixed; running the wrong mode is none of those.
+   *
+   * <p>Blank counts as EXPLICIT: {@code @Value}'s {@code :OBSERVE_ONLY} fallback only applies when
+   * the property is missing, so an empty string means someone set it to nothing.
+   */
   private static CoverageGateMode parseGateMode(String raw) {
-    if (raw == null || raw.isBlank()) {
-      return CoverageGateMode.OBSERVE_ONLY;
+    if (raw == null) {
+      return CoverageGateMode.OBSERVE_ONLY; // defensive: @Value always supplies the fallback
     }
     try {
       return CoverageGateMode.valueOf(raw.trim().toUpperCase(java.util.Locale.ROOT));
     } catch (IllegalArgumentException e) {
-      log.warn("unknown swing-coverage-gate mode '{}' — falling back to OBSERVE_ONLY", raw);
-      return CoverageGateMode.OBSERVE_ONLY;
+      throw new IllegalStateException(
+          "artha.signals.swing-coverage-gate.mode='"
+              + raw
+              + "' is not one of DISABLED / OBSERVE_ONLY / ARMED — refusing to start rather than"
+              + " silently running a mode nobody chose",
+          e);
     }
   }
 
@@ -1069,32 +1112,60 @@ public class SwingBatchEngine {
       // a genuine trail cross, the position still exits at a level computed off a stretched window
       // and the alert arrives AFTER the fill. That cost is accepted because the only preventive
       // alternative is a refusal, which is strictly worse on an exit path.
-      SwingCoverageProbe.Coverage exitCoverage =
-          SwingCoverageProbe.probe(
-              series, SwingCoverageProbe.exitLookbackBars(strat.definition(), bank), calendar);
-      // ⚠️ UNDETERMINABLE counts as degraded here, and materiallyIncomplete() alone does NOT say so
-      // — it is false when determinable is false, so a probe that FAILED reported the exit as
-      // cleanly covered and said nothing (cross-vendor review, 2026-08-10). On the ENTRY side the
-      // same blindness let the trade through; here it is quieter but the same shape: the operand
-      // cannot express "I do not know", so silence meant both "fine" and "broken".
+      // ⚠️ MODE-GATED (owner decision, 2026-08-14). The first cut of the three-state flag gated only
+      // the ENTRY half, so this block probed, logged at ERROR, wrote a swing_batch_refusals row and
+      // fired an ntfy page in EVERY mode — including DISABLED. A flag whose OFF position still turns
+      // a durable-row-writing, paging detector on for every book is not a flag; "ships inert" was
+      // true of half the change and false of the other half.
       //
-      // Evaluation still proceeds unconditionally — that is the doctrine above and it does not
-      // change. Only the OBSERVATION widens.
-      if (exitCoverage.notProvenSound()) {
-        log.error(
-            "{} swing exit: #{} {} evaluated on INCOMPLETE or UNKNOWN coverage — {} — stop/trail"
-                + " level may be computed off a stretched window (evaluation NOT blocked)",
-            doctrine.batchName(), primary.id(), primary.tradingsymbol(), exitCoverage.describe());
-        recordCoverageRow(
-            doctrine,
-            effectSession(requiredBarDate),
-            primary.tradingsymbol(),
-            coverageDegradedReason(primary.tradingsymbol()));
-        alertExitCoverageDegraded(
-            doctrine,
-            effectSession(requiredBarDate),
-            primary.tradingsymbol(),
-            exitCoverage.describe());
+      // The three states read DIFFERENTLY here than on the entry side, and that is forced by the
+      // doctrine above rather than chosen: an exit may never refuse, so the axis that varies is
+      // OBSERVATION, not admission. DISABLED observes nothing; OBSERVE_ONLY records + warns;
+      // ARMED records + errors + PAGES. ARMED on this half means "alert loudly" — see
+      // CoverageGateMode. The evaluation below runs identically under all three.
+      if (coverageGateMode != CoverageGateMode.DISABLED) {
+        SwingCoverageProbe.Coverage exitCoverage =
+            SwingCoverageProbe.probe(
+                series, SwingCoverageProbe.exitLookbackBars(strat.definition(), bank), calendar);
+        // ⚠️ UNDETERMINABLE counts as degraded here, and materiallyIncomplete() alone does NOT say
+        // so — it is false when determinable is false, so a probe that FAILED reported the exit as
+        // cleanly covered and said nothing (cross-vendor review, 2026-08-10). On the ENTRY side the
+        // same blindness let the trade through; here it is quieter but the same shape: the operand
+        // cannot express "I do not know", so silence meant both "fine" and "broken".
+        //
+        // Evaluation still proceeds unconditionally — that is the doctrine above and it does not
+        // change. Only the OBSERVATION widens.
+        if (exitCoverage.notProvenSound()) {
+          // ⚠️ NOT prefixed WOULD_REFUSE_ the way the entry row is under OBSERVE_ONLY. That prefix
+          // exists because an entry row would otherwise claim a refusal for a candidate that then
+          // FIRED; here the exit fires under every mode, so this row states the same true fact
+          // whichever mode wrote it and a prefix would invent a distinction that does not exist.
+          recordCoverageRow(
+              doctrine,
+              effectSession(requiredBarDate),
+              primary.tradingsymbol(),
+              coverageDegradedReason(primary.tradingsymbol()));
+          if (coverageGateMode == CoverageGateMode.ARMED) {
+            log.error(
+                "{} swing exit: #{} {} evaluated on INCOMPLETE or UNKNOWN coverage — {} — stop/trail"
+                    + " level may be computed off a stretched window (evaluation NOT blocked)",
+                doctrine.batchName(), primary.id(), primary.tradingsymbol(), exitCoverage.describe());
+            alertExitCoverageDegraded(
+                doctrine,
+                effectSession(requiredBarDate),
+                primary.tradingsymbol(),
+                exitCoverage.describe());
+          } else {
+            // WARN, not ERROR: an observation nobody is acting on must not spend the ERROR budget a
+            // post-deploy log sweep reads as breakage. The durable row is the evidence; the page is
+            // what arming buys.
+            log.warn(
+                "{} swing exit: #{} {} evaluated on INCOMPLETE or UNKNOWN coverage — {} — stop/trail"
+                    + " level may be computed off a stretched window (gate OBSERVE_ONLY: evaluation"
+                    + " NOT blocked, ops NOT paged)",
+                doctrine.batchName(), primary.id(), primary.tradingsymbol(), exitCoverage.describe());
+          }
+        }
       }
       ExitEvaluator.Position position =
           new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex);

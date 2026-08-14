@@ -51,7 +51,7 @@ class CronPassthroughParityTest {
    * the whole file execute zero assertions and pass — the guard-that-checks-nothing shape. Lowering
    * this number is a deliberate act that must be justified in the PR that does it.
    */
-  private static final int EXPECTED_JOB_COUNT = 6;
+  private static final int EXPECTED_JOB_COUNT = 7;
 
   private static final List<Job> JOBS =
       List.of(
@@ -84,7 +84,16 @@ class CronPassthroughParityTest {
           new Job(
               "artha.insights.sell-decision-cron",
               "ARTHA_INSIGHTS_SELL_DECISION_CRON",
-              SRC + "insights/InsightSweeper.java"));
+              SRC + "insights/InsightSweeper.java"),
+          // Added 2026-08-14 with the H18 boot catch-up. This default stopped being merely a
+          // schedule that day: SwingBatchCatchUp.catchUpIfMissed PARSES it to decide whether today's
+          // fire was missed, so compose's copy drifting no longer just reschedules the sweep — it
+          // also moves the boot door's idea of when the sweep was due, on the ONLY path that takes
+          // swing entries. Same reasoning market-data recorded for IngestCoverageCanary.
+          new Job(
+              "artha.swing.catchup-cron",
+              "ARTHA_SWING_CATCHUP_CRON",
+              SRC + "swing/SwingBatchCatchUp.java"));
 
   @Test
   @DisplayName("the catalogue still covers every job it claims to")

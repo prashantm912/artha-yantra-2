@@ -99,7 +99,8 @@ class SwingBatchCatchUpTest {
       effectDefaultsConfigured = true;
     }
     return new SwingBatchCatchUp(
-        recorder, runs, state, intents, effects, signals, new SwingRunMutex(), List.of(doctrines), events, clock, enabled, 5);
+        recorder, runs, state, intents, effects, signals, new SwingRunMutex(), List.of(doctrines), events, clock, enabled, 5,
+        "0 35 8 * * MON-FRI");
   }
 
   /** A run outcome whose canonical marker write SUCCEEDED (the ordinary complete/partial cases). */

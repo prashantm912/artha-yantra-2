@@ -2154,6 +2154,44 @@ LOST and every affected PR's verdict line must say so** rather than claiming a c
 Builders are unaffected — they are Opus subagents already. #1373's round-2 review completed BEFORE
 the limit and is genuine cross-vendor; the H9 plan round 3 and #1354's verdict are not.
 
+**N75 · LOCAL MODELS EVALUATED AS A THIRD LANE — TRIAGE PROVEN (~96% CONTEXT CUT), REVIEW DISPROVEN
+ON SIX MODELS, BUILD UNTESTED. NOT WIRED IN.** 2026-08-14 evening, prompted by N74 plus the owner
+dropping the Claude plan Max 20 → Max 5 on the same day. Goal was **token burn**, not speed. Owner's
+explicit close: *"don't switch the workflow to use ollama yet — we need to still do more testing."*
+
+**What is proven.** `qwen3.5:9b` with `think: false` (6.6 GB, ~38 tok/s, 100% GPU at 8k ctx) digests
+raw operational output with no factual loss: a docker-logs dump 8,400 → **320** tokens (6/6 facts,
+22 repetitive STALE warnings aggregated); a CI failure log 6,800 → **218** tokens, correctly splitting
+the genuine failure (3/3 runs) from two flakes (Run 1 only) **and** recovering the root cause; a psql
+dump 960 → 247, catching `NOTIFIER_HEALTH source=BOOT_CATCHUP` unprompted. That is the largest single
+category of context spend in this ledger's own workflow.
+
+⚠️ **What is disproven, and it is the leg we most wanted covered.** Six models, three architectures,
+4.7 → 23 GB (`qwen2.5-coder:7b/14b`, `deepseek-coder-v2:16b`, `qwen3-coder:30b`, `qwen3.5:9b`,
+`qwen3.6:35b-a3b`) reviewed the same diff against two defects Opus found the same day (H18's
+weekday-holiday hole, and the missing pre-open reserve). **Every model scored ZERO real findings; 21
+false ones between them**, including two hallucinated compile errors and one false Critical. The
+failure mode is not omission — they examine the RIGHT method and state something confidently wrong.
+`qwen3.5:9b` wrote *"if `isTradingDay` incorrectly returns TRUE for a holiday"* — the exact inverse of
+the defect. **A weak reviewer is net negative**, not merely useless: each false finding costs
+verification time, the resource Max 5 just made scarce.
+
+⚠️ **METHOD TRAP that almost inverted this verdict, and it generalises past LLMs.** A *leading* probe —
+both halves of the evidence pre-assembled adjacent in one prompt — made the 7B look like it found the
+hole. The *fair* probe (whole method bodies, evidence unassembled, as a reviewer actually meets it)
+scored the same model 0/2. **Same model, same defect; the only variable was how the question was
+posed.** Any future benchmark must hand over UNASSEMBLED evidence or it measures the prompt.
+
+Two new [[success-shaped-nothing-catalogue]] entries came out of the setup, both non-repo-specific:
+**#16** a file PRE-ALLOCATED to full size while still downloading (ollama sparse blobs — I hashed
+three in-flight pulls, declared them corrupt and killed them, three times, before the owner spotted
+it; real progress is `fsutil sparse queryrange`, not `ls -l`), and **#17** a parameter the API
+ACCEPTS and the model IGNORES (`think: "low"` — exact sibling of `@Schema(nullable = true)` being a
+silent no-op at OpenAPI 3.1). Full measurements, hardware ceiling and the still-open questions live in
+memory topic `local-model-evaluation`; the three open ones are **build capability (untested — the
+deciding metric is whether reviewing its diff costs fewer tokens than writing the code, and it
+forfeits STEP 0)**, whether ollama implements MTP, and prefill-after-`<think>` via `"raw": true`.
+
 **N72 · A ROUTINE POST-CLOSE DEPLOY DESTROYED THE SESSION'S FORENSICS, AND THE OBVIOUS REMEDY IS
 IMPOSSIBLE HERE.** 2026-08-13, and it was MINE. I recreated both strategy-signal and market-data at
 **15:44 IST — fourteen minutes after close and BEFORE the post-market routine ran**. `docker logs`

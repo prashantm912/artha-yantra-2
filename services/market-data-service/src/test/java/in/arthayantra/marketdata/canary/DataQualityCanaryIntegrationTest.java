@@ -27,7 +27,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 class DataQualityCanaryIntegrationTest extends MarketDataIntegrationTestBase {
 
   private static final LocalDate DQ = LocalDate.of(2019, 3, 4);
-  private static final List<String> SYMS = List.of("BCQDIV", "BCQOK", "BCQNONE", "BCQBHAV");
+  private static final List<String> SYMS =
+      List.of("BCQDIV", "BCQOK", "BCQNONE", "BCQBHAV", "BCQALGO");
   /** Own symbols + own date, so the shared no-cleanup IT database cannot cross-contaminate. */
   private static final List<String> THIN_SYMS = List.of("BCQTHIN1", "BCQTHIN2");
 
@@ -61,13 +62,24 @@ class DataQualityCanaryIntegrationTest extends MarketDataIntegrationTestBase {
     // BCQBHAV: a BHAVCOPY-source candle must be EXCLUDED (would compare against itself)
     bhav("BCQBHAV", "100");
     bhavcopyDaily("BCQBHAV", "999");
+    // ⚠️ BCQALGO: a NON-Kite fetched candle must still be COMPARED. The population this canary now
+    // seeds itself goes out through GapBackfiller -> CandleQueryService, which stamps
+    // `gateway.sourceLabel()` (CandleQueryService:65) — deliberately the fetching impl's label. Flip
+    // artha.marketdata.source.candles to openalgo and every seeded row is OPENALGO, so the old
+    // `source='KITE'` predicate would count NONE of them: 202 rows seeded, 0 compared, a permanent
+    // coverage YELLOW produced by a routing flag with nothing to do with the close feeds. 0.5%
+    // apart, so it is comparable-but-clean and moves `compared` without touching `divergent`.
+    bhav("BCQALGO", "100");
+    candle("BCQALGO", "100.5", "OPENALGO");
   }
 
   @Test
   void v8DetectsBhavcopyVsKiteCloseDivergence() {
     BhavcopyCloseCanary.BhavcopyCloseReport report = bhavcopyClose.evaluate(DQ);
     assertThat(report.tradeDate()).isEqualTo(DQ);
-    assertThat(report.compared()).isEqualTo(2); // BCQDIV + BCQOK (BCQNONE + BCQBHAV excluded)
+    assertThat(report.compared())
+        .as("BCQDIV + BCQOK + BCQALGO; BCQNONE has no candle and BCQBHAV is self-sourced")
+        .isEqualTo(3);
     assertThat(report.divergent()).isEqualTo(1); // only BCQDIV
     assertThat(report.status()).isEqualTo("YELLOW");
     assertThat(report.offenders()).hasSize(1);

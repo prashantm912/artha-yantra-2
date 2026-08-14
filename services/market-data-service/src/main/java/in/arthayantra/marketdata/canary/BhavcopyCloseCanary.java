@@ -30,12 +30,14 @@ import org.springframework.stereotype.Component;
  * divergence between the NSE EOD bhavcopy close and the Kite-captured 1d close for a symbol that has
  * BOTH — an unadjusted corporate action, or a bad print in one feed — is never surfaced. This
  * standalone canary compares the two closes for the latest bhavcopy trade date (only symbols whose
- * {@code candles} 1d bar carries {@code source='KITE'}, i.e. genuinely dual-sourced) and alerts on the
- * count exceeding the threshold. Read-only; it deliberately does NOT touch the corporate-action plane.
+ * {@code candles} 1d bar came from a real fetch rather than the bhavcopy projection, i.e. genuinely
+ * dual-sourced) and alerts on the count exceeding the threshold. Read-only; it deliberately does NOT
+ * touch the corporate-action plane.
  *
  * <p>Keying: bhavcopy close is {@code nse_eod_bhavcopy.close_price} (PK {@code trade_date, symbol,
- * series}); the Kite close is a {@code candles} 1d row (PK excludes {@code source}) filtered to {@code
- * source='KITE'} and matched on the IST calendar date of the bucket. Live-only sweep + fail-soft
+ * series}); the fetched close is a {@code candles} 1d row (PK excludes {@code source}) filtered to
+ * {@code source <> 'BHAVCOPY'} and matched on the IST calendar date of the bucket — see the comment
+ * on {@code COMPARE_SQL} for why that predicate is not {@code = 'KITE'}. Live-only sweep + fail-soft
  * alerting; {@link #evaluate(LocalDate)} is side-effect-free so a GET / a test can call it any time.
  *
  * <p><b>The comparison population is this canary's OWN, and it used to be BORROWED.</b> Until
@@ -87,6 +89,26 @@ public class BhavcopyCloseCanary {
   private static final String YELLOW = "YELLOW";
   private static final String RED = "RED";
 
+  /**
+   * The reference list {@link #prefetchNow(LocalDate)} seeds the comparison population from — a
+   * CONSTANT, deliberately, not a {@code @Value} knob.
+   *
+   * <p>It was briefly the latter, and that was the wrong shape (#653 class): a knob needs a compose
+   * passthrough and a {@code .env.example} line or it is pinned to its default forever while
+   * LOOKING tunable. But the tunability is not wanted here in the first place. The only reachable
+   * settings are this list, a list that does not exist in {@code reference/index-constituents.json}
+   * — whose sole effect is the empty-population URGENT page below, i.e. a nightly alarm bought with
+   * a typo — and a narrower index, whose sole effect is a smaller sample and a nightly coverage
+   * YELLOW. Neither is an operation anyone should be able to perform by editing {@code .env}.
+   * Widening the sample is a real change with real cost (the class javadoc's ~14 min full sweep),
+   * and it belongs in a PR that re-measures the timing, not in a restart.
+   *
+   * <p>Package-private so {@code BhavcopyClosePopulationPrefetchTest} can assert the shipped value
+   * really resolves to a population that clears the coverage floor, rather than each test injecting
+   * its own list and leaving the production value unexercised.
+   */
+  static final String POPULATION_INDEX = "NIFTY 200";
+
   /** One symbol whose bhavcopy close diverges from its Kite 1d close beyond the threshold. */
   public record CloseMismatch(
       String symbol, @Schema(type = "string") BigDecimal bhavClose, @Schema(type = "string") BigDecimal kiteClose, @Schema(type = "string") BigDecimal relDiffPct) {}
@@ -112,8 +134,24 @@ public class BhavcopyCloseCanary {
       @Schema(type = "string") BigDecimal thresholdPct,
       List<CloseMismatch> offenders) {}
 
-  // Symbols whose 1d bar is genuinely Kite-captured (source='KITE'); a bhavcopy-projected bar
-  // (source='BHAVCOPY') would compare against itself. Matches the two closes on the IST session date.
+  // Symbols whose 1d bar came from a real fetch, not from the bhavcopy projection: a
+  // source='BHAVCOPY' bar would compare against itself. Matches the two closes on the IST session
+  // date.
+  //
+  // ⚠️ Written as `source <> 'BHAVCOPY'` rather than `source = 'KITE'`, and that is load-bearing now
+  // that this canary SEEDS its own population. The seed goes out through GapBackfiller ->
+  // CandleQueryService, which stamps `gateway.sourceLabel()` (CandleQueryService:65) — deliberately
+  // the FETCHING impl's label, not a profile ternary. Flip artha.marketdata.source.candles to
+  // openalgo and the seed writes 202 OPENALGO rows while a `= 'KITE'` predicate counts NONE: a
+  // permanent coverage YELLOW produced by a routing flag that has nothing to do with the close
+  // feeds. Pre-existing while the population was borrowed; this change makes the canary the
+  // population's OWNER and would have inherited it.
+  //
+  // The `<>` form is the established idiom for exactly this distinction — see
+  // CandleRepository.hasNonBhavcopyDaily, which the corporate-action job uses to tell a genuinely
+  // dual-sourced equity from a bhavcopy-only one. It is not a widening in practice: the only 1d
+  // writers are the fetch gateway (KITE / OPENALGO / MOCK) and the bhavcopy projection, since the
+  // tick aggregator emits 1m bars only (CandleBuilder:147).
   //
   // ⚠️ `b.series = 'EQ'` is KEPT, deliberately, and it was checked rather than assumed — an EQ-only
   // filter elsewhere in this repo once hid every BE-series symbol and manufactured a fake outage.
@@ -134,7 +172,7 @@ public class BhavcopyCloseCanary {
       FROM nse_eod_bhavcopy b
       JOIN candles c
         ON c.exchange = 'NSE' AND c.tradingsymbol = b.symbol AND c.interval = '1d'
-       AND c.source = 'KITE'
+       AND c.source <> 'BHAVCOPY'
        AND (c.bucket AT TIME ZONE 'Asia/Kolkata')::date = b.trade_date
       WHERE b.series = 'EQ' AND b.trade_date = ?
         AND b.close_price IS NOT NULL AND c.close IS NOT NULL AND c.close > 0
@@ -166,7 +204,6 @@ public class BhavcopyCloseCanary {
   private final BigDecimal threshold;
   private final int redFloor;
   private final int sampleLimit;
-  private final String populationIndex;
 
   /**
    * The smallest comparison population this canary will certify. Below it the verdict is never
@@ -235,7 +272,6 @@ public class BhavcopyCloseCanary {
       @Value("${artha.bhavcopy-close.red-floor:20}") int redFloor,
       @Value("${artha.bhavcopy-close.sample-limit:25}") int sampleLimit,
       @Value("${artha.bhavcopy-close.min-compared:100}") int minCompared,
-      @Value("${artha.bhavcopy-close.population-index:NIFTY 200}") String populationIndex,
       @Value("${artha.bhavcopy-close.prefetch-cron:0 5 16 * * MON-FRI}") String prefetchCron) {
     this.jdbc = jdbc;
     this.ntfy = ntfy;
@@ -243,7 +279,6 @@ public class BhavcopyCloseCanary {
     this.constituents = constituents;
     this.backfiller = backfiller;
     this.calendar = calendar;
-    this.populationIndex = populationIndex;
     this.prefetchCron = prefetchCron;
     this.prefetchSchedule =
         Scheduled.CRON_DISABLED.equals(prefetchCron) ? null : CronExpression.parse(prefetchCron);
@@ -272,7 +307,7 @@ public class BhavcopyCloseCanary {
 
   /**
    * Fetches this canary's OWN comparison population — the 1d Kite bar for every symbol in the
-   * {@code populationIndex} reference list — at 16:05 IST. Live-only, trading-days-only.
+   * {@link #POPULATION_INDEX} reference list — at 16:05 IST. Live-only, trading-days-only.
    *
    * <p><b>⚠️ Why 16:05 and not "just before the 18:45 ingest".</b> Because the pass has no upper
    * bound on its duration and the deadline it must beat is {@link #sweep()} at 18:58, not the
@@ -343,10 +378,10 @@ public class BhavcopyCloseCanary {
 
   /**
    * Replays a MISSED {@link #prefetchPopulation()} at boot, synchronously, and returns the symbols
-   * attempted (0 when there was nothing to replay). Called by {@code BhavcopyStartupCatchup} ahead
-   * of the bhavcopy pull, under a HARD DEADLINE — see that class for why the call is a direct one
-   * rather than two ordered {@code ApplicationReadyEvent} listeners, and why the caller stops
-   * waiting on this method after 90 s rather than letting a slow pass hold up the feed.
+   * attempted (0 when there was nothing to replay). Called by {@code BhavcopyStartupCatchup} on its
+   * own thread, ALONGSIDE the bhavcopy pull rather than in front of it — see that class for why no
+   * ordering between the two is required, and why the wait that used to enforce one was deleted
+   * rather than retuned. However slow this pass is, it cannot hold up the feed.
    *
    * <p><b>Why this is not optional polish.</b> {@link #prefetchPopulation()} is cron-only, so it
    * fires only while the service is up at 16:05 IST. On a boot after that hour the pass is simply
@@ -402,7 +437,7 @@ public class BhavcopyCloseCanary {
    * from tests and by hand — the guards live in {@link #prefetchPopulation()}, so this always runs.
    */
   public int prefetchNow(LocalDate tradeDate) {
-    List<String> symbols = constituents.symbols(populationIndex);
+    List<String> symbols = constituents.symbols(POPULATION_INDEX);
     if (symbols.isEmpty()) {
       // ⚠️ This branch must emit something NOTHING ELSE emits, or it is not a guard at all. Delete
       // it and the loop below runs zero times, returns the same 0, and raises no interaction — so a
@@ -413,11 +448,11 @@ public class BhavcopyCloseCanary {
       //
       // It does NOT wait for the 18:58 sweep to notice. The sweep's coverage YELLOW says "too few
       // symbols were comparable" — true, but it cannot name the cause, and the causes are wildly
-      // different repairs (a typo in population-index vs. a Kite outage vs. index erosion). This
+      // different repairs (a typo in POPULATION_INDEX vs. a Kite outage vs. index erosion). This
       // fires 2h53m earlier and names it.
       emptyPopulationCounter.increment();
       String message =
-          "bhavcopy-close population index '" + populationIndex + "' has no constituents — the"
+          "bhavcopy-close population index '" + POPULATION_INDEX + "' has no constituents — the"
               + " canary fetched NOTHING, so tonight's comparison population is whatever other jobs"
               + " leave behind. Check the index name against reference/index-constituents.json";
       log.error("bhavcopy-close population pass fetched nothing: {}", message);
@@ -452,7 +487,7 @@ public class BhavcopyCloseCanary {
     log.info(
         "bhavcopy-close population pass: {} '{}' symbols attempted for {} in {} ms ({} raised);"
             + " the sweep's compared count is the authority on what landed",
-        symbols.size(), populationIndex, tradeDate,
+        symbols.size(), POPULATION_INDEX, tradeDate,
         System.currentTimeMillis() - startedAt, failed);
     return symbols.size();
   }
@@ -559,7 +594,7 @@ public class BhavcopyCloseCanary {
         jdbc.queryForObject(
             "SELECT count(*) FROM nse_eod_bhavcopy b "
                 + "JOIN candles c ON c.exchange='NSE' AND c.tradingsymbol=b.symbol "
-                + " AND c.interval='1d' AND c.source='KITE' "
+                + " AND c.interval='1d' AND c.source<>'BHAVCOPY' "
                 + " AND (c.bucket AT TIME ZONE 'Asia/Kolkata')::date = b.trade_date "
                 + "WHERE b.series='EQ' AND b.trade_date=? AND b.close_price IS NOT NULL "
                 + " AND c.close IS NOT NULL AND c.close > 0",
@@ -608,7 +643,7 @@ public class BhavcopyCloseCanary {
           "bhavcopy-close canary GREEN for {} — {} symbols compared after seeding the '{}' list,"
               + " none diverge > {}% (systemic agreement only; per-symbol correctness outside the"
               + " sample is unchecked)",
-          report.tradeDate(), report.compared(), populationIndex, report.thresholdPct());
+          report.tradeDate(), report.compared(), POPULATION_INDEX, report.thresholdPct());
       return;
     }
     divergenceCounter.increment(report.divergent());

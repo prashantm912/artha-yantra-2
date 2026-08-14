@@ -174,7 +174,7 @@ class CandleCaggIntegrationTest extends MarketDataIntegrationTestBase {
 
   /**
    * ⚠️ The one thing that makes a bhavcopy-FIRST 1d write safe for {@code BhavcopyCloseCanary}'s
-   * {@code source='KITE'} comparison population — and it is ACCIDENTAL, which is why it is pinned
+   * non-{@code BHAVCOPY} comparison population — and it is ACCIDENTAL, which is why it is pinned
    * rather than trusted.
    *
    * <p>The provenance {@code CASE} exercised above keeps the existing source only when the incoming
@@ -184,18 +184,30 @@ class CandleCaggIntegrationTest extends MarketDataIntegrationTestBase {
    * literal {@code 0}. {@code NULL IS NOT DISTINCT FROM 0} is FALSE, so a Kite write over a
    * bhavcopy bar takes {@code source='KITE'} even when open/high/low/close/volume agree exactly.
    *
+   * <p><b>⚠️ Scope: this pins the WRITE half only.</b> The Kite side below is hand-seeded as {@code
+   * oi = 0L}, so this test ASSUMES rather than measures that a Kite 1d cash-equity bar actually
+   * arrives with a zero. The decode half is pinned separately by {@code
+   * LiveHistoricalCandleGatewayTest#cashEquityDailyBarKeepsAZeroOpenInterestRatherThanNulling},
+   * which drives a canned seven-position wire response through the real gateway; and what NEITHER
+   * pins — Kite's own choice to SEND that seventh element — is written up there as a residual gap.
+   *
    * <p>That single difference is load-bearing elsewhere. If either side ever changes it — the
    * bhavcopy projection writing {@code oi = 0} for equities, or the Kite path normalising a zero to
    * null — an OHLCV-identical Kite bar would silently KEEP {@code source='BHAVCOPY'}, and the
    * canary would start losing precisely the bars that agree perfectly: a sample biased against
-   * agreement, judging agreement. It would surface as nothing louder than a slightly short
-   * {@code compared} count, and it would make {@code BhavcopyStartupCatchup}'s ordering — which is
-   * deliberately BOUNDED by a deadline today, on the strength of this test — genuinely load-bearing
-   * again.
+   * agreement, judging agreement. It would surface as nothing louder than a slightly short {@code
+   * compared} count, and it would make the boot ordering in {@code BhavcopyStartupCatchup} — which
+   * deliberately does not exist, on the strength of this pair of tests — load-bearing again.
    */
   @Test
   void kiteOverBhavcopyTakesTheKiteSourceBecauseOnlyOneSideEncodesNoOiAsZero() {
-    String symbol = "PROVBHAV";
+    // ⚠️ Unique per RUN, not a literal. ITs share the singleton DB with no per-method cleanup, so a
+    // fixed symbol makes this a once-only test: run 2's insertIgnoreAll (ON CONFLICT DO NOTHING)
+    // no-ops against run 1's leftover KITE row and the BHAVCOPY seed assertion below fails INVERTED
+    // ("expecting 'KITE' to be equal to 'BHAVCOPY'"), which reads as the provenance rule being
+    // backwards rather than as stale state. CI reruns failures twice in the same JVM, so the
+    // misleading form is the one an operator would actually see.
+    String symbol = "PROVBHAV" + Long.toString(System.nanoTime(), 36).toUpperCase(java.util.Locale.ROOT);
     // exactly what the EOD projection writes: BhavcopyCandles.of(...) through insertIgnoreAll
     repository.insertIgnoreAll(
         List.of(

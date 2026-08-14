@@ -265,33 +265,32 @@ class BhavcopyClosePopulationPrefetchTest {
   }
 
   /**
-   * ⚠️ The two defaults must agree, and nothing else checks that they do. {@code population-index}
-   * and {@code min-compared} are independent {@code @Value} knobs, so a typo in the index name, or a
-   * reference list that erodes below the floor as NSE rebalances the index out from under a STATIC
-   * JSON file, produces a canary that is YELLOW every single night by construction — with a fetch
-   * pass that dutifully runs and a report that never certifies anything. That failure is silent in
-   * every other test here, because they all inject their own symbol list.
+   * ⚠️ The shipped index name and the coverage floor must agree, and nothing else checks that they
+   * do. A typo in {@link BhavcopyCloseCanary#POPULATION_INDEX}, or a reference list that erodes
+   * below the floor as NSE rebalances the index out from under a STATIC JSON file, produces a canary
+   * that is YELLOW every single night by construction — with a fetch pass that dutifully runs and a
+   * report that never certifies anything. That failure is silent in every other test here, because
+   * they all stub {@code constituents} and never touch the real JSON.
    */
   @Test
-  @DisplayName("the default reference index really can satisfy the default coverage floor")
-  void theDefaultPopulationClearsTheDefaultFloor() throws java.io.IOException {
-    // Read the @Value default out of the source rather than repeating the literal. Every other test
-    // here injects "NIFTY 200" explicitly, so a typo in the production default would be invisible to
-    // all of them — the guard would pass while the shipped canary enumerated nothing.
-    String declaredIndex = declaredPopulationIndexDefault();
+  @DisplayName("the shipped reference index really can satisfy the default coverage floor")
+  void theDefaultPopulationClearsTheDefaultFloor() {
+    // Resolve the PRODUCTION constant against the REAL reference file. Every other test here stubs
+    // the constituents lookup, so a typo in the shipped index name would be invisible to all of
+    // them — the guard would pass while the deployed canary enumerated nothing.
     List<String> population =
         new StaticIndexConstituents(new com.fasterxml.jackson.databind.ObjectMapper())
-            .symbols(declaredIndex);
+            .symbols(BhavcopyCloseCanary.POPULATION_INDEX);
 
     assertThat(population)
         .as(
-            "artha.bhavcopy-close.population-index defaults to '%s'; if that key is absent from"
+            "BhavcopyCloseCanary.POPULATION_INDEX is '%s'; if that key is absent from"
                 + " reference/index-constituents.json the pass fetches nothing at all",
-            declaredIndex)
+            BhavcopyCloseCanary.POPULATION_INDEX)
         .isNotEmpty();
     assertThat(population.size())
         .as(
-            "the default population must clear the default min-compared of 100 with room to spare,"
+            "the shipped population must clear the default min-compared of 100 with room to spare,"
                 + " or the canary is YELLOW every night no matter how healthy the feeds are")
         .isGreaterThanOrEqualTo(150);
   }
@@ -333,24 +332,6 @@ class BhavcopyClosePopulationPrefetchTest {
                 + " ~202-fetch pass with no upper bound cannot be started inside it",
             prefetch / 60, prefetch % 60, ingest / 60, ingest % 60)
         .isLessThan(ingest);
-  }
-
-  /** The {@code artha.bhavcopy-close.population-index} default as the canary actually declares it. */
-  private static String declaredPopulationIndexDefault() throws java.io.IOException {
-    String source =
-        java.nio.file.Files.readString(
-            repoRoot()
-                .resolve(
-                    "services/market-data-service/src/main/java/in/arthayantra/marketdata/canary/"
-                        + "BhavcopyCloseCanary.java"));
-    java.util.regex.Matcher m =
-        java.util.regex.Pattern.compile(
-                "\\$\\{artha\\.bhavcopy-close\\.population-index:([^}]*)}")
-            .matcher(source);
-    assertThat(m.find())
-        .as("BhavcopyCloseCanary no longer declares an artha.bhavcopy-close.population-index default")
-        .isTrue();
-    return m.group(1);
   }
 
   /** Minute-of-day from a compose {@code NAME: "${NAME:-0 m H * * MON-FRI}"} line. */
@@ -397,7 +378,6 @@ class BhavcopyClosePopulationPrefetchTest {
         20,
         25,
         100,
-        "NIFTY 200",
         PREFETCH_CRON);
   }
 

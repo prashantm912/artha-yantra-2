@@ -401,7 +401,8 @@ services:
       # branch of upsertAuthoritativeAll also compares `oi` and only Kite encodes "no open
       # interest" as 0. The 16:00 Kite daily bar is already final (measured byte-identical on
       # re-fetch at 17:43 IST, 2026-08-13). Retuning this moves BOTH triggers: a boot after this
-      # time replays the missed pass (bounded at 90 s, see BhavcopyStartupCatchup).
+      # time replays the missed pass (alongside the bhavcopy pull, never in front of it — see
+      # BhavcopyStartupCatchup).
       ARTHA_BHAVCOPY_CLOSE_PREFETCH_CRON: "${ARTHA_BHAVCOPY_CLOSE_PREFETCH_CRON:-0 5 16 * * MON-FRI}"
       # the bhavcopy fetch the chain waits on
       ARTHA_BHAVCOPY_EOD_CRON: "${ARTHA_BHAVCOPY_EOD_CRON:-0 45 18 * * MON-FRI}"

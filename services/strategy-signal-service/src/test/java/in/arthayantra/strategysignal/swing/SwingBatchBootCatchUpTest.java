@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -20,8 +21,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,6 +32,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.DisplayName;
@@ -54,8 +58,10 @@ import org.springframework.scheduling.support.CronExpression;
  * ledger fake below is therefore STATEFUL and starts empty: it returns only what was actually seeded
  * through it, so a drain-only boot door cannot pass {@link #bootAfterTheCronSweepsASessionThatHasNoLedgerRowAtAll()}.
  *
- * <p>Every clock here is fixed, and nothing writes to a database — no fixture can rot into a
- * different test class when real time reaches a date (ledger H19).
+ * <p>No clock here reads real time and nothing writes to a database — no fixture can rot into a
+ * different test class when real time reaches a date (ledger H19). Most are {@code Clock.fixed}; the
+ * mid-sweep case uses {@link WindableClock}, which still starts from a fixed instant and only ever
+ * moves when a test explicitly winds it.
  */
 class SwingBatchBootCatchUpTest {
 
@@ -63,15 +69,18 @@ class SwingBatchBootCatchUpTest {
   private static final Clock BOOTED_0838 = fixed("2026-08-14T03:08:00Z");
   /** Friday 2026-08-14, 07:00 IST — before the cron, so nothing has been missed yet. */
   private static final Clock BOOTED_0700 = fixed("2026-08-14T01:30:00Z");
-  /** Friday 2026-08-14, 09:15 IST exactly — the market-open deadline, inclusive. */
-  private static final Clock BOOTED_0915 = fixed("2026-08-14T03:45:00Z");
+  /**
+   * Friday 2026-08-14, 09:04 IST — one minute of clear air outside the reserve, and squarely inside
+   * the blanket 09:00–09:15 band the door used to refuse outright.
+   */
+  private static final Clock BOOTED_0904 = fixed("2026-08-14T03:34:00Z");
   /** Friday 2026-08-14, 22:14 IST — the EVENING boot the original boot-catch-up rejection cited. */
   private static final Clock BOOTED_2214 = fixed("2026-08-14T16:44:00Z");
   /** Saturday 2026-08-15, 10:00 IST — a non-trading day, so ONLY the cron's weekday clause refuses. */
   private static final Clock BOOTED_SATURDAY = fixed("2026-08-15T04:30:00Z");
-  /** Friday 2026-08-14, 09:05 IST — before the open but INSIDE the 15-minute pre-open reserve. */
+  /** Friday 2026-08-14, 09:05 IST — EXACTLY the cutoff (09:15 open less the 10-minute reserve). */
   private static final Clock BOOTED_0905 = fixed("2026-08-14T03:35:00Z");
-  /** Friday 2026-08-14, 08:59 IST — the last minute the boot sweep may still start. */
+  /** Friday 2026-08-14, 08:59 IST — comfortably clear of the reserve on the accepting side. */
   private static final Clock BOOTED_0859 = fixed("2026-08-14T03:29:00Z");
   /**
    * Monday 2026-09-14, 18:30 IST — Ganesh Chaturthi, a WEEKDAY exchange holiday. The cron is
@@ -86,6 +95,14 @@ class SwingBatchBootCatchUpTest {
   private static final String BATCH = "manas-arora";
   /** Thursday 2026-08-13 — the session whose entries the missed 08:35 fire would have forfeited. */
   private static final LocalDate MISSED = LocalDate.of(2026, 8, 13);
+  /** Tuesday 2026-08-11 — a SECOND missed session, so a sweep has two runs to get through. */
+  private static final LocalDate MISSED_EARLIER = LocalDate.of(2026, 8, 11);
+  /**
+   * Friday 2026-09-11 — the trading session before the 2026-09-14 holiday, and the only date the
+   * holiday-morning boot can meaningfully owe entries for: it is the one that sits inside
+   * {@code sessionWindow(2026-09-14)}.
+   */
+  private static final LocalDate MISSED_BEFORE_HOLIDAY = LocalDate.of(2026, 9, 11);
   /** Wednesday 2026-08-12 — the last recorded run, i.e. this deployment owns the rolling history. */
   private static final LocalDate LAST_RUN = LocalDate.of(2026, 8, 12);
 
@@ -165,13 +182,21 @@ class SwingBatchBootCatchUpTest {
 
   /** An armed family whose 2026-08-13 entries never ran, with a funnel serving that day's screen. */
   private SwingDoctrine armedFamilyMissingThursdaysEntries() {
+    return armedFamilyMissingEntriesFor(MISSED);
+  }
+
+  /**
+   * The same fixture pinned to any session, because the session MUST lie inside the boot day's own
+   * {@code sessionWindow} or the sweep has nothing to claim and every assertion about it is vacuous.
+   */
+  private SwingDoctrine armedFamilyMissingEntriesFor(LocalDate session) {
     when(runs.lastRunDate(BATCH)).thenReturn(Optional.of(LAST_RUN));
     // Every window session has complete entries EXCEPT the missed one — Mockito's boolean default is
     // false, so state it explicitly rather than relying on the absence of a stub.
     when(runs.hasRunWithEntries(any(), any())).thenReturn(true);
-    when(runs.hasRunWithEntries(BATCH, MISSED)).thenReturn(false);
-    when(runs.hasRun(BATCH, MISSED)).thenReturn(true); // the 16:00 exits-only pass wrote its marker
-    when(intents.findIntent(BATCH, MISSED))
+    when(runs.hasRunWithEntries(BATCH, session)).thenReturn(false);
+    when(runs.hasRun(BATCH, session)).thenReturn(true); // the 16:00 exits-only pass wrote its marker
+    when(intents.findIntent(BATCH, session))
         .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(true, true)));
     when(effects.allConfirmed(any(), any())).thenReturn(true);
     when(effects.repairable(any(), any())).thenReturn(List.of());
@@ -190,7 +215,17 @@ class SwingBatchBootCatchUpTest {
     when(doctrine.candidateSnapshot())
         .thenReturn(
             new SwingDoctrine.CandidateSnapshotRead(
-                Optional.of(new SwingDoctrine.CandidateSnapshot(MISSED, List.of()))));
+                Optional.of(new SwingDoctrine.CandidateSnapshot(session, List.of()))));
+    return doctrine;
+  }
+
+  /** The 08-13 fixture plus a SECOND owed session, so the sweep has two runs queued oldest-first. */
+  private SwingDoctrine armedFamilyMissingTwoSessions() {
+    SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
+    when(runs.hasRunWithEntries(BATCH, MISSED_EARLIER)).thenReturn(false);
+    when(runs.hasRun(BATCH, MISSED_EARLIER)).thenReturn(true);
+    when(intents.findIntent(BATCH, MISSED_EARLIER))
+        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(true, true)));
     return doctrine;
   }
 
@@ -237,6 +272,62 @@ class SwingBatchBootCatchUpTest {
         task.run();
       }
     };
+  }
+
+  /**
+   * A scheduler that RECORDS the submitted task instead of running it. That distinction is the whole
+   * point: with an inline scheduler a door that calls the sweep DIRECTLY is indistinguishable from
+   * one that dispatches, because both leave the same effects behind by the time the test looks.
+   */
+  private static final class RecordingScheduler extends ThreadPoolTaskScheduler {
+
+    private final transient List<Runnable> submitted = new ArrayList<>();
+
+    @Override
+    public void execute(Runnable task) {
+      submitted.add(task);
+    }
+  }
+
+  /**
+   * A clock a test can wind forward. {@code Clock.fixed} cannot express the mid-sweep case at all:
+   * the pre-open reserve is spent BY the sweep's own work, so what has to be asserted is a clock
+   * that moves while the session loop is running.
+   */
+  private static final class WindableClock extends Clock {
+
+    /** Shared across every {@link #withZone} copy — the sweep re-reads the clock on every gate. */
+    private final AtomicReference<Instant> now;
+
+    private final ZoneId zone;
+
+    WindableClock(String start) {
+      this(new AtomicReference<>(Instant.parse(start)), ZoneOffset.UTC);
+    }
+
+    private WindableClock(AtomicReference<Instant> now, ZoneId zone) {
+      this.now = now;
+      this.zone = zone;
+    }
+
+    @Override
+    public ZoneId getZone() {
+      return zone;
+    }
+
+    @Override
+    public Clock withZone(ZoneId other) {
+      return new WindableClock(now, other);
+    }
+
+    @Override
+    public Instant instant() {
+      return now.get();
+    }
+
+    void wind(Duration by) {
+      now.updateAndGet(instant -> instant.plus(by));
+    }
   }
 
   @Test
@@ -345,13 +436,23 @@ class SwingBatchBootCatchUpTest {
     // The 08:35 cron IS holiday-blind and fires on this day, so refusing here would make the boot
     // door STRICTER than the schedule it stands in for, and the prior sessions in its window are
     // real sessions that may still owe entries. Holidays sweep; holiday EVENINGS do not.
-    SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
+    //
+    // ⚠️ The owed session MUST sit inside sessionWindow(2026-09-14). This test used to reuse the
+    // AUGUST fixture, which does not — so every September window session read hasRunWithEntries=true,
+    // nothing was ever claimed, and no sweep was exercised at all. `ledger.seeded` was satisfied by
+    // seedWindow alone, which means it asserted that a holiday-morning boot SEEDS and never that it
+    // SWEEPS: the test stayed green with the sweep doing nothing.
+    SwingDoctrine doctrine = armedFamilyMissingEntriesFor(MISSED_BEFORE_HOLIDAY);
 
     bootCatchUp(BOOTED_HOLIDAY_MORNING, CRON, doctrine).onStartup();
 
-    assertThat(ledger.seeded)
-        .as("a weekday holiday inside the cron's own window must sweep exactly as the cron would")
-        .isNotEmpty();
+    ArgumentCaptor<LocalDate> ran = ArgumentCaptor.forClass(LocalDate.class);
+    verify(recorder, atLeastOnce())
+        .runAndRecord(any(), ran.capture(), anyBoolean(), any(), any(), any());
+    assertThat(ran.getAllValues())
+        .as("a weekday holiday inside the cron's own window must actually RUN the prior session's"
+            + " pass, pinned to that session, exactly as the holiday-blind 08:35 cron would")
+        .containsExactly(MISSED_BEFORE_HOLIDAY);
   }
 
   @Test
@@ -377,31 +478,38 @@ class SwingBatchBootCatchUpTest {
   }
 
   @Test
-  @DisplayName("09:05 — before the open but inside the pre-open reserve — is refused")
+  @DisplayName("09:05 — exactly at the reserve cutoff, so refused; the bound is inclusive")
   void aBootInsideThePreOpenReserveIsRefused() {
     // ⚠️ MAJOR 2 (cross-vendor review). This band was entirely untested: the old gate accepted any
-    // instant strictly before 09:15, and the boot door fires exactly when the backlog is LARGEST
-    // (up to 7 sessions x 2 families = 14 session runs, against 81 s measured for a normal
-    // two-family sweep). Crossing 09:15 mid-entry-pass is not merely late — SwingBatchEngine skips
-    // the EXIT pass entirely when the entry pass trips the deadline, so it takes a partial entry set
-    // AND leaves every held stop unevaluated, and the half-done session can never be completed.
+    // instant strictly before 09:15. Crossing 09:15 mid-entry-pass is not merely late —
+    // SwingBatchEngine skips the EXIT pass entirely when the entry pass trips the deadline, so it
+    // takes a partial entry set AND leaves every held stop unevaluated, and the half-done session
+    // can never be completed.
+    //
+    // 09:05 is now the cutoff EXACTLY (09:15 open minus the 10-minute per-session-run reserve), so
+    // this also pins the bound as inclusive. The reserve shrank from 15 minutes because the figure
+    // it was sized against — "up to 14 session runs" — was an assumption, not a bound; what the
+    // reserve actually protects is ONE run, and the loop re-checks it at every session boundary.
     SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
 
     bootCatchUp(BOOTED_0905, CRON, doctrine).onStartup();
 
     assertThat(ledger.seeded)
-        .as("a sweep with under 15 minutes of clear air must not START — a partial entry set with"
-            + " the exit pass skipped is strictly worse than not running")
+        .as("a sweep without one session run's worth of clear air must not START — a partial entry"
+            + " set with the exit pass skipped is strictly worse than not running")
         .isEmpty();
     verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
   }
 
   @Test
-  @DisplayName("08:59 — the last minute with full headroom — still sweeps")
+  @DisplayName("08:59 — clear of the reserve on the accepting side — still sweeps")
   void aBootJustInsideTheReserveBoundarySweeps() {
     // The other side of the boundary, so the reserve cannot be silently widened into uselessness:
     // a guard that refuses everything would pass every refusal test above while forfeiting every
-    // real recovery, including the 08:38 incident this whole change exists for.
+    // real recovery, including the 08:38 incident this whole change exists for. (The LAST accepting
+    // minute is 09:04, pinned separately below — this one holds the band that was already safe
+    // under the old 15-minute door, so re-widening the reserve to 16 minutes or more, which would
+    // put the cutoff at or before 08:59, is caught here too.)
     SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
 
     bootCatchUp(BOOTED_0859, CRON, doctrine).onStartup();
@@ -411,14 +519,68 @@ class SwingBatchBootCatchUpTest {
   }
 
   @Test
-  @DisplayName("09:15 exactly is already too late — the deadline is inclusive")
-  void aBootAtTheOpeningBellIsRefused() {
+  @DisplayName("09:04 — inside the OLD blanket 09:00 door, outside the reserve — now sweeps")
+  void aBootJustOutsideTheReserveStillSweeps() {
+    // This replaces a 09:15 test that could not fail: 09:15 was never the governing bound on either
+    // side of this change (the door refused from 09:00, and now from 09:05), so it passed
+    // identically before and after and pinned nothing.
+    //
+    // 09:04 is the case the blanket 15-minute door got WRONG. Cold start on this machine is 6.1 /
+    // 7.8 / 13.1 s measured, so the whole 09:00–09:15 refused band is reachable by a ~09:00
+    // power-on — and the refusal is PERMANENT, not deferred: the next morning's 08:35 sweep
+    // re-claims the session but the funnel now serves a newer screen, so entriesReady is false
+    // (SCREEN_NOT_AS_OF_SESSION) until the attempt budget runs out and the session is ABANDONED
+    // "UNRECOVERABLE by the catch-up". The modal backlog is one session per family — 81 s measured
+    // — against eleven minutes of clear air here, so this is not a marginal call.
     SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
 
-    bootCatchUp(BOOTED_0915, CRON, doctrine).onStartup();
+    bootCatchUp(BOOTED_0904, CRON, doctrine).onStartup();
 
-    assertThat(ledger.seeded).isEmpty();
-    verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+    assertThat(ledger.seeded)
+        .as("a boot with a full session run's reserve in hand must sweep — refusing it forfeits the"
+            + " session's entries permanently")
+        .contains(MISSED);
+    verify(recorder).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+  }
+
+  @Test
+  @DisplayName("the reserve is re-checked at EVERY session boundary, not only at the boot door")
+  void theSweepStopsBetweenSessionsOnceTheReserveIsSpent() {
+    // ⚠️ THE M1 DEFECT. The reserve used to be a START gate and nothing else: once past the door,
+    // every in-flight gate was marketOpenDeadlinePassed() — 09:15, and trading-day-conditional. So a
+    // sweep admitted at 08:59 kept CLAIMING new sessions right up to 09:15 with no reserve left,
+    // and the run that straddled the open took a partial entry set with its exit pass skipped. The
+    // door's own ceiling could never bound that: retryableSessions returns every retryable row,
+    // including ones older than the rolling window, so the sweep's length is not knowable when it
+    // starts.
+    SwingDoctrine doctrine = armedFamilyMissingTwoSessions();
+    WindableClock clock = new WindableClock("2026-08-14T03:29:00Z"); // 08:59 IST — full headroom
+    // The sweep's own work is what spends the reserve. One long session run puts the clock at 09:09
+    // — past the 09:05 cutoff but still before the 09:15 open, which is exactly the band the old
+    // trading-day-conditional deadline gate waved through.
+    when(recorder.runAndRecord(any(), any(), anyBoolean(), any(), any(), any()))
+        .thenAnswer(
+            call -> {
+              clock.wind(Duration.ofMinutes(10));
+              return new SwingBatchRecorder.RunOutcome(
+                  new SwingBatchEngine.SwingRun(
+                      4, 12, 4, 0, 0, SwingBatchEngine.AdmissionProbe.empty()),
+                  true);
+            });
+
+    bootCatchUp(clock, CRON, doctrine).onStartup();
+
+    ArgumentCaptor<LocalDate> ran = ArgumentCaptor.forClass(LocalDate.class);
+    verify(recorder, atLeastOnce())
+        .runAndRecord(any(), ran.capture(), anyBoolean(), any(), any(), any());
+    assertThat(ran.getAllValues())
+        .as("only the OLDEST owed session may run: after it the clock reads 09:09, so the reserve is"
+            + " spent and no NEW session run may start")
+        .containsExactly(MISSED_EARLIER);
+    assertThat(ledger.pending)
+        .as("the session that did not start must stay retryable for the next sweep — stopping"
+            + " BETWEEN sessions is safe, being cut off INSIDE one is not")
+        .contains(MISSED);
   }
 
   @Test
@@ -483,13 +645,18 @@ class SwingBatchBootCatchUpTest {
   }
 
   @Test
-  @DisplayName("the boot one-shot is dispatched onto the pool SwingRunActivity watches")
+  @DisplayName("the boot one-shot is DISPATCHED onto the pool SwingRunActivity watches, not run inline")
   void theBootSweepRunsOnTheObservedCatchUpPool() throws Exception {
     // Not decoration. That pool is poolSize=1 and already carries catchUp()'s @Scheduled, so this
     // is what makes a boot and an 08:35 tick in the same second SERIALIZE rather than race. It is
     // also what keeps a boot sweep visible to SwingRunActivity, whose contract the pre-open
     // reconciler's wait depends on — a boot sweep on any other thread would leave that gate
     // reporting idle mid-sweep, silently, with every other test still green.
+    //
+    // ⚠️ The @Qualifier assertion below says WHICH pool and nothing whatever about the door USING
+    // it: rewriting onStartup() as a direct runIfMissed() call left this test green. The recording
+    // scheduler closes that half — it captures the task WITHOUT running it, so an inline dispatch
+    // shows up as a sweep that has already happened before the captured task is ever run.
     assertThat(
             SwingBatchBootCatchUp.class
                 .getDeclaredConstructor(
@@ -498,6 +665,27 @@ class SwingBatchBootCatchUpTest {
                 .getAnnotation(Qualifier.class)
                 .value())
         .isEqualTo("swingCatchUpTaskScheduler");
+
+    SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
+    RecordingScheduler scheduler = new RecordingScheduler();
+
+    new SwingBatchBootCatchUp(swingCatchUp(BOOTED_0838, CRON, doctrine), scheduler, true)
+        .onStartup();
+
+    assertThat(scheduler.submitted)
+        .as("onStartup must hand the sweep to the qualified scheduler rather than running it on the"
+            + " ApplicationReadyEvent thread")
+        .hasSize(1);
+    assertThat(ledger.seeded)
+        .as("nothing may have run yet — a sweep that has already happened was dispatched INLINE,"
+            + " which is invisible to SwingRunActivity and races the 08:35 tick on the same pool")
+        .isEmpty();
+
+    scheduler.submitted.get(0).run();
+
+    assertThat(ledger.seeded)
+        .as("and the task the scheduler was handed must be the real sweep, not a no-op")
+        .contains(MISSED);
   }
 
   @Test

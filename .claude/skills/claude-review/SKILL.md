@@ -1,29 +1,56 @@
 ---
 name: claude-review
-description: Structured cross-vendor review of Codex-built changes by an Opus subagent — the mirror of codex-code-review, same checklist + verdict tags + convergence loop, so the reviewer is always the OPPOSITE vendor from the builder
+description: The structured code-review round for non-trivial changes OUTSIDE the money/parity tiers — an Opus subagent on a fresh thread judging the diff against the shared checklist, returning APPROVED/REQUEST_CHANGES/NEEDS_REWORK and converging over rounds. Same-vendor, so run it with a distinct lens; money/parity/migration/live-engine take a rationed Codex slot instead.
 ---
 
 # Claude Review
 
-The Anthropic-side reviewer, for when the **builder was Codex**. It gives Codex-built code the same
-*structured* other-vendor review loop that Claude-built code gets from `codex-code-review` — closing the
-"Codex reviews Codex" gap where the only cross-vendor eyes were the Architect's audit. An Opus subagent
-reads the diff against the SAME `.claude/skills/codex/checklist.md` and returns the same
-`APPROVED`/`REQUEST_CHANGES`/`NEEDS_REWORK` verdict.
+**The review round.** An Opus subagent on a FRESH thread reads the diff against
+`.claude/skills/codex/checklist.md` and returns `APPROVED` / `REQUEST_CHANGES` / `NEEDS_REWORK`.
+The Architect audits the receipt against the real artifact ON TOP — **this skill is the review, the
+audit is the final gate, and they are never the same gate.**
 
-**Routing (ROUTING.md, the router rule):** reviewer vendor = **opposite of the builder vendor**.
-- Builder = **Codex** (`codex-build`) → review with **this skill** (Opus subagent).
-- Builder = **Claude/Opus** (`ship-a-change`, Architect-direct, or `delegated-ship`'s Opus subagent) →
-  review with **`codex-code-review`** (Codex).
+## ⚠️ Read this before running it: are you even the right reviewer?
 
-The Architect (also Claude) still audits the receipt vs the real artifact ON TOP — this skill is the
-structured review loop, the audit is the final gate.
+Codex was **rationed** on 2026-08-15 ($20/mo tier), not retired. Pick by TIER first
+(`.claude/skills/codex/ROUTING.md`):
+
+- **money · parity · exit doctrine · migrations · live engine** → **NOT this skill.** Those earn a
+  rationed `codex-code-review` slot, PRE-merge. If no slot is free, HOLD the item
+  (`Cross-vendor review: PENDING (awaiting rationed Codex slot)`); only after **two missed slots**
+  does it fall back here, and then the degradation gets recorded.
+- **everything else** → this skill.
+
+For everything routed here the review is **same-vendor**, and that is weaker than the two-vendor gate
+it replaces: the 2026-07-25 cross-vendor round caught a live Critical (`premium_pct` exits resolved
+against the INDEX entry price) that CI structurally could not, and a later round caught a foreign
+hunk the Architect had already read past in audit.
+
+**Do not let "reviewed" imply what it used to.** The verdict line says so explicitly:
+```
+Cross-vendor review: SKIPPED (clean tier — same-vendor Opus review on a fresh thread, cross-vendor not spent)
+```
+
+**Buy back what diversity you can** — in order of value:
+1. **Fresh thread, no exceptions.** The reviewer must not have seen the build conversation. On this
+   path it is the ONLY structural separation between writer and reviewer.
+2. **Give it a distinct LENS.** A generic "review this" from the same vendor that built it is the
+   weakest possible round. When a change can fail in more than one way, run more than one reviewer:
+   correctness · money-path · does-the-test-actually-detect · operational blast radius.
+3. **Optionally seed it with local candidates** — `candgen.py` (q3.8, no-discard prompt) is a
+   different model family and once surfaced a real defect at rank 1. It duplicates itself heavily
+   and has found nothing a good builder had not already flagged. A confirmation net; **never a gate**.
+   Seven local models scored 0/2 as reviewers — they generate, they do not judge. See `local-model`.
+
+It still works, and well: a same-vendor fresh-thread round on PR #1376 (2026-08-15) found two
+Majors — a pre-open reserve that was a start gate only, and a test that asserted a constructor
+annotation rather than the behaviour it claimed to pin — none of which the build, its tests, or the
+Architect's own reading had caught. Same-vendor is a real gate; it is just not the one it replaces.
 
 ## Run it (the Architect drives; the reviewer is a subagent)
 
 1. **Spawn the reviewer** — Agent tool, `model: "opus"`, a read-only reviewer type
-   (`general-purpose`, or `timescale-domain-reviewer` / `ui-a11y-reviewer` for those surfaces). It is a
-   FRESH context that did not build the change, and a different vendor from Codex → genuine cross-vendor.
+   (`general-purpose`, or `timescale-domain-reviewer` / `ui-a11y-reviewer` for those surfaces).
    Prompt it with:
    > Review the uncommitted change. Read the diff with `git -C <worktree> status -s` and
    > `git -C <worktree> diff HEAD` (omit `-C` for the main repo). Judge it ONLY against
@@ -31,10 +58,18 @@ structured review loop, the audit is the final gate.
    > approval gate — plus `CLAUDE.md` conventions and any change-area memory traps pasted below. Cite
    > `file:line` for every finding; tag severity from the checklist; prefer one-line fixes. The testing
    > gate (lint/typecheck/affected tests) was run by the requester — summary below; if it failed, or new
-   > logic has no tests and no rationale, return REQUEST_CHANGES. You are the OPPOSITE-vendor reviewer of
-   > Codex-built code; find what a fresh Anthropic model would catch that the OpenAI builder + its own
-   > review thread might share a blind spot on. End with exactly one tag on its own line:
-   > APPROVED / REQUEST_CHANGES / NEEDS_REWORK. `$GATE_SUMMARY  <pasted traps>`
+   > logic has no tests and no rationale, return REQUEST_CHANGES.
+   >
+   > ⚠️ You are the SAME vendor as the builder, so the usual cross-vendor safety net is gone. Assume
+   > you share its blind spots and compensate: for each new assertion ask "could this test pass
+   > against the pre-fix code?", and for each claim in the receipt ask "what would falsify this?".
+   > **Your lens for this review is: `<LENS>`.**
+   >
+   > End with exactly one tag on its own line: APPROVED / REQUEST_CHANGES / NEEDS_REWORK.
+   > `$GATE_SUMMARY  <pasted traps>`
+
+   Always begin the brief with a **STEP 0**: verify the brief's premise against the code first, and
+   say so if it is wrong — that is a successful outcome, not a failure.
 
 2. **Parse the trailing tag** of the subagent's final message:
    - `APPROVED` → hand back to the Architect audit. Promotion follows the normal tiered policy
@@ -43,17 +78,18 @@ structured review loop, the audit is the final gate.
      findings, pushes back on wrong ones; re-run the testing gate.
    - `NEEDS_REWORK` → surface before mass-editing (a firewall/boundary violation).
 
-3. **Iterate to convergence (threaded).** Continue the SAME subagent with `SendMessage` (its context is
-   retained — the mirror of `codex exec resume`): "Re-review after these fixes: <notes on what changed,
-   what you pushed back on>." Loop until `APPROVED`. Cap 5 rounds; surface leftovers to the Architect.
+3. **Iterate to convergence (threaded).** Continue the SAME subagent with `SendMessage` (its context
+   is retained): "Re-review after these fixes: <what changed, what you pushed back on>." Loop until
+   `APPROVED`. Cap 5 rounds; surface leftovers to the Architect.
 
 ## Notes
 
-- **checklist.md is shared** — both reviewers judge against the identical criteria, so a Codex review and
-  a Claude review are comparable and the gate is consistent.
-- **Cross-vendor is real here:** Opus reviewer (Anthropic) ≠ Codex builder (OpenAI). The Architect being
-  Claude doesn't weaken it — the Architect didn't build the change; Codex did.
-- **Availability:** Opus subagents have no OpenAI-capacity dependency, so this path is always up (it IS the
-  fallback reviewer when Codex is down, per ROUTING.md).
+- **Verify the reviewer's sharpest claim yourself.** It is same-vendor now; a confident finding is
+  not evidence. On #1376 the Architect independently re-read the single line the top finding rested
+  on before acting, and separately DOWNGRADED a Major after measuring the cold-start latency its
+  severity assumed (6–13 s, not the minutes the reviewer supposed).
+- `checklist.md` stays at `.claude/skills/codex/checklist.md` — the path is historical, the content
+  is vendor-neutral and always was.
+- **Availability:** Opus subagents have no external-vendor dependency, so this path is always up.
 - Skip for trivial/docs-only changes (say so instead of spawning). Money/parity → pair with
   `adversarial-review` and the Architect's own Golden+Parity rerun.

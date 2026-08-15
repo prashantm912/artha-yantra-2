@@ -29,13 +29,23 @@ Applies to the MAIN session loop only — if you were spawned as a subagent, ign
 and just execute your brief. **Opus 5 is the main loop: orchestrator + final gate.** It never
 builds substantive code; it orients, classifies, briefs, runs the testing gate, audits, merges,
 deploys, verifies live, and talks to the owner. Four stages, each with its own model
-(full table + fallbacks: `.claude/skills/codex/ROUTING.md`):
+(full table + fallbacks: `.claude/skills/codex/ROUTING.md`).
+
+⚠️ **CODEX IS RATIONED (owner, 2026-08-15 — $20/mo tier).** It is no longer the default reviewer;
+it is a scarce slot spent ONLY on **money · parity · exit doctrine · migrations · live engine**, and
+always **PRE-merge** (a slot on merged code buys an audit, not a gate). Everything else gets
+`claude-review` — Opus subagent, FRESH thread, DISTINCT lens — which is **weaker than what it
+replaced**, so buy back what diversity you can and **write the loss into the verdict line** rather
+than letting "reviewed" imply what it used to. Never spend a slot on builds, docs, an advisory ask,
+or anything already merged. ⚠️ The budget is an ASSUMPTION until measured — record the first
+post-2026-08-20 run's cost. Local models do NOT restore cross-vendor review (seven scored 0/2); see
+`.claude/skills/local-model/` for what they ARE measured to do.
 
 | Stage | Model | Note |
 |---|---|---|
-| **Plan** | **Fable 5** (Agent tool, `model: "fable"`) → Opus on capacity error | ONLY for real items: HOLD tier, migrations, money/parity surfaces, or >~3 files / multi-PR. Small chips skip straight to a brief. Non-trivial plans still get `codex-plan-review` (cross-vendor: Fable writes, Codex reviews). |
-| **Build** | **Codex** (`codex-build`) → **Sonnet 5** for MECHANICAL work → **Opus subagent** when Codex is out AND the surface is parity / money / exit doctrine / migrations / the live engine | Never degrade a money or parity path to Sonnet to save tokens — that is exactly where green suites have hidden defects. |
-| **Review** | opposite vendor of the builder, fresh thread (review router in ROUTING.md) | A DISTINCT gate from the audit — see below. |
+| **Plan** | **Fable 5** (Agent tool, `model: "fable"`) → Opus on capacity error | ONLY for real items: HOLD tier, migrations, money/parity surfaces, or >~3 files / multi-PR. Small chips skip straight to a brief. Non-trivial plans get `codex-plan-review` if a slot is free (cheapest leverage), else an Opus fresh-thread round. |
+| **Build** | **Opus subagent** (`delegated-ship`) for parity / money / exit doctrine / migrations / the live engine → **Sonnet 5** for MECHANICAL work only | Never degrade a money or parity path to Sonnet to save tokens — that is exactly where green suites have hidden defects. |
+| **Review** | money/parity/migration/live-engine → **`codex-code-review`** (rationed slot, PRE-merge) · everything else → **`claude-review`** (Opus, FRESH thread, DISTINCT lens) | ⚠️ Same-vendor for the majority. A DISTINCT gate from the audit — see below. |
 | **Audit + ship** | **Opus 5** (main loop) | Final gate, then PR → CI → merge → deploy → live-verify → ledger. |
 
 ⚠️ **The review round and the Architect audit are two gates, not one — never collapse them.**
@@ -806,27 +816,34 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   `research` (no-code spike → findings + BUILD/DEFER verdict), `write-tests` (author tests in
   our harness — naming/Testcontainers/parity/seam-ladder/coverage-debt), `hotfix` (live-incident
   fast-lane: snapshot-first, minimal fix, admin-merge, deploy + canary), `comprehensive-audit`
-  (owner-triggered 360° platform audit — tiered sharded Codex-Sol convergence → one dual-signed
-  doc in `docs/audits/`) — instead of improvising inline.
-- **Codex skill suite** (`.claude/skills/codex-*`, shared harness `.claude/skills/codex/`) =
-  the skill-based, templated form of the codex-builder-lane — persistent-thread Codex sessions
-  instead of on-the-fly `codex exec` strings: `codex-build` (delegate a build in a worktree,
-  `--bypass` — **luna DRAFTS fast/cheap → sol REVIEWS+FIXES on a fresh thread → then Opus cross-vendor
-  review**, three perspectives, receipt contract baked in; **a >~4-checkbox plan uses BATCHED mode** —
-  delegate risk-sized batches on one thread, review each batch's git-index delta, feed fixes forward as
-  binding `--notes`, cross-vendor + audit run ONCE at the end; same analog in `delegated-ship` for Opus
-  builders), `codex-code-review` + `codex-plan-review`
-  (threaded read-only review against `.claude/skills/codex/checklist.md` = our invariants,
-  `APPROVED`/`REQUEST_CHANGES`/`NEEDS_REWORK` convergence), `codex-ask` (advisory second
-  opinion, no gate). Model/effort in one file (`codex/scripts/_common.sh`); state is
-  per-target + gitignored. Codex never merges/deploys — Architect keeps that. Two builder
-  modes (D1): the `docs/handoffs/` brief lane = SHIP mode (Codex commits + opens the PR, per
-  AGENTS.md); `codex-build` = EDIT-ONLY mode (Codex edits the tree, Architect commits —
-  AGENTS.md carries the matching exception). **Model routing + availability fallback:
-  `.claude/skills/codex/ROUTING.md`** — the harness auto-retries the codex chain on
-  at-capacity errors; codex-down → Opus subagent per the table, same receipt contract.
-  **Review router (ROUTING.md): the reviewer is the opposite vendor of the builder** (normal path;
-  during an outage fall back to same-vendor and record the loss) — Codex-built → `claude-review`
-  (Opus subagent); Claude/Opus-built → `codex-code-review` (Codex); both judge the same
-  `checklist.md`. Plan review is already cross-vendor (Claude writes, `codex-plan-review` = Codex).
-  Canonical order: testing gate → cross-vendor review → Architect audit (final gate) → tiered promotion.
+  (owner-triggered 360° platform audit — tiered sharded read-only analyst convergence → one signed
+  doc in `docs/audits/`; analyst is an Opus subagent — a 13-shard Codex audit would eat the whole
+  monthly ration) — instead of improvising inline.
+- **Review + local-model lanes.** `claude-review` (Opus subagent, FRESH thread, DISTINCT lens) is
+  the ONLY review path and judges `.claude/skills/codex/checklist.md` (path is historical; the
+  checklist is vendor-neutral), emitting `APPROVED`/`REQUEST_CHANGES`/`NEEDS_REWORK`. Canonical
+  order: testing gate → review round → Architect audit (final gate) → tiered promotion. ⚠️ **The
+  review and the audit are two gates; the tier lenses inside `delegated-ship` are audit depth, NOT a
+  review round.**
+- **`local-model` skill** (`.claude/skills/local-model/`) = the two ollama models on this box,
+  `qwen3.5:9b` (6.6 GB, 43 tok/s, interactive) and `qwen3.8:27b-q4_K_M` (17 GB, 2.6 tok/s,
+  unattended). They exist for TOKEN BURN, never speed, and they never decide anything. Measured
+  lanes: CI-failure digestion (5/5 both), psql dumps (5/5), service logs (q3.8 5/5, 9b 3/5), doc
+  summaries, SQL drafts (run them and diff the rows), commit-message drafts, prod code from a tight
+  spec on non-money surfaces (q3.8 8/8 vs hidden tests), and defect CANDIDATES before a review round.
+  ⚠️ **Never a review verdict — seven models scored 0/2.** ⚠️ **Any generated test is worthless until
+  red-proofed** — one emitted a 4/4-GREEN suite detecting neither of two planted bugs. ⚠️ **Read
+  `local-model/PROMPTING.md` before writing any prompt for them**: on 2026-08-15 three capability
+  verdicts flipped on a prompt change alone (review 0/2→1/2, psql 0/5→5/5), i.e. we were measuring
+  our probes, not the models — and two wrong verdicts reached merged ledger entries before the owner
+  caught them.
+- **Codex suite — RATIONED 2026-08-15 (owner, $20/mo tier).** `.claude/skills/codex-*` + the
+  `codex/` harness stay ENABLED but budget-gated: `codex-code-review` on money/parity/migration/
+  live-engine PRE-merge, `codex-plan-review` on a size-gate plan if a slot is free. **Never** on
+  builds (`delegated-ship` builds free), docs/mechanical, an advisory `codex-ask`, or merged code.
+  A money/parity item WAITS for a slot with `Cross-vendor review: PENDING (awaiting rationed Codex
+  slot)` — the red `verdict` check is the design; **two missed slots** → ship same-vendor and record
+  it. ⚠️ Always via the harness, never a hand-rolled `codex exec` (the harness owns the sandbox
+  decision). ⚠️ A failed resume leaves the PREVIOUS round's `review.txt` intact — compare its mtime
+  before/after or you will read a confident review of the wrong revision. Full rules + the slot
+  procedure: `.claude/skills/codex/ROUTING.md`.

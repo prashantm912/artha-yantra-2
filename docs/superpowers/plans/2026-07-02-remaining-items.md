@@ -2224,8 +2224,51 @@ test-authoring. Full grid in memory topic `local-model-evaluation`; headline row
 
 Owner's standing instruction unchanged: **nothing wired into the workflow yet.**
 
+⚠️⚠️ **N76c · THE WHOLE LOCAL-MODEL EVALUATION WAS MEASURING MY PROMPTS, NOT THE MODELS — AND THIS
+LEDGER PUBLISHED TWO WRONG VERDICTS BEFORE THE OWNER'S QUESTION CAUGHT IT.** 2026-08-15, prompted
+by the owner asking, simply, *"why not Log/CI triage"* and then *"check psql again on 3.8 see if
+prompts were right"*. Both challenges were correct. Three capability verdicts flipped with the
+model, the data and the temperature all held fixed:
+
+| verdict | terse prompt | fair prompt | what actually changed |
+|---|---|---|---|
+| review, H18 diff | **0/2** | **1/2, real defect at RANK 1** | asked for EVERY candidate with KEPT/DISCARDED verdicts instead of "list only real defects, max 6 sentences" |
+| psql triage, `qwen3.5:9b` | **0/5** | **5/5** | supplied the operator rule I had been grading against but never stated |
+| 7B, holiday hole | looked like a PASS | **0/2** | the original trap, opposite direction — evidence pre-assembled in one prompt |
+
+⚠️ **The psql case is the sharpest and it was entirely mine.** The `NOTIFIER_HEALTH` row sits ALONE
+in its own single-row result block — there is no column of `SCHEDULED` rows for `BOOT_CATCHUP` to
+stand out against. Flagging it requires domain knowledge nowhere in the dump, while the prompt said
+*"Do not speculate."* **I graded five runs as failures for not knowing something I never told them**,
+then wrote "triage lane does NOT unlock" into N76b and into memory. Given the rule, the 9b flags it
+5/5 and explains it correctly. My replacement rule was itself imprecise — it induces a false positive
+on `MINERVINI_PLANE_DIVERGENCE` (whose `MINERVINI_SCHEDULER` source IS its normal trigger) in 4/5
+runs, recorded so nobody credits that to the model either.
+
+**Corrected fair-prompt results, ×5 per probe:** CI failure logs **5/5 on BOTH** models · psql **5/5**
+(9b) · service log **5/5** (q3.8), **3/5** (9b — the one genuine weakness, on a prompt that IS fair:
+it dropped the batch summary twice and misread `would-enter 5` once). So the triage lane DOES clear
+the owner's ≥4/5 gate, and N76b's headline was wrong.
+
+**Why the service log is the hard one, mechanism:** surefire output already MARKS what matters
+(`Run 1/2/3`, a totals line), so the answer is near-extractive and comes out stable; the service log
+has no such marking and the model must CHOOSE which six of ~200 lines matter — and it chose
+differently each run. **Rule: stable where the document marks what matters, unstable where the model
+must decide what matters.** That supersedes the "structure vs needle" framing.
+
+**Rules earned — these outlive the local-model question entirely:**
+1. Before recording ANY failure, re-read your own prompt and ask what it actually supplied. If the
+   answer needs knowledge you never handed over, **the probe is broken, not the subject.**
+2. State the rubric IN the prompt whenever it depends on domain knowledge. A rubric the grader keeps
+   private is not a test — it is a guess about what the subject will volunteer.
+3. Fair ≠ minimal. Over-supplying (leading) and under-supplying both produce a confident wrong number.
+4. **A capability claim without its prompt attached is not a claim.** Same family as
+   [[filter-artifacts-look-like-outages]] — it fails in the ALARMING direction, which is what makes
+   it survive review: nobody argues with a negative result.
+
 ⚠️ **N76b · THE FOUR OWNER-APPROVED FOLLOW-UPS, SAME DAY — AND THE STABILITY ONE REVOKED A CLAIM
-THIS LEDGER HAD ALREADY PUBLISHED.**
+THIS LEDGER HAD ALREADY PUBLISHED.** ⚠️ **Its "wiring does NOT unlock" headline is itself CORRECTED
+by N76c above — the 0/5 it rests on was a probe defect. The n=1 lesson stands; the verdict does not.**
 
 - **Stability ×5 killed the triage lane.** Same psql probe, five runs, scored on the load-bearing
   `NOTIFIER_HEALTH source=BOOT_CATCHUP` line: **`qwen3.5:9b` 0/5** (bare "NOTIFIER" in only 2/5),

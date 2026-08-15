@@ -2224,6 +2224,33 @@ test-authoring. Full grid in memory topic `local-model-evaluation`; headline row
 
 Owner's standing instruction unchanged: **nothing wired into the workflow yet.**
 
+⚠️ **N76b · THE FOUR OWNER-APPROVED FOLLOW-UPS, SAME DAY — AND THE STABILITY ONE REVOKED A CLAIM
+THIS LEDGER HAD ALREADY PUBLISHED.**
+
+- **Stability ×5 killed the triage lane.** Same psql probe, five runs, scored on the load-bearing
+  `NOTIFIER_HEALTH source=BOOT_CATCHUP` line: **`qwen3.5:9b` 0/5** (bare "NOTIFIER" in only 2/5),
+  `qwen3.8:27b` **3/5**. **The 08-14 PASS was the outlier, not the 08-15 fail** — a single lucky run
+  had been carrying a capability claim in memory and in N75/N76 for a day. Owner's gate was ≥4/5;
+  neither model clears it, so **wiring does not unlock**. The ~96% context-reduction figure survives
+  as a VOLUME measure; *"no factual loss"* does not survive repetition. **General rule earned here:
+  grade a model on N runs or do not grade it** — the single-run number is the same shape as every
+  other one-sample claim this ledger has had to retract.
+- **Review: 0/2 → 1/2, and the fix was the PROMPT, not the model.** Identical evidence, one
+  instruction changed — instead of *"list only real defects, max 6 sentences"*, demand **every
+  candidate considered, each KEPT/DISCARDED with a reason, doubts stated rather than dropped**.
+  `qwen3.8` then produced the H18 holiday hole as **candidate #1, KEPT**, correctly reasoned — the
+  finding it had talked itself out of under the terse prompt. **The discard step was the defect, not
+  the perception.** Caveats: 27 min, 3,965 tokens, and it degenerated (candidates 16–20 verbatim
+  repeats of 11–15; 2 of 4 KEPT restate #1); the second ground-truth defect stayed missed. **Not a
+  reviewer — a candidate generator with Claude judging.** One sample proves a possibility, not a rate.
+- **MTP is real: +19%** (3.1 vs 2.6 tok/s), and it shares the base blob so the pull was instant at
+  ~zero extra disk. Provisional (one sample each).
+- **Prefill-after-`<think>` WORKS — the last open technique, now closed.** Via `"raw": true` with a
+  hand-rolled template that pre-closes the think block: control `think:true` = 261 eval tokens /
+  867 thinking chars / 124 s; prefilled = **31 tokens / 0 thinking chars / 16 s, same correct
+  answer**. 8× fewer tokens, 7.8× faster. Costs the server-side chat template, so it must be
+  maintained per model family.
+
 ⚠️ **BUILD MEASURED THE SAME NIGHT (2026-08-14) — the first-round result the benchmark above then
 refined: ALSO DISPROVEN at that point, AND THE BIGGER MODEL FAILS *GREEN*.** Fair probe,
 same discipline: `ScalpAlertDedupe` (42 lines, pure logic, injected `Clock`, no existing test), class

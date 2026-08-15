@@ -43,6 +43,12 @@ resolve rebase conflicts as a field UNION when both sides are additive).
 A builder that stops mid-verify ("waiting for the build result") resumes cleanly with
 one SendMessage nudge: "check the output, finish, full receipt."
 
+**Batching is also the main TOKEN lever — and it has one hard constraint.** N items batched into one
+plan/build/review/PR pay ONE review round instead of N. ⚠️ **Only batch items on the SAME SURFACE.**
+A mixed-surface batch makes the review round harder rather than cheaper (the reviewer cannot hold one
+mental model), and a revert takes the innocent items with it. Same-surface + risk-sized is the whole
+rule. Full token-discipline list: [fable-method] §3b.
+
 **Large plan? Batch it.** A single brief
 for a >~4-checkbox plan returns a diff too big to audit well and lets the builder drift before you
 catch it. Instead delegate a risk-sized batch (smallest green set; novel/parity/money → small,

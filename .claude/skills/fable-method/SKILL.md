@@ -94,11 +94,66 @@ place: `.claude/skills/codex/ROUTING.md`. Never hardcode a model choice in a bri
 6. **Scheduled future verification** when the proof arrives later — a 20:05 batch gets a
    20:22 durable check ([daily-ops]); never claim an outcome that hasn't happened yet.
 
+**The measurement rules (2026-08-15 — a whole day of wrong conclusions bought these):**
+
+- ⚠️ **n=1 is not a measurement.** A single pass or a single fail tells you nothing about a
+  non-deterministic system. Both directions bit in one day: one lucky run carried a capability claim
+  into two merged ledger entries, and the ×5 rerun that corrected it was ITSELF wrong. Run it five
+  times or do not state a rate.
+- ⚠️ **Before recording a FAILURE, re-read your own prompt / query / filter.** If the answer you
+  wanted requires something you never supplied, **the probe is broken, not the subject.** Measured:
+  a model scored 0/5 for not flagging a row whose significance was nowhere in the data, under a
+  prompt that also said "do not speculate"; given the rule it scores 5/5. Same family as
+  `series='EQ'` hiding every BE-series symbol. **These fail in the ALARMING direction, which is why
+  they survive review — nobody argues with a negative result.**
+- ⚠️ **Write the rubric down BEFORE generating or querying anything**, and check the input supplies
+  everything the rubric grades. A rubric you hold privately is not a test; it is a guess about what
+  the subject will volunteer.
+- ⚠️ **A confident finding from a reviewer is not evidence.** Verify its sharpest claim yourself.
+  Measured the same day: an independent re-read confirmed one Major, while measuring the cold-start
+  latency a second Major's severity assumed (6–13 s, not the minutes supposed) downgraded it.
+
 **The surprising-result rule:** a number too good or too bad means suspect the harness
 before the strategy. Armed-gate backtests showing ~0 trades = data artifact; derived-history
 OI is muted by design; Minervini RS-CAGR "dropping" 43→34.6% was a bug-fix *correction*.
 Cross-check determinism: an unchanged sim re-runs **to the decimal** — if the control
 variant moved, the sim changed, not the market.
+
+## 3b. Token discipline — the levers, and the one that back-fired
+
+Context is the cost line, not turns. A long conversation is expensive because of what got PASTED
+into it, not how many times you spoke. Ranked by measured value:
+
+1. **Digest raw output before it enters context** — the single biggest lever. A docker-logs dump
+   8,400 → 320 tokens, a CI failure log 6,800 → 218, ≈**96% reduction** via a local model
+   ([local-model]). ⚠️ Then read the raw lines the summary points at; never cite the summary as
+   evidence. Measured reliability is per-lane, not global: CI logs 5/5, psql 5/5, service logs 5/5
+   on q3.8 but **3/5 on the 9b**.
+2. **Never paste a raw log, dump, or file wholesale into your own context** when a citation does the
+   job. `file:line`, a SQL query plus its result rows, one decisive log line. This is the same
+   discipline the honesty rules already demand for claims — it just happens to be the cheapest one.
+3. **Fan out reading to subagents.** A subagent's context is separate; only its conclusion returns.
+   Use it whenever answering means sweeping many files ([Explore]) — you keep the finding, not the
+   file dumps.
+4. **Batch same-surface items into ONE plan/build/review/PR.** N items pay one review round instead
+   of N. ⚠️ **Only on the SAME surface.** A mixed-surface batch makes the review round harder rather
+   than cheaper, and a revert takes the innocent items with it. Risk-size the batch (novel / parity /
+   money → small; mechanical → large) — the batching mechanics are in [delegated-ship].
+5. **Don't re-derive what the conversation already established.** Re-reading a file you have already
+   read, or re-litigating a decision the owner already made, is pure cost.
+
+⚠️ **The lever that MEASURED NEGATIVE — read this before reaching for a cheap generator.** Local
+code generation looked like an obvious saving and was not: brief ~500 tokens + reading the output
+~700 + **two mandatory red-proof cycles ~600** ≈ **1,800 tokens for a test suite that caught neither
+planted bug**, versus ~1,600 to write it correctly by hand. The generation was nearly free; the
+**verification needed to trust it was not, and it cannot be skipped, because the failure mode is a
+passing suite.**
+
+**The general rule that falls out: a cheap producer plus a mandatory verifier is only cheap if the
+verification is cheap.** Before adopting any "this will save tokens" step, price the verification it
+forces, not the step itself. Where verification is genuinely free — running a generated SQL and
+diffing its rows, or reading a commit message against a diff you were reading anyway — the saving is
+real. Where it costs two Maven cycles, it is not.
 
 ## 4. Decide what to do next
 

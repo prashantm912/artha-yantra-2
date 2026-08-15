@@ -2191,7 +2191,41 @@ silent no-op at OpenAPI 3.1). Full measurements, hardware ceiling and the still-
 memory topic `local-model-evaluation`; still open are whether ollama implements MTP,
 prefill-after-`<think>` via `"raw": true`, and whether a non-test build task behaves differently.
 
-⚠️ **BUILD MEASURED THE SAME NIGHT — ALSO DISPROVEN, AND THE BIGGER MODEL FAILS *GREEN*.** Fair probe,
+**N76 · OVERNIGHT 3-MODEL BENCHMARK (2026-08-15, owner-approved full rigor) — `qwen3.8:27b` IS THE
+FIRST OF SEVEN MODELS TO CLEAR THE PASS BAR; VERDICT = TWO MODELS, THREE LANES; CODER-30B DOMINATED.**
+ollama upgraded 0.32.11 → 0.32.13 (qwen3.8's 412 gate is a runtime-version floor, not the macOS gate);
+`qwen3.8:27b-q4_K_M` (17.7 GB dense) pulled in ~20 min. 10 probes × 3 models, rubrics locked before
+any generation, graded against ground truth: live-DB rows for SQL, **hidden JUnit tests written
+before the models saw the spec** for prod code, the real merged commit for drafting, red-proofs for
+test-authoring. Full grid in memory topic `local-model-evaluation`; headline rows:
+
+- **`qwen3.8:27b` cleared the pre-registered bar**: its dedupe suite caught the never-expires
+  red-proof (failures naming the expiry assertions) and it alone solved the moving-clock problem —
+  *"share the same lastSent map is not possible, so we use a mutable clock instead"*. Also: 8/8 on
+  hidden-test prod code, exact-rows SQL that dodged the `AT TIME ZONE '+05:30'` inversion trap, 7/8
+  zero-fabrication doc summary, verified-claims commit message, 3/3 triage. Cost: **2.6 tok/s** —
+  unattended-lane only.
+- **Review stays disproven at the CLASS level — 7 models, 0/2 every time** — but q3.8's failure is
+  new in kind: it FOUND the H18 holiday hole mid-reasoning and **talked itself out of it**, shipping
+  a false multi-day claim instead, with ~2,400 tokens of chain-of-thought leaking past `think:false`
+  into an answer capped at 6 sentences. The gap moved from perception to judgment; the verdict didn't.
+- **`qwen3.5:9b` is fast (43.3 tok/s on 0.32.13) and UNSTABLE**: it failed the psql probe it had
+  passed on 08-14 (identical file, same temp), failed test-authoring a third different way
+  (`Thread.sleep(301*1000)` in a unit test), and its prod code hung the JVM in a `while(true)`.
+  Interactive triage + commit drafts only; ~85% single-run reliability; never let it write code.
+- **`qwen3-coder:30b` won NOTHING outright**: slower than the 9b, no capability q3.8 lacks, worst
+  reviewer (6 false), and its build failure mode is the dangerous false-green kind (both red-proofs
+  stayed green AGAIN — Thursday's result reproduced exactly). **Delete recommended; owner decides.**
+  One redemption worth keeping: 8/8 on prod code — which answered the open question: prod-code-from-
+  tight-spec is a genuinely easier skill than test design (the compiler + spec carry it).
+- **Grading-pipeline honesty**: while grading I walked into the repo's own recorded `-Dtest=A+B`
+  false-green trap, and a silent extraction crash nearly graded one model's suite against another's
+  stale files. The graders have the same success-shaped-nothing failure modes as the graded.
+
+Owner's standing instruction unchanged: **nothing wired into the workflow yet.**
+
+⚠️ **BUILD MEASURED THE SAME NIGHT (2026-08-14) — the first-round result the benchmark above then
+refined: ALSO DISPROVEN at that point, AND THE BIGGER MODEL FAILS *GREEN*.** Fair probe,
 same discipline: `ScalpAlertDedupe` (42 lines, pure logic, injected `Clock`, no existing test), class
 source + repo conventions handed over, **no hint at which behaviours matter**, rubric fixed BEFORE
 running. `qwen3-coder:30b` emitted 4 tests that compile, pass checkstyle and go **4/4 GREEN with

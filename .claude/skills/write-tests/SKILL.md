@@ -6,7 +6,7 @@ description: Author tests correctly in our harness — *IntegrationTest naming, 
 # Write Tests
 
 How to author tests that actually run and actually protect behavior in this repo. Use it whenever a
-change adds new logic (the `codex-build` testing gate hands off here), or when backfilling coverage.
+change adds new logic (the builder testing gate hands off here), or when backfilling coverage.
 
 ## Non-negotiables (get these wrong → silent skips or a broken gate)
 
@@ -59,4 +59,8 @@ wiring. In-container `now()`/`::date` is UTC — filter time by explicit `+05:30
 ## Handoff
 
 Report the gate line the reviewer expects: `lint: clean | typecheck: clean | tests: N passed (M new)`.
-Then `codex-code-review` (or `adversarial-review` for parity/money) → Architect audit → merge.
+Then `claude-review` — or `codex-code-review` on a rationed slot if the change is money/parity/
+migration/live-engine, plus `adversarial-review` — → Architect audit → merge.
+
+⚠️ **A test written by a LOCAL model does not count until it is red-proofed** — one emitted a 4/4-GREEN
+suite that detected neither of two planted bugs. See the `local-model` skill.

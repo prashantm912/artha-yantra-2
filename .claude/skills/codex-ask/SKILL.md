@@ -3,6 +3,11 @@ name: codex-ask
 description: Grounded cross-vendor second opinion from Codex on any question — architecture, debugging, a conclusion to red-team — advisory, never gating
 ---
 
+> # ⚠️ DO NOT SPEND A RATIONED SLOT ON AN ADVISORY ASK (owner, 2026-08-15)
+> Under the **$20/month tier** the budget is reserved for tier-gated pre-merge review. `codex-ask` is
+> advisory and never gating, so it is the first thing to cut. Use a fresh Opus subagent for a second
+> opinion, or skip it. Full rules: `.claude/skills/codex/ROUTING.md`.
+
 # Codex Ask
 
 Free-form second opinion from Codex CLI on any matter — an architecture call, a debugging hypothesis,

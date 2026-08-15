@@ -31,7 +31,7 @@ idle and pay a reload on the next call.
 |---|---|---|---|
 | **CI failure log** → summary | **5/5** | **5/5** | ✅ either. Biggest token win; surefire output is near-extractive |
 | **psql operational dump** | **5/5** | 5/5 (3/5 terse) | ✅ either — **but only with the domain rule stated in the prompt**, see PROMPTING.md |
-| **service log (docker logs)** | **3/5** | **5/5** | ⚠️ q3.8 only. The 9b dropped the batch summary twice and misread a real number once |
+| **service log (docker logs)** | 3/5 terse → **5/5 structure-marked** | **5/5** | ✅ either — **but the 9b needs the CATEGORIES named in the prompt** (service lifecycle / load health / actions taken / risk refusals / warnings-aggregated / batch tally). Terse, it drops the batch summary. See PROMPTING.md |
 | **doc summarization** | ~6/8 | **7/8, zero fabrication** | ✅ q3.8 |
 | **SQL drafting** | partial (ignored format) | **exact rows, dodged the IST trap** | ✅ q3.8, then RUN IT and diff the rows |
 | **commit-message draft** | ✅ most specific of 3 | ✅ | ✅ either — you read the diff anyway |

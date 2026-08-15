@@ -135,4 +135,52 @@ public class MonitorSchedulingConfig {
     scheduler.setDaemon(true);
     return scheduler;
   }
+
+  /**
+   * A single daemon thread owned solely by {@code BhavcopyCloseCanary.prefetchPopulation} — the
+   * 16:05 IST pass that fetches the close canary's OWN comparison population (the NIFTY 200
+   * reference list) through the rate-limited Kite historical path.
+   *
+   * <p><b>Why it cannot sit on the default pool.</b> That pool is ONE thread shared by ~32
+   * scheduled methods, including the entire 18:45→18:58 evening chain (bhavcopy → NSE EOD →
+   * screens → context → data-quality → breadth → buyable → close canary), and the machine is hard
+   * off at 19:00. This pass is 202 sequential calls paced by the {@code kite-historical} limiter
+   * at 3 req/s — ~71 s measured. But its WORST case is not 71 s: every call goes through {@code
+   * KiteCallExecutor}'s Retry (4 attempts, backoff to 8 s) over a 60 s HTTP read-timeout, so a Kite
+   * brown-out makes this pass arbitrarily long. Sharing the default pool, an overrun starting at
+   * 16:05 would still be holding the only thread at 18:45 and would push the bhavcopy ingest and
+   * every screen behind it off the end of the evening — trading the whole batch for a data-quality
+   * check. Its own thread means an overrun can only ever starve itself.
+   *
+   * <p><b>Why not {@link #monitorTaskScheduler()}.</b> Same fence as {@link
+   * #barFlushTaskScheduler()} and {@link #oiCaptureTaskScheduler()}: that pool is reserved for pure
+   * liveness DETECTORS. This is a WRITE path (Kite fetch + {@code upsertAuthoritativeAll}), so
+   * parking it there could starve {@code FeedWatchdog.check} and {@code DataHealthCanary.sweep}.
+   *
+   * <p><b>The 16:05 cron is not the only caller of that pass.</b> {@code
+   * BhavcopyCloseCanary.catchUpPopulation} replays a MISSED pass at boot, and it runs on {@code
+   * BhavcopyStartupCatchup}'s own one-shot thread rather than here. ⚠️ The reason is NOT that it
+   * must precede that bean's bhavcopy projection — an earlier version of this note said so, and
+   * {@code BhavcopyStartupCatchup} (:50, :89-93) now says the opposite outright: nothing orders the
+   * two, any ordering is an accident of timing, and the wait that used to enforce it was deleted
+   * because the provenance CASE makes bhavcopy-first harmless. The surviving reason is the other
+   * half: queueing the replay behind this single-thread scheduler would put a hung 16:05 cron in
+   * front of it. The two can only overlap on a boot landing inside the same second as the cron, and
+   * the pass is idempotent (cache-first upserts), so the overlap costs duplicate fetches and
+   * nothing else.
+   *
+   * <p><b>The canary's own {@code sweep()} deliberately does NOT move here.</b> Serialising the
+   * 18:58 evaluation behind the 16:05 fetch on one thread would guarantee a complete population —
+   * and would also mean a HUNG fetch silently cancels the evaluation entirely. A short population
+   * evaluated loudly (the coverage floor turns it YELLOW) beats no evaluation at all; the sweep is
+   * two SQL reads and does not need protecting.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler closeCanaryTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("close-canary-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
 }

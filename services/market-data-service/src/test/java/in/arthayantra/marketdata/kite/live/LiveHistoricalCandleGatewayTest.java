@@ -120,6 +120,89 @@ class LiveHistoricalCandleGatewayTest {
             .withQueryParam("continuous", equalTo("0")));
   }
 
+  /**
+   * ⚠️ Pins the REMOTE half of the accident that keeps {@code BhavcopyCloseCanary}'s comparison
+   * population intact.
+   *
+   * <p>{@code candles} has {@code source} outside its primary key and {@code upsertAuthoritativeAll}
+   * keeps the EXISTING source when the incoming bar matches on every field INCLUDING {@code oi}. The
+   * bhavcopy projection writes {@code oi = null}; this gateway asks for {@code oi=1} and a cash
+   * equity answers with a literal {@code 0}. {@code NULL IS NOT DISTINCT FROM 0} is FALSE, so a Kite
+   * bar written over an OHLCV-identical bhavcopy bar takes the Kite source and stays in the canary's
+   * population. {@code
+   * CandleCaggIntegrationTest#kiteOverBhavcopyTakesTheKiteSourceBecauseOnlyOneSideEncodesNoOiAsZero}
+   * pins the WRITE half — but it hand-seeds the Kite side as {@code 0L}, so it assumes exactly what
+   * this test measures: that a wire {@code 0} survives the whole decode path as {@code 0} rather
+   * than being normalised to null somewhere between {@link
+   * in.arthayantra.marketdata.kite.wire.KiteCandle} and the port record.
+   *
+   * <p><b>⚠️ The residual gap, stated because a guard that reads wider than it is would be worse
+   * than none.</b> This pins OUR mapping against a canned response; it cannot pin KITE's choice to
+   * SEND the seventh element. If Kite ever omitted it for cash equities the second half of this test
+   * shows what happens — {@code oi} decodes to null, {@code NULL IS NOT DISTINCT FROM NULL} is TRUE,
+   * and a value-identical Kite bar would silently KEEP {@code source='BHAVCOPY'}, so the canary
+   * would lose precisely the bars that agree perfectly and surface it as nothing louder than a
+   * slightly short {@code compared} count. The daily {@code ContractCanary} does not close that: its
+   * {@code historical} manifest entry stops at {@code data.candles: array} (no per-candle arity, no
+   * {@code oi}), its probe is the NIFTY 50 INDEX on the {@code minute} interval and sends no {@code
+   * oi=1} at all, and its path resolver has no array-index syntax — so pinning the wire arity there
+   * needs a new equity/day/{@code oi=1} probe plus resolver support, which is its own change.
+   */
+  @Test
+  void cashEquityDailyBarKeepsAZeroOpenInterestRatherThanNulling() {
+    // A cash equity's 1d page as Kite returns it under oi=1: seven positions, the last a literal 0.
+    wireMock.stubFor(
+        get(urlPathEqualTo("/instruments/historical/408065/day"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(
+                        """
+                        {"status":"success","data":{"candles":[
+                          ["2026-02-03T00:00:00+0530",100.00,101.00,99.00,100.50,500,0]
+                        ]}}
+                        """)));
+
+    List<HistoricalCandleGateway.Candle> candles =
+        gateway("EQ", () -> Optional.of("test-token"))
+            .fetch(new InstrumentKey("NSE", "RELIANCE"), "1d", FROM, TO);
+
+    assertThat(candles).hasSize(1);
+    assertThat(candles.get(0).oi())
+        .as(
+            "a wire 0 must reach candles.oi as 0, not null — null is what the bhavcopy projection"
+                + " writes, and matching it would strand OHLCV-identical Kite bars at"
+                + " source='BHAVCOPY', outside BhavcopyCloseCanary's comparison population")
+        .isEqualTo(0L);
+    wireMock.verify(
+        getRequestedFor(urlPathEqualTo("/instruments/historical/408065/day"))
+            .withQueryParam("oi", equalTo("1")));
+
+    // The counterfactual, so the guarantee's CONDITION is visible next to the guarantee: an omitted
+    // seventh element decodes to null and the provenance flip stops happening. Nothing in this repo
+    // can stop Kite doing that; this is the shape to look for if `compared` ever drifts down.
+    wireMock.resetAll();
+    wireMock.stubFor(
+        get(urlPathEqualTo("/instruments/historical/408065/day"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(
+                        """
+                        {"status":"success","data":{"candles":[
+                          ["2026-02-03T00:00:00+0530",100.00,101.00,99.00,100.50,500]
+                        ]}}
+                        """)));
+
+    assertThat(
+            gateway("EQ", () -> Optional.of("test-token"))
+                .fetch(new InstrumentKey("NSE", "RELIANCE"), "1d", FROM, TO)
+                .get(0)
+                .oi())
+        .as("an ABSENT seventh element is the hazard shape — it decodes to null, not 0")
+        .isNull();
+  }
+
   @Test
   void optionsFetchWithContinuousButFutNeverDoes() {
     wireMock.stubFor(

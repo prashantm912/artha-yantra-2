@@ -66,8 +66,9 @@ When triggered, the plan is written by a **Fable 5 subagent** (Agent tool, `mode
 loop writes it itself on a capacity error — don't stall the item). The point is a *different
 reasoning style applied before code exists*: decomposition, design forks resolved against real
 code/DB evidence, and the "is this already built?" check that has killed whole items. A plan that
-meets the bar then goes through `codex-plan-review` — cross-vendor by construction, since the
-planner is Anthropic and the reviewer is Codex.
+meets the bar then goes through a plan-review round — `codex-plan-review` if a rationed slot is free
+(reviewing a PLAN is the cheapest leverage in the pipeline: one call, saves a whole build), else an
+Opus subagent on a FRESH thread, which is same-vendor — give it a distinct lens and say so.
 
 A plan is DONE when it names, per unit: the files/seams it touches, the verify check that must go
 from red to green, the parity/golden exposure, the migration number if any, and the open questions

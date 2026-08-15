@@ -12,8 +12,8 @@ fixes small, merges, deploys, verifies, records. Outcome log + trap details: mem
 topic `opus-delegation-standard`.
 
 **Model routing (owner revision 2026-07-25):** the main loop is **Opus 5** (orchestrator + final
-gate). The builder below is **Codex first** (`codex-build`); this Agent-subagent path is the
-fallback — **Sonnet 5** for mechanical work, **Opus** whenever the surface is parity / money / exit
+gate). Codex is RATIONED to REVIEW only (2026-08-15), so this Agent-subagent path is the ONLY builder lane:
+**Sonnet 5** for mechanical work, **Opus** whenever the surface is parity / money / exit
 doctrine / migrations / the live engine. Items meeting the plan bar (HOLD, migration, money/parity,
 >~3 files) get a **Fable 5** plan first ([fable-method] §2a). Full table: `.claude/skills/codex/ROUTING.md`.
 
@@ -43,7 +43,7 @@ resolve rebase conflicts as a field UNION when both sides are additive).
 A builder that stops mid-verify ("waiting for the build result") resumes cleanly with
 one SendMessage nudge: "check the output, finish, full receipt."
 
-**Large plan? Batch it** (the Opus-subagent analog of `codex-build`'s batched mode). A single brief
+**Large plan? Batch it.** A single brief
 for a >~4-checkbox plan returns a diff too big to audit well and lets the builder drift before you
 catch it. Instead delegate a risk-sized batch (smallest green set; novel/parity/money → small,
 mechanical → large), audit its delta, then SendMessage the next batch with what you fixed + why as
@@ -72,13 +72,19 @@ Depth tiered by risk — docs/mechanical = diff read; engine/money/parity = full
 | FE page/component | 1 × ui-a11y-reviewer |
 | alert-only ops code, docs | 0 extra — main-loop audit suffices |
 
-**Cross-vendor gate (review router, `.claude/skills/codex/ROUTING.md`):** the builder here is an Opus
-subagent (Anthropic), so for every non-trivial change ALSO run `codex-code-review` (Codex = the opposite
-vendor) — the tier lenses above are same-vendor (Opus) and do not satisfy the cross-vendor requirement on
-their own. It slots into ROUTING's canonical order (testing gate → cross-vendor review → Architect audit
-= final gate → tiered promotion); the receipt-vs-diff check in §2 is a fast sanity pass, the Architect's
-audit is the final gate after review. Codex down → record the same-vendor loss and lean on the lenses +
-audit. Trivial/docs → skip.
+**Review gate (review router, `.claude/skills/codex/ROUTING.md`):** pick the reviewer by TIER, not by
+who built it. **money · parity · exit doctrine · migrations · live engine → `codex-code-review`**, a
+rationed slot, PRE-merge (hold the item with `Cross-vendor review: PENDING (awaiting rationed Codex
+slot)` if none is free; two missed slots → ship same-vendor and record it). **Everything else →
+`claude-review`** (Opus, FRESH thread, DISTINCT lens) — same-vendor, so record that in the verdict
+line rather than letting "reviewed" imply what it used to. Optionally seed either round with local
+`candgen.py` candidates — a different model family, but a confirmation net only, never a gate.
+
+⚠️ **The tier lenses above are NOT a review round.** They are audit depth; the review is a separate
+subagent on a fresh thread. Running the lenses and calling it reviewed collapses two gates into one —
+the failure this doctrine exists to prevent. It slots into ROUTING's canonical order (testing gate →
+review round → Architect audit = final gate → tiered promotion); the receipt-vs-diff check in §2 is a
+fast sanity pass, the audit is the final gate after review. Trivial/docs → skip, and say so.
 
 Reviewers are REFUTERS with one lens each, spawned in ONE message. HOLD reviews must
 trace **operational loops** (who retries, what state is already committed, which cron
@@ -99,7 +105,16 @@ with tier + review tally + test evidence.
 ```
 Cross-vendor review: APPROVED | REQUEST_CHANGES (resolved) | NEEDS_REWORK (resolved) | SKIPPED (<reason>)
 ```
-plus the reviewer's vendor/model. `SKIPPED (<reason>)` is FIRST-CLASS — ROUTING.md legitimately
+plus the reviewer's vendor/model. ⚠️ **The literal string `Cross-vendor review:` is the greppable
+anchor `ci-review-verdict.yml` matches — keep it EXACTLY, even though cross-vendor review no longer
+exists.** Under rationing there are three honest forms — pick by what actually happened:
+```
+Cross-vendor review: APPROVED — gpt-5.6-sol (OpenAI)                # a slot was spent: genuine cross-vendor
+Cross-vendor review: PENDING (awaiting rationed Codex slot)         # money/parity on hold — red verdict is the DESIGN
+Cross-vendor review: SKIPPED (clean tier — same-vendor Opus review on a fresh thread, cross-vendor not spent)
+```
+Never write `APPROVED — <an Anthropic model> (Anthropic)` and let it read as a cross-vendor pass.
+`SKIPPED (<reason>)` is FIRST-CLASS — ROUTING.md legitimately
 allows skipping trivial/docs, and *a rule that cannot express the legitimate case gets ignored in
 the illegitimate one*. The verdict lives ONLY in `state/*.review.txt`, which is **gitignored** and
 dies with the worktree — **the PR body is the only durable record**. Verified 2026-07-17: of three

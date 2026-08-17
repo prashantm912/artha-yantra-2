@@ -631,7 +631,17 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
 - ⚠️ **BOTH equity source tables are RETRO-MUTABLE — a persisted decision row CANNOT be reproduced
   from current data** (found 2026-08-03, and it silently invalidates A-vs-B measurements). `candles`
   is retroactively rewritten (one symbol's ENTIRE July series was rewritten on 2026-07-31), and
-  `nse_eod_bhavcopy` was **still gaining rows for April–June trade dates months later**. So comparing
+  `nse_eod_bhavcopy` was **still gaining rows for April–June trade dates months later**.
+  ⚠️ **THE TWO HALVES ARE DIFFERENT MECHANISMS AND THIS BULLET USED TO CONFLATE THEM (corrected
+  2026-08-17, N30).** `candles` genuinely MUTATES — an existing bar's value changes from A to B.
+  `nse_eod_bhavcopy` does NOT: measured on the 2026-08-10 event that prompted this, all **13**
+  historical trade dates it wrote had **ZERO rows beforehand** and gained 40,862 — **absence
+  becoming presence, never a rewrite.** **The warning is unchanged and still binding** (a screen that
+  ran when 2026-04-30 was missing saw a different world from one run today, so a persisted decision
+  still cannot be reproduced), but the DETECTION differs and that is why the distinction earns its
+  place: a bhavcopy gap is visible as a per-date row COUNT, while a `candles` rewrite is invisible
+  unless you compare VALUES. Do not reach for a value-diff on bhavcopy or conclude `candles` is safe
+  because row counts match. So comparing
   "what the screen decided then" against "what the data says now" compares two different worlds and
   reports the difference as a divergence. **Any cross-table or historical A-vs-B comparison must gate
   on `fetched_at`** — and note `fetched_at` is an UPSERT timestamp, not first-seen, so it bounds

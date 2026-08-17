@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.nse.analytics;
 
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
+import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -14,8 +15,21 @@ import org.springframework.stereotype.Service;
 
 /**
  * oipulse "Delivery Data": one stock's daily delivery quantity / % time-series over a relative period
- * (the most recent N trading sessions) from the NSE EQ-series bhavcopy. % delivery is the institutional
- * conviction read; % LTP change and the day range ride along. 422 DATA_GAP when the symbol has no rows.
+ * (the most recent N trading sessions) from the NSE cash-equity bhavcopy ({@link CashEquityUniverse},
+ * i.e. EQ + BE). % delivery is the institutional conviction read; % LTP change and the day range ride
+ * along. 422 DATA_GAP when the symbol has no rows.
+ *
+ * <p><b>BE rows carry no delivery figures at all</b>, and that is a property of the NSE feed, not a
+ * gap in ours: measured 2026-08-17, ZERO of 54,384 BE rows in the table carry either {@code deliv_per}
+ * or {@code deliv_qty} (the schema documents both as "null for non-deliverable rows", V014:18-19).
+ * Such a row is therefore served with {@code deliveryPct}/{@code deliveryQty} as JSON <b>null</b> —
+ * never 0, because "0% went to delivery" is a factual claim about the tape whereas the truth is that
+ * NSE published nothing. The row still carries a real OHLC/volume series, which is why it is served
+ * rather than withheld; the UI renders the absent cells as an em-dash
+ * ({@code DeliveryDataPage.tsx:65}).
+ *
+ * <p>⚠️ This used to filter {@code series = 'EQ'}, so every BE symbol hit the 422 below despite
+ * having rows — an owner-visible outage on 7 of the 32 symbols the swing books trade (ledger H24).
  */
 @Service
 public class EquityDeliveryService {
@@ -54,13 +68,13 @@ public class EquityDeliveryService {
             "SELECT trade_date, open_price, high_price, low_price, close_price, prev_close, "
                 + " deliv_per, deliv_qty, ttl_trd_qnty "
                 + "FROM nse_eod_bhavcopy "
-                + "WHERE symbol = ? AND series = 'EQ' "
+                + "WHERE symbol = ? AND " + CashEquityUniverse.SERIES_PREDICATE + " "
                 + "ORDER BY trade_date DESC LIMIT ?",
             (rs, n) -> mapRow(rs),
             symbol,
             days);
     if (rows.isEmpty()) {
-      throw new ApiException(422, ErrorCodes.DATA_GAP, "no EQ bhavcopy for symbol " + symbol);
+      throw new ApiException(422, ErrorCodes.DATA_GAP, "no EQ/BE bhavcopy for symbol " + symbol);
     }
     return new Delivery(symbol, days, rows);
   }

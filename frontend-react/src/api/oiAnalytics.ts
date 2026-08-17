@@ -756,7 +756,9 @@ export function useEquityReturns() {
 }
 
 /** Equity Delivery Data (oipulse): one stock's daily delivery series over the most recent N sessions.
- * 422 DATA_GAP (symbol has no EQ bhavcopy) → null → the page renders its empty state. */
+ * 422 DATA_GAP (symbol has no EQ/BE bhavcopy) → null → the page renders its empty state.
+ * BE-series rows carry deliveryPct/deliveryQty as null — NSE publishes no delivery figures for that
+ * series — which the table renders as an em-dash rather than 0. */
 export function useEquityDelivery(symbol: string | null, days: number) {
   return useQuery({
     queryKey: ['equity', 'delivery', symbol, days],

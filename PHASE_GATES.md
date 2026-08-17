@@ -199,6 +199,32 @@ subset is CI-enforced).
 > (`revisit-scalper-budget-inr-2026-08-12`). **H2** (18 live `-pe` strategies, 0 signals since 07-21
 > against 69 non-PE) needs no new data — only someone to read the query it already has.
 
+> **CURRENCY UPDATE 2026-08-17 — READ THIS, THEN GO STRAIGHT TO THE LEDGER.** These currency blocks
+> had stopped at 2026-08-02, i.e. **15 days stale** — long enough for a reader to take a false
+> picture from them before reaching the redirect at the top of this section. **The one-hop
+> destination is the `📍 CURRENT STATE` block at the top of
+> `docs/superpowers/plans/2026-07-02-remaining-items.md` §0**: dated, says what is deployed live and
+> what is in flight, and carries an instruction to be updated at every session close. **Do not
+> reconstruct current state from the blocks above — they are an as-built log and they are ALLOWED to
+> age. That is the design, not a defect; the defect is only ever a missing redirect.**
+>
+> ⚠️ **Two claims in the 2026-08-02 block above are now FALSE. Corrected here rather than edited in
+> place, because a log keeps its original wording:** **(1) H2 is ANSWERED — the `-pe` scalpers DO
+> fire.** 26 signals across 4 slugs, first fire **2026-08-11 11:06 IST**, against the zero that block
+> records. #959 moves from UNFALSIFIED to VALIDATED, and the 2026-08-03 *"wait for a bearish 60m
+> regime, do not loosen"* call was right — the gate opened on its own within 8 sessions.
+> **(2) H1's session-liveness heartbeat is ARMED AND PROVEN**, observed pinging live at 18:53:58 IST
+> on 2026-08-17.
+>
+> **Frontier as of 2026-08-17:** the active build program is ledger row **H24** — a 30-site
+> `series='EQ'` sweep, 13 defects, **1 fixed + deployed + live-probed**, 12 planned as PR-2..6 with
+> the migration-bearing unit last. Five items are held for a rationed cross-vendor slot on
+> **2026-08-20**: **#1283 → #1376 → #1354 → H22 → H23**, and the owner ruled all five QUEUE rather
+> than relaxing to same-vendor. ⚠️ **H9 gained its first LIVE MONEY instance** on 2026-08-17 — a real
+> swing `STOP_LOSS` priced **1.32% off the official close** (₹232.70 on 65 shares) and **in the
+> book's favour**, so it OVERSTATES swing P&L: the direction that flatters an E1 reliability verdict
+> rather than alarming it.
+
 **Re-platformed 2026-06-19 to the OpenAlgo + React master plan.**
 `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` §16.1 is now the
 forward-work authority (Phases 0–6). The legacy **Stage A–G** system in the sections below is the

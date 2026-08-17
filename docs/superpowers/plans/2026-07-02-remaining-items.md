@@ -12,6 +12,50 @@ the two 2026-07-02 audits (both fix queues fully closed) and the open-PR/issue l
 
 ## 0. Work queue (consolidated 2026-07-10; 2-pass-audited same day)
 
+### 📍 CURRENT STATE — as of 2026-08-17 ~19:20 IST (update this block at every session close)
+
+**Read this first, then the enumeration recipe below.** This block answers *"what is in flight right
+now"*, which the recipe deliberately does not.
+
+**Live stack:** healthy. `market-data` carries **#1394** (`9b3a52e7`, deployed 15:36 IST, live-probed).
+Every other service is on its pre-existing image — **no other deploy is pending.** The Kite session
+is valid to 2026-08-18 06:00 IST; it will need the owner's daily re-login tomorrow morning.
+
+**Held for the Codex slot on 2026-08-20 — STRICT ORDER, and the owner ruled 2026-08-17 that ALL
+FIVE queue rather than relaxing to same-vendor:**
+
+| # | item | state |
+|---|---|---|
+| 1 | **#1283** swing coverage gate | inert (OBSERVE_ONLY); review the delta since `266d37ae` only |
+| 2 | **#1376** swing boot catch-up | inert (`ARTHA_SWING_BOOT_CATCHUP_ENABLED` absent); the M1/M2 fix at `5e83980d` is unreviewed |
+| 3 | **#1354** evening-chain canary | **build COMPLETE + green** on `feat/market-data-evening-chain-status-review-fixes` @ **`e7aa0e89`** (pushed, PR head untouched — land with `git push origin e7aa0e89:feat/market-data-evening-chain-status`). ⚠️ **TWO OWNER DECISIONS BLOCK MERGE** — 3-of-5 tail coverage, and the repo's first unauthenticated cross-service WRITE endpoint. Owner deferred both to Thursday *with the review in hand*. Tier is NO LONGER clean |
+| 4 | **H22** risk-refusal-as-transient | unbuilt |
+| 5 | **H23** catch-up overwrites settle row | unbuilt, fix shape undecided |
+
+⚠️ **Consequence the owner accepted explicitly: the queue drains at whatever the $20 tier allows,
+and that number is STILL UNMEASURED. Record the first slot's cost on 2026-08-20.** If it clears only
+one or two, bring the throughput problem back rather than quietly relaxing the rule.
+
+**Active build program — H24 (`series='EQ'` sweep), owner: "fix the whole set":**
+**1 of 13 done** (PR-1 `EquityDeliveryService`, #1394, deployed + live-probed on 4 held BE symbols).
+12 remain as PR-2..6 — `RegimeService` → `BreadthService` → `EquityContextRepository` →
+data-quality → `equity_breadth_daily`+**V058** (migration-bearing, LAST, gets an adversarial round).
+Pace agreed: sequential, merge through the day, **deploy as one batch after 15:30**. ⚠️ Two measured
+traps the next builder MUST carry, both in the H24 row: **NULLs sort FIRST in Postgres `DESC`** (so
+`BreadthService:92` needs a guard, not an exemption — and `avg()` ignores NULLs so two sites widen
+with ZERO numeric change), and **`equity_breadth_daily` spans 214 days vs `backfill-days:180`**, so
+the planned TRUNCATE loses ~34 days unless that config is raised first.
+
+**Owner-requested for 2026-08-18:** trace **H25** (the 18:57 sell-decision sweep left no log line and
+no row — distinguish "silent no-op" from "never ran"; do NOT guess).
+
+**Standing operating constraints confirmed 2026-08-17:** deploys wait until **after 15:30 IST**;
+clean-tier PRs **merge on green** and report after; money-path items do not merge without a slot.
+
+**Newest defects, all found 2026-08-17 while investigating something else:** H22, H23, H24, H25, and
+H9's first live money instance (a real `STOP_LOSS` priced 1.32% off the official close, **in the
+book's favour** — it overstates swing P&L, the direction that flatters an E1 verdict).
+
 ### ⚠️ How to enumerate the queue in a fresh session — READ FIRST
 
 **A top-down read of the §0 tables alone is NOT sufficient and has already produced a wrong

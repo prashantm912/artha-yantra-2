@@ -252,15 +252,29 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   `GET /api/v1/signal-rejections/dot-health` (per-dot gate-input liveness),
   `GET /api/v1/market/health/ingest` + the `/data-ops/ingest-health` page (per-source EOD ingest
   coverage over `marketdata.ingest_runs`, #686/#699), and the scheduled canaries (ingest-coverage
-  08:45, notifier-health 08:30, paper reconcilers 21:15, PartialBucketCanary every 60s — all IST)
-  — check these BEFORE hand-digging a "feed looks dead" / "batch missed" report.
-  **Measured evening order, 2026-08-04** (do NOT quote the YAML cron defaults — they differ from
-  what is deployed, and reading `${artha.minervini.cron:0 50 19 * * MON-FRI}` as "19:50" put a wrong
-  time into four separate reports the same night): **19:30** CA refresh rides the nightly BHAVCOPY
-  job · **19:31** `MINERVINI_SCREEN` + `MANAS_SCREEN` · **19:35** `MINERVINI_PLANE_DIVERGENCE`
-  (source `MINERVINI_SCHEDULER`) · **19:45** market-context · **19:50** data-quality · **19:55**
-  equity-breadth · **21:15** paper reconcilers. Read `marketdata.ingest_runs` +
-  `marketdata.canary_runs`/`strategy.canary_runs` for the real times, never the defaults.
+  08:45, notifier-health 08:30, paper reconcilers 08:50/08:52, PartialBucketCanary every 60s — all
+  IST) — check these BEFORE hand-digging a "feed looks dead" / "batch missed" report.
+  **Measured schedule, re-read 2026-08-17 from `docker inspect` — #1358 (`34a7d39c`) MOVED EVERY JOB
+  INSIDE 08:00–19:00 IST and the reconcilers to MORNING.** The block that used to sit here listed
+  19:30–21:15 and was ~13 days stale; it had itself been added as a "measured" correction, which is
+  exactly why a dated cron list in a doc cannot be trusted — **re-read `docker inspect` every time
+  the value is load-bearing** (this stale block reached a #1354 review comment and would have driven
+  a whole `expectedNotBefore` table off wrong numbers). Never quote the YAML `${ENV:default}` values;
+  they differ from what is deployed.
+  Morning: **08:30** swing-canary + notifier-health · **08:35** swing-catchup (⚠️ the ONLY path that
+  takes swing ENTRIES — see below) · **08:45** ingest-coverage · **08:50** paper-reconciliation ·
+  **08:52** past-expiry-recon. Afternoon: **16:00** minervini-swing · **16:02** manas-swing ·
+  **16:05** bhavcopy-close-prefetch. Evening: **18:20** upstox-canary · **18:45** bhavcopy-eod ·
+  **18:46** nse-eod · **18:47** minervini-screen · **18:48** manas-screen · **18:49** market-context ·
+  **18:50** data-quality · **18:51** equity-breadth · **18:53** buyable-alerts · **18:54**
+  heartbeat-swing · **18:55** graduation · **18:56**/**18:57** insights · **18:58** bhavcopy-close.
+  ⚠️ **The 16:00 swing batch is an EXITS-ONLY pass and legitimately reports 0 candidates** — the
+  screens that feed it run at 18:47/18:48, so the entries pass is the NEXT MORNING's 08:35 catch-up
+  (`SwingBatchCatchUp:276` guards on `hasRunWithEntries`, not `hasRun`, precisely so the 16:00 marker
+  cannot suppress it). A `swing_catchup_runs` row missing before 08:35 is **not** evidence of a
+  missed batch — reading it that way produced a false "Friday's screens were never consumed" alarm
+  on 2026-08-17. Read `marketdata.ingest_runs` + `marketdata.canary_runs`/`strategy.canary_runs` for
+  the real times, never the defaults.
 - **3m reads are a read-time 1m→3m rollup** (`CandleRepository.rangeRolledFromOneMinute`, #365): the
   live SignalEngine 3m-primary depends on this rollup. The unused `candles_3m` cagg + its refresh
   policy were DROPPED (V027, #427) — 3m has no materialized view; only the 1m base feeds it.

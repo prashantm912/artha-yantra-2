@@ -809,7 +809,36 @@ Run in order; each answers one question. Canned SQL in §6.
     extended to routine deploys — or hold the deploy until after ~19:00 when the post-market run
     has grepped them. A findings file written after a log-loss must carry the caveat prominently:
     absence of log evidence is not evidence of a quiet session.
-38. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+38. **The engine-reload path runs ON the signal-eval thread and blocks on market-data HTTP — a
+    market-data deploy or outage starves evaluation, and the subscriber watchdog's `eval-stall`
+    ERROR is the detector** (added 2026-08-17, first live measurement) — `SignalEngine.reload`
+    (reached from `drainReloadOnly` on the `signal-eval` thread — deliberate, so config swaps land
+    at bar boundaries) calls `FuturesUniverseResolver.resolve` → a synchronous RestClient call to
+    market-data. On 2026-08-17, three consecutive reloads each took ~70–80 s (normally sub-second
+    "unchanged") in exactly the window market-data was being recreated for a post-close deploy
+    (`engine_reloads` 15:26:58 / 15:28:16 / 15:29:23 IST vs the new container's `StartedAt`
+    15:36:22); the watchdog fired `eval-stall — bars arriving but not evaluated for 180s (receipt
+    19s old)` at 15:28:20 **with a thread-stack capture showing the WAITING HTTP frame**, and a
+    clean sub-second reload followed at 15:37:15 once market-data was healthy. Zero trading impact
+    (post-close; every scalper window shut by 15:21) — but the same sequence mid-session is an
+    evaluation outage for the deploy's duration, which is the measured mechanism behind the
+    standing "no mid-session deploys" proposal. Standing check on any session that overlaps a
+    deploy or a market-data restart:
+    ```sql
+    -- eval-stall forensics: a row here is strong FAIL evidence (absence proves nothing, §4.3)
+    SELECT occurred_at AT TIME ZONE 'Asia/Kolkata', kind, left(detail,140)
+    FROM strategy.subscriber_health_events WHERE occurred_at >= :d0 ORDER BY 1;
+    -- reload cadence: consecutive rows spaced ~60–90 s apart (instead of one-off) fingerprint a
+    -- slow resolve; compare against `docker inspect <mds> --format '{{.State.StartedAt}}'` (UTC)
+    SELECT reload_at AT TIME ZONE 'Asia/Kolkata', installed, loaded, unresolved, load_errors
+    FROM strategy.engine_reloads WHERE reload_at >= :d0 ORDER BY 1;
+    ```
+    The watchdog's ERROR log line carries the `signal-eval thread stack` — read it before
+    theorising; on 08-17 it named `FuturesUniverseResolver.resolve:102` directly. Note the boot
+    variant of the same dependency: a strategy-signal boot while market-data is unready installs
+    `0 loaded / 38 unresolved` and self-heals on a later reload (08-14: ~90 s; 08-17: ~10 min) —
+    judge on `unresolved == 0` reached before the open, and watch that transient's growth.
+39. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

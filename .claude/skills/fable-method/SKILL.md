@@ -129,6 +129,18 @@ into it, not how many times you spoke. Ranked by measured value:
    ([local-model]). ⚠️ Then read the raw lines the summary points at; never cite the summary as
    evidence. Measured reliability is per-lane, not global: CI logs 5/5, psql 5/5, service logs 5/5
    on q3.8 but **3/5 on the 9b**.
+   ⚠️ **THIS BULLET, AS A PRINCIPLE, DOES NOT FIRE — 2026-08-17: a full session of live diagnosis,
+   ~8 `docker logs` pulls, THREE merged PRs and ZERO local-model calls.** The models were installed,
+   idle and documented; nothing at the point of use said to reach for them, and a principle loses to
+   momentum every time you are mid-investigation and want the next fact. **The trigger now lives
+   where the command is typed — [live-verify]'s log-pull GATE — and that is the version to follow.**
+   Its decisive test is not a line count: **do you already know the string you are looking for?**
+   Yes → `grep`, never a model (exact, complete, no fabrication risk — a targeted grep BEATS a
+   digest). No → you are reading to find out what happened, so digest before pasting. The same
+   session also showed the adjacent waste is often not the digest at all but the QUERY: `select *`
+   on a row with a fat JSON column, and six failed column-name guesses a local model could not have
+   prevented because it does not know the schema either. **Narrow the query, then digest what is
+   still wide.**
 2. **Never paste a raw log, dump, or file wholesale into your own context** when a citation does the
    job. `file:line`, a SQL query plus its result rows, one decisive log line. This is the same
    discipline the honesty rules already demand for claims — it just happens to be the cheapest one.

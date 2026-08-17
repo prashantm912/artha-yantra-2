@@ -131,6 +131,29 @@ I/O contention (often the nightly pg_dump), not a hang — don't restart it.
 - `NIFTY-FUT-CONT` max bar = backfill end — the continuous future is replay-only by
   design; LIVE signals ride the dated front contract (re-resolved ~08:40 IST).
 - Kite token expires 06:00 IST → "Ticker: DISCONNECTED" pre-open until owner re-logins.
+  ⚠️ **BUT DISTINGUISH THAT ROUTINE EXPIRY FROM A DEAD APP — measured 2026-08-17, and they look
+  identical from inside the stack.** Both give `TOKEN_EXPIRED`, 403 `Incorrect api_key or
+  access_token`, and a ticker that will not connect. The difference is that the owner's re-login
+  **also fails**, and nothing in our logs says why — because the failure is at Zerodha. **The
+  one-command discriminator, run it BEFORE touching anything:**
+  ```bash
+  curl -s "$(docker exec ay-market-data-service sh -c 'wget -qO- http://127.0.0.1:8081/api/v1/auth/kite/login-url' | sed -E 's/.*"url":"([^"]+)".*/\1/')"
+  ```
+  A healthy app returns the Zerodha login page. A dead one returns
+  `{"status":"error","message":"Invalid \`api_key\`.","error_type":"InputException"}` — **byte-identical
+  to what a garbage 16-char key returns**, which is the control test that proves the key itself is
+  unrecognised rather than merely unauthorised. (Omitting the key gives a *different* error,
+  `Missing or empty field`, so the endpoint is parsing fine.) **Cause is almost always the Kite
+  Connect monthly subscription lapsing** (₹500/mo — the app is disabled on non-payment); fix is in
+  the owner's developer console at https://developers.kite.trade/apps, not in this repo. Verify our
+  side is innocent by hashing the key across all three sources — `deploy/secrets/kite_api_key`, the
+  container's served `login-url`, and `.env` — before blaming Zerodha.
+  ⚠️ **AND THE SECOND-ORDER SYMPTOM, because it is what you will actually notice first:** a dead
+  token at boot makes `FuturesUniverseResolver` return `503 DATA_STALE` for **every** universe, so
+  `engine_reloads` sits at `loaded=0 / unresolved=38` for as long as the credential is dead.
+  Measured: 585 s on 2026-08-17 against a 71–132 s band across the seven prior boots, resolving 37 s
+  after the login succeeded. **A long 0-loaded transient is a CREDENTIAL signal, not an engine
+  signal — check the Kite session before investigating the engine.**
 - Market-data 404s outside market hours for quote/chain endpoints.
 - Swing paper positions don't tick intraday — funnel equities aren't in the live feed;
   they settle on the daily batch's close.

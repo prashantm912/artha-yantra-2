@@ -15,6 +15,25 @@ the 60m-bias veto · signal contract `NFO:NIFTY26AUGFUT` (log-confirmed). Logs o
 snapshotted to scratchpad at run start (NEW-4) — ⚠️ **market-data was recreated 15:36 IST
 (PR #1394 deploy) BEFORE this run started, so its session logs are DESTROYED**; §3.37
 fallbacks used, and the log-loss caveat applies to every market-data log-derived check.
+✅ **CAVEAT LIFTED 2026-08-17 ~18:30 IST — the logs were NOT destroyed; they were snapshotted
+before the recreate and this run could not find them.** The deploying session took the NEW-4
+snapshot as required, but wrote it to a **session-private scratchpad path no routine knows**, so
+this agent correctly observed an empty `docker logs` and reasonably concluded loss. Recovered
+copy: `C:\Trading\ArthaYantra\log-snapshots\2026-08-17\` (outside the repo), spanning the
+container's whole life `2026-08-14T11:23Z → 2026-08-17T09:49Z` (= **15:19 IST**) — i.e. the
+ENTIRE session bar its last 11 post-close minutes. **Re-run against the recovered file, the
+market-data session is CLEAN and the header's "unknowable" is now ANSWERED:** 898 lines in
+09:15–15:30 IST — **894 INFO, 4 WARN, ZERO ERROR**; 890 of them routine cagg refreshes
+(`candles_{5m,1h,1d,1w}`). ⚠️ **One event this run could not see, now documented: a kite ticker
+DISCONNECT at 13:21:29 IST — and it self-healed inside the same second** (`kite ticker connected;
+replayed 1 mode groups`), detecting two tick gaps (`NFO:FINNIFTY26OCTFUT`, `NFO:FINNIFTY26SEPFUT`,
+open since 13:10 IST) and completing `gap backfill done` for both. **Zero occurrences of
+`NIFTY26AUGFUT` in the WARN set — the signal contract was never gapped**, so no scalper impact,
+consistent with this doc's independent finding that rejections ran normally to 14:43. ⚠️ **STILL
+genuinely unknowable: 15:19 → 15:36:22**, the window between the snapshot and the recreate — but
+that is post-close and after every scalper window shut at 15:21, so §6.1's market-data half remains
+the only real casualty. **The process defect was DISCOVERABILITY, not compliance** — see the
+NEW-4 row in §7 and the snapshot-path convention added to `live-verify` / `session-analysis`.
 
 ## 1 Funnel numbers
 
@@ -203,7 +222,7 @@ Ledger §0 group G is the authoritative status; nothing applied by this run.
 | watch | `strike-pick` chain-proximity | **WATCH — Mon-eve NSE cluster on schedule: 361-NF** | §2; day-of window tomorrow (Tue 08-18) |
 | NEW-5 (08-14) | Redis candles.1m subscription drop | **WATCH — no recurrence** (today's stall is a different class: §6.1) | week window open to 08-21 |
 | NEW-2 (08-12) | scalper `budget_inr` ₹25k | **SHIPPED-VERIFIED** | first genuine 2-lot NIFTY fill (§6.2); 24 disabled-scalper drafts = standing residue |
-| NEW-4 (08-13) | post-close deploy log snapshot | **PROPOSED (process, owner) — carried; VIOLATED today by the 15:36 market-data recreate** | this run started 15:55, after the deploy — market-data session logs gone (§3.37 caveat in header). The strategy-signal snapshot survived (boot 08:17) |
+| NEW-4 (08-13) | post-close deploy log snapshot | ✅ **NOT VIOLATED — REVISED 2026-08-17 ~18:30. The snapshot WAS taken; the rule is missing a PATH, not compliance.** | This run reported the 15:36 recreate as a NEW-4 violation and it was reasonable to — `docker logs` was genuinely empty. But the deploying session HAD snapshotted both services first, to a **session-private scratchpad no routine can discover**, so the evidence existed the whole time and the analysis degraded for nothing. Recovered to `C:\Trading\ArthaYantra\log-snapshots\2026-08-17\`; caveat lifted in the header with the re-run (898 lines, 0 ERROR, one self-healed 13:21:29 ticker reconnect). **The fix is a FIXED, CONVENTIONAL PATH written by the deploy step and READ by this routine** — `<repo-parent>/log-snapshots/<YYYY-MM-DD>/<service>.log` — now in `live-verify` (deploy side) and `session-analysis` (read side). ⚠️ **Generalises past logs: a rule that says "save it" but not WHERE produces evidence that exists and cannot be found, which is indistinguishable from evidence that was never saved.** The strategy-signal snapshot survived independently (boot 08:17) |
 | NEW-3 (08-12) | `daily_profit_target` 1.5% | **OBSERVATION (owner) — carried** | no trip (red day) |
 | NEW-1 (08-05) | paper heat-cap margin timeout | **PROPOSED — carried** | grep 0 on 3 funded entries — 4th consecutive evaluability PASS (§6.3); N23-A stands |
 | T29/G11 | scalper `time_stop` | **CLOSED (owner KEEP) — 6th chop-day observation, again stop-favouring** | 3 of 4 clusters stop-favouring; the 4th favoured the TP bracket, not the hold (§5). Series 11 stop / 2 hold / 1 TP |

@@ -135,6 +135,34 @@ I/O contention (often the nightly pg_dump), not a hang — don't restart it.
 - Swing paper positions don't tick intraday — funnel equities aren't in the live feed;
   they settle on the daily batch's close.
 
+## ⚠️ BEFORE ANY RECREATE ON A SESSION DAY — snapshot to the CONVENTIONAL path
+
+A `docker compose up -d --force-recreate` takes `docker logs` with it. The owner's standing rule
+is to snapshot market-data + strategy-signal **first**. **Write them HERE, and nowhere else:**
+
+```bash
+D="/c/Trading/ArthaYantra/log-snapshots/$(date +%F)"; mkdir -p "$D"
+docker logs ay-market-data-service     > "$D/market-data.log" 2>&1
+docker logs ay-strategy-signal-service > "$D/strategy-signal.log" 2>&1
+```
+
+`<repo-parent>/log-snapshots/<YYYY-MM-DD>/<service>.log` — outside the repo, so it is not a git
+concern, and **stable, so a LATER session or scheduled routine can find it.** `session-analysis`
+reads this path.
+
+⚠️ **MEASURED 2026-08-17, and the failure is subtler than skipping the snapshot: a deploying
+session DID snapshot both services, to its own session-private scratchpad. The 15:55 scheduled
+`session-analysis` then found `docker logs` empty, correctly concluded the session logs were
+destroyed, applied a caveat to EVERY market-data log-derived check, and fell back to degraded
+evidence — while the file sat on disk the whole time.** Re-run against the recovered snapshot, the
+session was clean (898 lines, 0 ERROR) and contained one event nobody had seen: a 13:21:29 kite
+ticker disconnect that self-healed within the same second, with both tick gaps backfilled.
+**A rule that says "save it" but not WHERE produces evidence that exists and cannot be found —
+which is operationally identical to evidence that was never saved.**
+
+Snapshot even when you believe the deploy is post-close: the scheduled analyst runs at ~15:55 and
+cannot know what you did at 15:36.
+
 ## Deploy verification (the stale-jar trap)
 
 A compose rebuild that COPYs a stale `target/*.jar` "succeeds" and runs old code. Verify

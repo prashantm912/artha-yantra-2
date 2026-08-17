@@ -47,6 +47,24 @@ Arguments: `post [YYYY-MM-DD]` (default: the most recent completed session) · `
 **HARD guardrails: read-only.** No deploys, no service restarts, no writes to live tables, no
 config changes, no `ay` verbs that touch containers. SELECTs + `docker logs` only.
 
+⚠️ **BEFORE concluding a service's session logs were destroyed by a deploy, CHECK THE SNAPSHOT
+PATH.** A recreate empties `docker logs`, but the deploying session is required to snapshot first,
+and it writes to a fixed location:
+
+```bash
+ls /c/Trading/ArthaYantra/log-snapshots/$(date +%F)/          # market-data.log, strategy-signal.log
+```
+
+**Measured 2026-08-17: this routine reported market-data's session logs DESTROYED by a 15:36
+deploy, applied a log-loss caveat to every market-data log-derived check, and used degraded
+fallbacks — while the snapshot sat on disk.** It had been written to a session-private scratchpad
+instead of this path, so `docker logs` was genuinely empty and the conclusion was reasonable. On
+re-run the session was clean (898 lines, 0 ERROR) and held one event the fallbacks missed
+entirely: a 13:21:29 kite ticker disconnect that self-healed inside the same second.
+
+**If the snapshot exists, analyse IT and say so.** If it genuinely does not, report the loss AND
+name the missing path — an absent snapshot is a process finding worth a row, not just a caveat.
+
 1. README §4.1 data-health pass: rejections flowing this session (rows + max generated_at vs wall
    clock), context nulls/zeros on TODAY's rows (compare against the findings ledger — flag anything
    newly-dead the same day), capture liveness (1m candle max bucket, snapshot counts).

@@ -961,6 +961,44 @@
         }
       }
     },
+    "/api/v1/market/health/evening-chain/legs" : {
+      "post" : {
+        "tags" : [ "evening-chain-leg-controller" ],
+        "operationId" : "recordLeg",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/LegReport"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LegRecorded"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/fundamentals/refresh" : {
       "post" : {
         "tags" : [ "fundamentals-controller" ],
@@ -8426,6 +8464,40 @@
           }
         },
         "required" : [ "additionalMargin", "equityMargin", "exposureMargin", "finalMargin", "netBuyPremium", "priced", "requiredMargin", "spanMargin", "totalMargin", "unpricedReason" ]
+      },
+      "LegReport" : {
+        "type" : "object",
+        "properties" : {
+          "source" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "startedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "finishedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "error" : {
+            "type" : [ "string", "null" ]
+          }
+        }
+      },
+      "LegRecorded" : {
+        "type" : "object",
+        "properties" : {
+          "source" : {
+            "type" : "string"
+          },
+          "recorded" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "recorded", "source" ]
       },
       "RefreshResponse" : {
         "type" : "object",

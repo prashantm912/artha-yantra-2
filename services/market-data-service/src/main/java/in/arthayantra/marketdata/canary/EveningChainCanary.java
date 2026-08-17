@@ -10,6 +10,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -22,6 +23,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Component;
 
 /**
@@ -44,16 +46,18 @@ import org.springframework.stereotype.Component;
  * INSTRUMENT_SYNC} (08:30 IST, a morning job) and {@code OPTIONS_SNAPSHOT_CAPTURE} (a continuous
  * intraday capture that stops accumulating at the 15:30 close) — neither is an evening batch, so
  * reusing that list would report "still pending" on two sources that never run in the evening at
- * all. This list is the nine sources of the evening chain: the three {@code NseEodScheduler} pulls,
- * the bhavcopy backfill, the two swing screeners, and the three EOD analytics folds.
+ * all. This list is the twelve legs of the evening chain: the three {@code NseEodScheduler} pulls,
+ * the bhavcopy backfill, the two swing screeners, the three EOD analytics folds, and — since review
+ * Major C (2026-08-17) — the 18:56-18:58 tail: two strategy-signal insight sweeps reported over HTTP
+ * and this service's own bhavcopy-close canary.
  * {@code MINERVINI_SCREEN}'s own {@code ingest_runs} boundary was moved (2026-08-11) to close only
  * AFTER {@code MinerviniScheduler}'s plane-divergence probe finishes, specifically so this class
  * never has to know that sub-step exists — when there IS a ledger row it already means "this leg is
  * fully done", not "the screen write happened".
  *
- * <p><b>⚠️ Seven of the nine are judged by their {@code ingest_runs} row; the two SCREENERS cannot
+ * <p><b>⚠️ Every leg but two is judged by its {@code ingest_runs} row; the two SCREENERS cannot
  * be, and an earlier version of this class judging them that way was a Critical.</b> That javadoc
- * used to claim the nine were "verified against each job's ledger call site", and they were not:
+ * used to claim they were "verified against each job's ledger call site", and they were not:
  * {@code MinerviniScheduler:116-125} and {@code ManasScheduler:79-83} both RETURN on the dedup skip
  * (screen already current with the bhavcopy watermark) BEFORE {@code ledger.start} is ever reached —
  * their own comments say "opened only after the dedup skip below, so a no-op run records nothing".
@@ -83,6 +87,16 @@ import org.springframework.stereotype.Component;
  * <p><b>Never derives completion from the clock.</b> "Is source X done" is answered from ledger and
  * artifact state, never from wall-clock time — a change to when the evening jobs fire needs no
  * change here.
+ *
+ * <p><b>⚠️ But it does bound which ROWS are eligible to answer, and it must</b> (review Critical B,
+ * 2026-08-17 — see {@link ExpectedLeg}). Judging "done" from state says nothing if the state being
+ * read belongs to a different run: eight of the nine sources write a terminal {@code ingest_runs} row
+ * on {@code ApplicationReadyEvent}, so a morning restart left SIX of nine reading DONE at 18:59 for
+ * jobs that had not run. Each leg now declares the cron of its earliest legitimate trigger and rows
+ * older than tonight's fire are dropped before classification. The distinction that keeps the rule
+ * above intact: the clock still never decides that a job HAS finished — it only decides which day it
+ * is, while each source's own SCHEDULE decides which rows are tonight's. A cron move still needs no
+ * change here, because the boundary is read from the producer's own property.
  *
  * <p><b>A source counts as done only in {@link SourceState#DONE}.</b> {@link SourceState#STUCK} — a
  * {@code RUNNING} row aged past {@code artha.evening-chain.running-stale-minutes} — is OUTSTANDING,
@@ -187,6 +201,49 @@ public class EveningChainCanary {
   private record RunRow(String source, String status, Instant startedAt, Instant finishedAt) {}
 
   /**
+   * One expected evening-chain leg: the {@code ingest_runs} source it writes, plus the cron of the
+   * EARLIEST trigger that can legitimately produce TONIGHT's row for it.
+   *
+   * <p><b>⚠️ This second field is the whole of review Critical B (2026-08-17), and without it the
+   * report was structurally wrong for two-thirds of the chain.</b> {@link #report()} windows from IST
+   * midnight and {@link #classify} called any non-{@code RUNNING} row in that window DONE at any age —
+   * but EIGHT of the nine sources have an {@code ApplicationReadyEvent} boot path that writes a
+   * terminal row the moment the process starts ({@code NseEodScheduler:54} for the three NSE pulls,
+   * {@code BhavcopyStartupCatchup:49}, {@code DataQualityEodJob:86}, {@code EquityBreadthEodJob:63},
+   * {@code MinerviniScheduler:58}, {@code ManasScheduler:54}). Measured twice on the live stack: four
+   * boot rows stamped 02:39 IST on 2026-08-15 and again at 08:17 IST on 2026-08-17 (BHAVCOPY,
+   * NSE_FII_DII, NSE_PARTICIPANT_OI, NSE_FII_DERIVATIVE), every one of them reading DONE sixteen and
+   * ten hours respectively before the evening window — and a DONE bhavcopy then opened {@link
+   * #bhavcopyIsTerminal}'s gate and promoted both screens too, so SIX of the nine read DONE for jobs
+   * that had not run. That is the exact "chain complete — safe to shut down" the whole class exists
+   * to prevent, produced by a stack that had merely been restarted that morning.
+   *
+   * <p><b>Why a per-source cron and not one coarse cut.</b> A blanket {@code today.atTime(16, 0)}
+   * would work today and be wrong the first time a cron moves; the boundary belongs to each source's
+   * own schedule, which is also what keeps {@code :83-85}'s "never derives completion from the clock"
+   * true — the clock supplies only which calendar day it is, the SCHEDULE supplies the boundary.
+   * Resolved through {@link Environment} against the SAME property key the job's own {@code
+   * @Scheduled} reads, so compose's passthrough (e.g. {@code ARTHA_NSE_EOD_CRON}) moves both together
+   * and a cron change needs no edit here. {@code cronDefault} mirrors the job's annotation default for
+   * the case where nothing is set (mock, CI, a bare {@code java -jar}); the two copies are pinned
+   * against each other by {@code eachLegMirrorsItsProducersScheduledDefault}.
+   *
+   * <p><b>Why the EARLIEST trigger rather than the source's own cron</b> — and this is also the answer
+   * to "cron time, or cron time minus a tolerance?". The two failure directions are not symmetric: a
+   * boundary set too LATE refuses a real run and costs a "still pending" push (annoying, safe), while
+   * a boundary set too EARLY re-admits a boot row and restores the false "safe to shut down"
+   * (the defect). A blind tolerance buys the second risk to insure against the first — and it is
+   * weakest in exactly the scenario that matters most, a deploy at 18:40 whose boot rows would clear
+   * an 18:40-ish cut. The only reason a row can legitimately precede its own cron is a NON-cron
+   * trigger, and this chain has exactly one: both screeners also run from {@code
+   * @EventListener(BhavcopyBackfillCompleted.class)} ({@code MinerviniScheduler:64}, {@code
+   * ManasScheduler:60}), fired by the 18:45 bhavcopy backfill and therefore able to land before their
+   * own 18:47/18:48 crons. So the screeners declare the BHAVCOPY cron — an exact boundary drawn from
+   * the schedule that actually drives them, rather than a guessed slack.
+   */
+  record ExpectedLeg(String source, String cronProperty, String cronDefault) {}
+
+  /**
    * Why a claim attempt ended the way it did — same shape as {@link IngestCoverageCanary}'s, see
    * its javadoc for the FINISHED-vs-HELD rationale (a HELD claim just means "not yet", a FINISHED
    * one is final and correctly silences this door forever).
@@ -207,18 +264,77 @@ public class EveningChainCanary {
   }
 
   // The evening batch chain (owner's words: "followup jobs" to close the day). See the class
-  // javadoc for why this is its own list rather than IngestCoverageCanary.EXPECTED.
-  static final List<String> EXPECTED =
+  // javadoc for why this is its own list rather than IngestCoverageCanary.EXPECTED, and
+  // ExpectedLeg for why each carries the cron of its EARLIEST legitimate trigger.
+  static final List<ExpectedLeg> EXPECTED =
       List.of(
-          IngestRunLedger.SOURCE_NSE_FII_DII,
-          IngestRunLedger.SOURCE_NSE_PARTICIPANT_OI,
-          IngestRunLedger.SOURCE_NSE_FII_DERIVATIVE,
-          IngestRunLedger.SOURCE_BHAVCOPY,
-          IngestRunLedger.SOURCE_MARKET_CONTEXT_DAY,
-          IngestRunLedger.SOURCE_DATA_QUALITY,
-          IngestRunLedger.SOURCE_MINERVINI_SCREEN,
-          IngestRunLedger.SOURCE_MANAS_SCREEN,
-          IngestRunLedger.SOURCE_EQUITY_BREADTH);
+          // The three NSE pulls share one scheduler and therefore one cron (NseEodScheduler:60).
+          new ExpectedLeg(
+              IngestRunLedger.SOURCE_NSE_FII_DII, "artha.nse.eod-cron", "0 46 18 * * MON-FRI"),
+          new ExpectedLeg(
+              IngestRunLedger.SOURCE_NSE_PARTICIPANT_OI, "artha.nse.eod-cron", "0 46 18 * * MON-FRI"),
+          new ExpectedLeg(
+              IngestRunLedger.SOURCE_NSE_FII_DERIVATIVE, "artha.nse.eod-cron", "0 46 18 * * MON-FRI"),
+          new ExpectedLeg(
+              IngestRunLedger.SOURCE_BHAVCOPY, "artha.bhavcopy.eod-cron", "0 45 18 * * MON-FRI"),
+          new ExpectedLeg(
+              IngestRunLedger.SOURCE_MARKET_CONTEXT_DAY,
+              "artha.context.eod-cron",
+              "0 49 18 * * MON-FRI"),
+          new ExpectedLeg(
+              IngestRunLedger.SOURCE_DATA_QUALITY,
+              "artha.data-quality.eod-cron",
+              "0 50 18 * * MON-FRI"),
+          // ⚠️ The screeners take the BHAVCOPY cron, not their own 18:47/18:48: their earliest
+          // legitimate trigger is BhavcopyBackfillCompleted, not their fallback cron. See ExpectedLeg.
+          new ExpectedLeg(
+              IngestRunLedger.SOURCE_MINERVINI_SCREEN,
+              "artha.bhavcopy.eod-cron",
+              "0 45 18 * * MON-FRI"),
+          new ExpectedLeg(
+              IngestRunLedger.SOURCE_MANAS_SCREEN, "artha.bhavcopy.eod-cron", "0 45 18 * * MON-FRI"),
+          new ExpectedLeg(
+              IngestRunLedger.SOURCE_EQUITY_BREADTH,
+              "artha.breadth.materialize-cron",
+              "0 51 18 * * MON-FRI"),
+          // ---- the tail: the strategy-signal insight sweeps + this service's own last job -------
+          // ⚠️ Review Major C (2026-08-17). Five jobs run 18:54-18:58, INSIDE the window this check
+          // closes at 18:59, and NONE was visible to it — the sell-decision sweep starts two minutes
+          // before the check and the push said "chain complete" straight over it. The owner chose
+          // extending the coverage over narrowing the claim to market-data.
+          //
+          // The strategy-signal rows arrive over HTTP and land in this service's own ingest_runs —
+          // see EveningChainLegController for the four facts that decided that direction. They
+          // classify through the SAME path as everything above, boundary included.
+          //
+          // ⚠️ TWO of the five are deliberately NOT here, and the rule is worth stating because it
+          // is not laziness: AN UNCONDITIONAL EXPECTATION MAY ONLY NAME AN UNCONDITIONALLY-LOADED
+          // PRODUCER. SwingBatchHeartbeat (18:54) is @ConditionalOnProperty("artha.heartbeat.url")
+          // and GraduationPromotionScheduler (18:55) is
+          // @ConditionalOnProperty("artha.graduation.promotion-enabled", havingValue="true") — when
+          // either is disarmed the BEAN does not exist, so its @Scheduled never fires, nothing ever
+          // reports, and a row here would be a leg stuck PENDING every evening forever. That is the
+          // never-resolving alert this class already learned about from the screeners (see the
+          // ingest_runs discussion above), arrived at from the other direction. Both ARE armed on
+          // the live stack today (verified via docker inspect, 2026-08-17), which is exactly what
+          // makes the trap easy to walk into. Closing them needs an ARMING signal this service can
+          // read, and for the heartbeat that signal cannot be the property itself: the value is a
+          // healthchecks.io ping URL, which is a credential and must not be mirrored into this
+          // container's environment to be tested for blankness.
+          new ExpectedLeg(
+              IngestRunLedger.SOURCE_INSIGHT_STRATEGY_EVIDENCE,
+              "artha.insights.strategy-evidence-cron",
+              "0 56 18 * * MON-FRI"),
+          new ExpectedLeg(
+              IngestRunLedger.SOURCE_INSIGHT_SELL_DECISION,
+              "artha.insights.sell-decision-cron",
+              "0 57 18 * * MON-FRI"),
+          // The last market-data job before shutdown; it wrote no ledger row at all until this
+          // change (BhavcopyCloseCanary#sweep).
+          new ExpectedLeg(
+              IngestRunLedger.SOURCE_BHAVCOPY_CLOSE,
+              "artha.bhavcopy-close.cron",
+              "0 58 18 * * MON-FRI"));
 
   /**
    * Default single-shot check time. Owner decision (2026-08-11, since the original brief): a HARD
@@ -281,8 +397,8 @@ public class EveningChainCanary {
    * <p>⚠️ This is deliberately NOT {@code artha.ingest-canary.running-stale-minutes}, which this
    * class originally shared "so stuck can never mean something different here than on the
    * ingest-health page" (review Major 3). That knob defaults to 120 minutes, which is right for a T+1
-   * morning board judging LAST evening's runs and is STRUCTURALLY UNREACHABLE here: the nine expected
-   * writers are scheduled 18:45–18:51 and the check fires at 18:59, so the oldest RUNNING row this
+   * morning board judging LAST evening's runs and is STRUCTURALLY UNREACHABLE here: the expected
+   * writers are scheduled 18:45–18:58 and the check fires at 18:59, so the oldest RUNNING row this
    * canary can ever see is 14 minutes old and {@link #classify} could only ever return PENDING. One
    * shared knob for two windows an order of magnitude apart is not one knob, it is a dead branch —
    * the STUCK state and its tests existed while production could not reach them.
@@ -302,6 +418,9 @@ public class EveningChainCanary {
   private final NtfyClient ntfy;
   private final MarketCalendar calendar;
   private final Clock clock;
+  // Kept as a field (not just read once in the constructor) because each leg's expected-not-before
+  // boundary is resolved from the SAME cron property its producer reads — see ExpectedLeg.
+  private final Environment environment;
   private final boolean live;
   private final boolean enabled;
   private final boolean alertsEnabled;
@@ -323,6 +442,7 @@ public class EveningChainCanary {
     this.ntfy = ntfy;
     this.calendar = calendar;
     this.clock = clock;
+    this.environment = environment;
     this.live = environment.matchesProfiles("live");
     this.enabled = enabled;
     this.alertsEnabled = alertsEnabled;
@@ -370,8 +490,9 @@ public class EveningChainCanary {
         queryRows(dayStart, dayEnd).stream().collect(Collectors.groupingBy(RunRow::source));
 
     List<SourceProgress> sources = new ArrayList<>();
-    for (String source : EXPECTED) {
-      sources.add(classify(source, bySource.get(source), generatedAt));
+    for (ExpectedLeg leg : EXPECTED) {
+      sources.add(
+          classify(leg, bySource.get(leg.source()), generatedAt, expectedNotBefore(leg, today, dayEnd)));
     }
     // The screener carve-out reads the bhavcopy watermark, so it may only be applied once that
     // watermark is FINAL for the night — i.e. once BHAVCOPY itself is terminal (review Major A).
@@ -385,22 +506,73 @@ public class EveningChainCanary {
     return new ChainReport(generatedAt, today, true, EXPECTED.size(), done, complete, List.copyOf(sources));
   }
 
-  private SourceProgress classify(String source, List<RunRow> rows, Instant now) {
-    if (rows == null || rows.isEmpty()) {
-      return new SourceProgress(source, SourceState.PENDING, null, null, null);
+  /**
+   * Where one leg stands, judged ONLY on rows that could be tonight's.
+   *
+   * <p>{@code notBefore} is {@link #expectedNotBefore}'s answer for this leg — everything older is
+   * dropped BEFORE classification, so a boot row is not merely reported differently, it is invisible
+   * to every branch below (including the {@code RUNNING} one: a job still running from a boot hours
+   * ago is not tonight's leg either, and calling it STUCK would name the wrong night). A leg with
+   * nothing left is PENDING with a null status, which is exactly the shape {@link
+   * #withScreenerArtifact} may still promote — deliberately, since "the screen has consumed a FINAL
+   * watermark" is a statement about tonight regardless of what a boot row did this morning.
+   */
+  private SourceProgress classify(
+      ExpectedLeg leg, List<RunRow> rows, Instant now, Instant notBefore) {
+    List<RunRow> tonight =
+        rows == null
+            ? List.of()
+            : rows.stream().filter(r -> !r.startedAt().isBefore(notBefore)).toList();
+    if (tonight.isEmpty()) {
+      return new SourceProgress(leg.source(), SourceState.PENDING, null, null, null);
     }
-    RunRow latest = rows.stream().max(Comparator.comparing(RunRow::startedAt)).orElseThrow();
+    RunRow latest = tonight.stream().max(Comparator.comparing(RunRow::startedAt)).orElseThrow();
     if (STATUS_RUNNING.equals(latest.status()) && latest.finishedAt() == null) {
       boolean aged = Duration.between(latest.startedAt(), now).compareTo(runningStale) > 0;
       return new SourceProgress(
-          source,
+          leg.source(),
           aged ? SourceState.STUCK : SourceState.PENDING,
           latest.status(),
           latest.startedAt(),
           null);
     }
     return new SourceProgress(
-        source, SourceState.DONE, latest.status(), latest.startedAt(), latest.finishedAt());
+        leg.source(), SourceState.DONE, latest.status(), latest.startedAt(), latest.finishedAt());
+  }
+
+  /**
+   * The earliest instant TODAY at which a row may count as {@code leg}'s tonight run: the next fire
+   * of the leg's own trigger cron after IST midnight. See {@link ExpectedLeg} for why this exists,
+   * why it is per-source, and why it is the exact cron time rather than the cron minus a tolerance.
+   *
+   * <p>Read live from {@link Environment} on the producer's own property key, so compose's
+   * passthrough moves the boundary with the job. {@code cronDefault} covers the case where nothing is
+   * set at all.
+   *
+   * <p>⚠️ Fail-SAFE, in the same direction as everything else here: a cron that cannot fire today at
+   * all (a {@code MON-FRI} expression on a Saturday muhurat session) or one that will not parse
+   * yields {@code dayEnd}, which no row inside the day window can reach — so the leg stays
+   * outstanding rather than accepting whatever happens to be there. That cannot produce a
+   * never-resolving PUSH, because {@link #check()}'s own cron is {@code MON-FRI} too and simply does
+   * not fire on such a day; the page would show the honest answer, which on a muhurat Saturday is
+   * that none of the weekday evening jobs ran and none will.
+   */
+  private Instant expectedNotBefore(ExpectedLeg leg, LocalDate today, Instant dayEnd) {
+    String cron = environment.getProperty(leg.cronProperty(), leg.cronDefault());
+    try {
+      ZonedDateTime fire = CronExpression.parse(cron).next(today.atStartOfDay(Ist.ZONE));
+      if (fire != null && fire.toLocalDate().equals(today)) {
+        return fire.toInstant();
+      }
+      log.warn(
+          "evening-chain: {}'s trigger cron ({}={}) does not fire on {} - leaving it outstanding",
+          leg.source(), leg.cronProperty(), cron, today);
+    } catch (IllegalArgumentException unparseable) {
+      log.warn(
+          "evening-chain: {}'s trigger cron ({}={}) will not parse ({}) - leaving it outstanding",
+          leg.source(), leg.cronProperty(), cron, unparseable.getMessage());
+    }
+    return dayEnd;
   }
 
   /**
@@ -626,8 +798,16 @@ public class EveningChainCanary {
     }
     String message = sb.toString();
 
-    if (!alertsEnabled) {
-      log.info("evening chain (alerts disabled, not sent): {}", message);
+    // ⚠️ A blank ntfy topic is a NO-OP, not a failure (review minor, 2026-08-17). NtfyClient#trySend
+    // returns false both for "the POST failed" and for "no topic is configured, so nothing was ever
+    // sent" — indistinguishable to the caller, so an unconfigured stack took the ERROR branch below
+    // every single evening, left the claim CLAIMED and logged "tonight's message is LOST" about a
+    // message that was never owed. Asking NtfyClient whether it is configured at all keeps trySend's
+    // contract exactly as documented (it is the only production caller, but the semantics of "did the
+    // POST succeed" are worth keeping honest) and puts this alongside !alertsEnabled, which is the
+    // same situation reached by the other door.
+    if (!alertsEnabled || !ntfy.isConfigured()) {
+      log.info("evening chain (no ntfy topic or alerts disabled, not sent): {}", message);
       return true; // nothing to deliver, by design — confirm rather than reclaim toward nothing
     }
     boolean sent = ntfy.trySend(title, "default", message);

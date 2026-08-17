@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.canary;
 
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.alerts.NtfyClient;
+import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -115,6 +116,7 @@ public class BhavcopyCloseCanary {
 
   private final JdbcTemplate jdbc;
   private final NtfyClient ntfy;
+  private final IngestRunLedger ledger;
   private final Clock clock;
   private final Counter divergenceCounter;
   private final boolean live;
@@ -183,6 +185,7 @@ public class BhavcopyCloseCanary {
   public BhavcopyCloseCanary(
       JdbcTemplate jdbc,
       NtfyClient ntfy,
+      IngestRunLedger ledger,
       Clock clock,
       MeterRegistry meterRegistry,
       Environment environment,
@@ -194,6 +197,7 @@ public class BhavcopyCloseCanary {
       @Value("${artha.bhavcopy-close.min-compared:100}") int minCompared) {
     this.jdbc = jdbc;
     this.ntfy = ntfy;
+    this.ledger = ledger;
     this.clock = clock;
     this.divergenceCounter = meterRegistry.counter("ay_bhavcopy_close_divergence_total");
     this.live = environment.matchesProfiles("live");
@@ -252,8 +256,17 @@ public class BhavcopyCloseCanary {
     if (!live || !enabled) {
       return;
     }
+    // ⚠️ The ledger row opens HERE, before any of the three exits below, because EveningChainCanary
+    // asks "will anything more run tonight" and every one of those exits answers "no" (review Major
+    // C, 2026-08-17). This is the last market-data job before the 19:00 shutdown and it wrote nothing
+    // at all, so the 18:59 check could not see it and announced "safe to shut down" over it. It is
+    // deliberately NOT inside the live/enabled gate: a canary switched off is not a leg that ran, and
+    // a row claiming otherwise would be the same lie in a different place — with the gate closed the
+    // source simply stays outstanding, which is what a disabled leg before shutdown honestly is.
+    Long runId = ledger.start(IngestRunLedger.SOURCE_BHAVCOPY_CLOSE);
     LocalDate latest = latestTradeDate();
     if (latest == null) {
+      ledger.skip(runId, "nse_eod_bhavcopy is empty — there is nothing to compare");
       return;
     }
     LocalDate today = LocalDate.now(clock.withZone(Ist.ZONE));
@@ -265,6 +278,9 @@ public class BhavcopyCloseCanary {
               + " bar for today (a late publish, or a non-trading weekday), and comparing an older"
               + " session would alert on the wrong day",
           latest, today);
+      // SKIPPED, never SUCCESS: this comparison is permanently missed for the session (see the
+      // javadoc above), so it is terminal — but nothing was compared and the row must not say it was.
+      ledger.skip(runId, "newest bhavcopy is " + latest + ", not today (" + today + ")");
       return;
     }
     BhavcopyCloseReport report;
@@ -272,9 +288,11 @@ public class BhavcopyCloseCanary {
       report = evaluate(latest);
     } catch (RuntimeException e) {
       log.warn("bhavcopy-close canary failed: {}", e.getMessage());
+      ledger.fail(runId, e.getMessage());
       return;
     }
     publish(report);
+    ledger.succeed(runId, report.compared());
   }
 
   /** The newest EQ bhavcopy trade date, or {@code null} when the table is empty. */

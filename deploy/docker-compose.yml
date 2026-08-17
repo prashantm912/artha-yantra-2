@@ -434,6 +434,19 @@ services:
       ARTHA_BHAVCOPY_CLOSE_MIN_COMPARED: "${ARTHA_BHAVCOPY_CLOSE_MIN_COMPARED:-100}"
       # buyable alerts (bean is @ConditionalOnProperty-disabled today, so inert)
       ARTHA_MINERVINI_BUYABLE_ALERTS_CRON: "${ARTHA_MINERVINI_BUYABLE_ALERTS_CRON:-0 53 18 * * MON-FRI}"
+      # ---- MIRRORS of two strategy-signal crons (added 2026-08-17, review Major C) ----
+      # ⚠️ market-data runs NEITHER of these two jobs. They are here because EveningChainCanary now
+      # covers the strategy-signal tail (18:54-18:57) and derives each leg's expected-not-before
+      # boundary from its producer's own cron property — so THIS container has to be able to resolve
+      # them. Without the passthrough the canary would fall back to the compiled default and a cron
+      # moved in .env would silently keep the old boundary: #653 again, one service over.
+      #
+      # These are the SAME .env variables the strategy-signal block reads, so the two containers can
+      # never disagree about a value the owner sets; the only drift risk left is the two DEFAULTS
+      # here and there, which EveningChainCanaryIntegrationTest pins against the producing
+      # @Scheduled annotation itself.
+      ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON: "${ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON:-0 56 18 * * MON-FRI}"
+      ARTHA_INSIGHTS_SELL_DECISION_CRON: "${ARTHA_INSIGHTS_SELL_DECISION_CRON:-0 57 18 * * MON-FRI}"
       ARTHA_MD_SOURCE_OPTIONANALYTICS: ${ARTHA_MD_SOURCE_OPTIONANALYTICS:-native}
       # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.
       ARTHA_UPSTOX_ANALYTICS_ENABLED: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:-false}

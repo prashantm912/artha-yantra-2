@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -34,6 +35,7 @@ import java.time.ZonedDateTime;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -138,11 +140,37 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
 
   private static final String SERVICE = "market-data-service";
 
+  /**
+   * When {@link #seedAllHealthy} stamps every leg: the LATEST trigger cron in {@code EXPECTED} (the
+   * bhavcopy-close canary, 18:58) and one minute before the 18:59 check, so every leg's own
+   * expected-not-before boundary admits it. Pinned by {@link
+   * #theHealthyFixtureClearsEveryLegsOwnBoundary}.
+   */
+  private static final LocalTime HEALTHY_AT = LocalTime.of(18, 58);
+
   /** The {@code n}-th trading day at-or-after {@link #ANCHOR} (0-indexed); each test gets a distinct one. */
   private static LocalDate day(int n) {
     LocalDate d = ANCHOR.minusDays(1);
     for (int i = 0; i <= n; i++) {
       d = CAL.nextTradingDay(d);
+    }
+    return d;
+  }
+
+  /**
+   * The {@code n}-th trading day strictly BEFORE {@link #ANCHOR} (1-indexed) — the band's other end.
+   *
+   * <p>⚠️ New fixtures extend BACKWARDS, not forwards, and the class javadoc is why: {@code day(19)}
+   * is 2026-09-08 and {@code IngestHealthBoardIntegrationTest}'s oldest fixture is 2026-09-10, so
+   * {@code day(20)}/{@code day(21)} would have landed exactly on it — one trading day of margin,
+   * spent. Backwards is also monotonically safer against the {@code IngestHealthBoard} /
+   * {@code FiiDigestService} "newest settled trading day" hazard that javadoc documents: as real time
+   * advances a date behind the anchor recedes from that window, while a date ahead of it walks in.
+   */
+  private static LocalDate dayBefore(int n) {
+    LocalDate d = ANCHOR;
+    for (int i = 0; i < n; i++) {
+      d = CAL.previousTradingDay(d);
     }
     return d;
   }
@@ -551,8 +579,7 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
     seedScreenOutput(MINERVINI_TABLE, watermark);
     seedScreenOutput(MANAS_TABLE, watermark);
 
-    NtfyClient ntfy = mock(NtfyClient.class);
-    when(ntfy.trySend(any(), any(), any())).thenReturn(true);
+    NtfyClient ntfy = ntfyThatSends(true);
     EveningChainCanary canary = canary(fixedAt(day, 18, 59), true, ntfy);
 
     ChainReport report = canary.report();
@@ -624,8 +651,8 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
    * pass every test above trivially. This pins the exact, non-empty membership independently.
    */
   @Test
-  void expectedSourcesAreExactlyTheNineEveningBatchWriters() {
-    assertThat(EveningChainCanary.EXPECTED)
+  void expectedSourcesAreExactlyTheTwelveEveningChainLegs() {
+    assertThat(EveningChainCanary.EXPECTED.stream().map(EveningChainCanary.ExpectedLeg::source))
         .as(
             "the evening-chain source list — change this ONLY alongside a real evening-job change,"
                 + " and never let it silently shrink to empty")
@@ -638,7 +665,191 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
             IngestRunLedger.SOURCE_DATA_QUALITY,
             IngestRunLedger.SOURCE_MINERVINI_SCREEN,
             IngestRunLedger.SOURCE_MANAS_SCREEN,
-            IngestRunLedger.SOURCE_EQUITY_BREADTH);
+            IngestRunLedger.SOURCE_EQUITY_BREADTH,
+            // The 18:56-18:58 tail (review Major C). The two strategy-signal legs arrive over HTTP;
+            // BHAVCOPY_CLOSE is this service's own last job, which wrote no ledger row before.
+            IngestRunLedger.SOURCE_INSIGHT_STRATEGY_EVIDENCE,
+            IngestRunLedger.SOURCE_INSIGHT_SELL_DECISION,
+            IngestRunLedger.SOURCE_BHAVCOPY_CLOSE);
+  }
+
+  /**
+   * ⚠️ The tail's two ABSENT legs, stated as a test so the exclusion is a decision on the record
+   * rather than an oversight (review Major C, 2026-08-17). {@code SwingBatchHeartbeat} (18:54) and
+   * {@code GraduationPromotionScheduler} (18:55) are {@code @ConditionalOnProperty} beans: disarmed,
+   * they do not exist, never fire, never report — and an unconditional expectation on them would sit
+   * PENDING every evening forever, which is the never-resolving alert this class already learned
+   * about from the screeners. Adding either one needs an ARMING signal market-data can read first;
+   * for the heartbeat that signal cannot be the property itself, because its value is a
+   * healthchecks.io ping URL and therefore a credential.
+   */
+  @Test
+  void theTwoConditionallyLoadedTailJobsAreDeliberatelyNotExpected() {
+    assertThat(EveningChainCanary.EXPECTED.stream().map(EveningChainCanary.ExpectedLeg::source))
+        .as(
+            "an unconditional expectation may only name an unconditionally-loaded producer — see"
+                + " this test's javadoc before adding either of these")
+        .doesNotContain("SWING_HEARTBEAT", "GRADUATION_PROMOTION");
+  }
+
+  /**
+   * The cross-service door accepts EXACTLY the legs another service reports, and nothing else. A
+   * wider allow-list would let any caller on the compose network mint a terminal {@code BHAVCOPY}
+   * row — which market-data measures itself, and which opens the screener carve-out.
+   */
+  @Test
+  void theLegReportDoorAcceptsOnlyTheRemotelyReportedSources() {
+    assertThat(EveningChainLegController.REPORTABLE)
+        .containsExactlyInAnyOrder(
+            IngestRunLedger.SOURCE_INSIGHT_STRATEGY_EVIDENCE,
+            IngestRunLedger.SOURCE_INSIGHT_SELL_DECISION);
+    assertThat(EveningChainCanary.EXPECTED.stream().map(EveningChainCanary.ExpectedLeg::source))
+        .as("every remotely-reported source must also be a leg the report waits on")
+        .containsAll(EveningChainLegController.REPORTABLE);
+  }
+
+  // ---- Critical B: a boot row is not tonight's run ----------------------------------------------
+
+  /**
+   * ⚠️ <b>THE RED-PROOF for review Critical B (2026-08-17).</b> Eight of the nine sources write a
+   * TERMINAL {@code ingest_runs} row on {@code ApplicationReadyEvent} ({@code NseEodScheduler:54},
+   * {@code BhavcopyStartupCatchup:49}, {@code DataQualityEodJob:86}, {@code EquityBreadthEodJob:63},
+   * {@code MinerviniScheduler:58}, {@code ManasScheduler:54}) — so on any day the stack was restarted
+   * in the morning, {@code report()} windowed from IST MIDNIGHT and {@code classify} called those
+   * rows DONE at 18:59 for jobs that had not run. Measured live: four boot rows at 02:39 IST on
+   * 2026-08-15 and again at 08:17 IST on 2026-08-17.
+   *
+   * <p><b>No test in this class could detect it, and that was the point of the finding</b> — every
+   * fixture here seeds evening times, so the failing case was excluded on exactly the axis that
+   * decides it. This one seeds the shape that actually occurred: a SUCCESS row at 08:17 IST and
+   * nothing else all day.
+   *
+   * <p>The two screeners are deliberately in the assertion too: with BHAVCOPY correctly PENDING, the
+   * {@link EveningChainCanary#bhavcopyIsTerminal} gate closes and the carve-out cannot promote them
+   * either — which is how one boot row turned into six false DONEs, not four.
+   */
+  @Test
+  void aMorningBootRowIsNotTonightsRun() {
+    LocalDate day = dayBefore(1);
+    clearWindow(day);
+    // The measured live shape: the ApplicationReadyEvent sources wrote terminal rows at 08:17 IST on
+    // a stack restart, and not one evening job has run yet.
+    for (String bootSource :
+        List.of(
+            IngestRunLedger.SOURCE_BHAVCOPY,
+            IngestRunLedger.SOURCE_NSE_FII_DII,
+            IngestRunLedger.SOURCE_NSE_PARTICIPANT_OI,
+            IngestRunLedger.SOURCE_NSE_FII_DERIVATIVE)) {
+      seedRunRange(day, bootSource, "SUCCESS", 8, 17, 8, 18);
+    }
+
+    ChainReport report = canary(fixedAt(day, 18, 59), true).report();
+
+    for (String bootSource :
+        List.of(
+            IngestRunLedger.SOURCE_BHAVCOPY,
+            IngestRunLedger.SOURCE_NSE_FII_DII,
+            IngestRunLedger.SOURCE_NSE_PARTICIPANT_OI,
+            IngestRunLedger.SOURCE_NSE_FII_DERIVATIVE)) {
+      SourceProgress s = find(report, bootSource);
+      assertThat(s.state())
+          .as(
+              "%s's row was written by the ApplicationReadyEvent boot path at 08:17, hours before its"
+                  + " own trigger cron — calling that DONE reports a job that has not run as finished",
+              bootSource)
+          .isEqualTo(SourceState.PENDING);
+      assertThat(s.status())
+          .as("%s must carry the no-row-yet shape, not the boot row's SUCCESS", bootSource)
+          .isNull();
+    }
+    assertThat(find(report, IngestRunLedger.SOURCE_MINERVINI_SCREEN).state())
+        .as("with BHAVCOPY correctly outstanding the screener carve-out stays shut")
+        .isEqualTo(SourceState.PENDING);
+    assertThat(find(report, IngestRunLedger.SOURCE_MANAS_SCREEN).state())
+        .isEqualTo(SourceState.PENDING);
+    assertThat(report.done()).isZero();
+    assertThat(report.complete())
+        .as("a morning restart must never publish 'chain complete - safe to shut down' at 18:59")
+        .isFalse();
+  }
+
+  /**
+   * The other half, so the fix cannot be a blind RED: the SAME source, the SAME day, a row at its own
+   * trigger cron instead of at boot, still reads DONE. Without this, deleting every row would pass
+   * the test above.
+   */
+  @Test
+  void aRowAtItsOwnTriggerCronStillCounts() {
+    LocalDate day = dayBefore(2);
+    clearWindow(day);
+    seedRunRange(day, IngestRunLedger.SOURCE_NSE_FII_DII, "SUCCESS", 8, 17, 8, 18); // the boot row
+    LocalTime fires = firesAt(legFor(IngestRunLedger.SOURCE_NSE_FII_DII), day);
+    seedRunRange(
+        day,
+        IngestRunLedger.SOURCE_NSE_FII_DII,
+        "SUCCESS",
+        fires.getHour(),
+        fires.getMinute(),
+        18,
+        59);
+
+    SourceProgress s = find(canary(fixedAt(day, 18, 59), true).report(), IngestRunLedger.SOURCE_NSE_FII_DII);
+
+    assertThat(s.state())
+        .as("the boundary must refuse only rows older than tonight's fire, never tonight's own run")
+        .isEqualTo(SourceState.DONE);
+    assertThat(s.startedAt())
+        .as("and it must report TONIGHT's row, not the boot row that shares the day")
+        .isEqualTo(day.atTime(fires).atZone(Ist.ZONE).toInstant());
+  }
+
+  /**
+   * The boundary is only as good as the cron it is drawn from. Each leg's {@code cronDefault} is a
+   * SECOND copy of a default that lives on the producer's own {@code @Scheduled} annotation, and the
+   * two could drift in silence — a producer moved to 17:00 with the canary still refusing anything
+   * before 18:46 would report a job that ran as PENDING every night. Same shape and same reason as
+   * {@link #defaultCheckCronMatchesTheScheduledAnnotation} and {@link
+   * #theStaleThresholdAnnotationDefaultIsTheConstantTheRatchetPins}.
+   *
+   * <p>⚠️ Read what this pins: the DEFAULT only. What the live container actually runs comes from
+   * compose's {@code ARTHA_*_CRON} passthrough, and the canary resolves the SAME property key through
+   * {@link org.springframework.core.env.Environment}, so the two move together by construction rather
+   * than by a test — which is exactly why the boundary is a property lookup and not a constant.
+   * {@code CronPassthroughParityTest} is what pins compose against these annotations.
+   */
+  @Test
+  void eachLegMirrorsItsProducersScheduledDefault() throws IOException {
+    for (EveningChainCanary.ExpectedLeg leg : EveningChainCanary.EXPECTED) {
+      assertThat(leg.cronDefault())
+          .as(
+              "%s's boundary cron default (%s) drifted from the @Scheduled default that carries"
+                  + " property %s — the canary would judge tonight's rows against a schedule nothing"
+                  + " runs on",
+              leg.source(), leg.cronDefault(), leg.cronProperty())
+          .isEqualTo(scheduledDefaultFor(leg.cronProperty()));
+    }
+  }
+
+  /**
+   * ⚠️ Guard against the healthy fixture silently ceasing to be healthy (success-shaped-nothing
+   * catalogue #14). {@link #seedAllHealthy} stamps one literal minute; if a producer's cron ever
+   * moves past it, every "healthy" fixture in this file would seed rows their own boundary refuses,
+   * and a dozen tests would fail somewhere far from the cause. This says the cause out loud.
+   */
+  @Test
+  void theHealthyFixtureClearsEveryLegsOwnBoundary() {
+    LocalDate day = day(0);
+    for (EveningChainCanary.ExpectedLeg leg : EveningChainCanary.EXPECTED) {
+      assertThat(firesAt(leg, day))
+          .as(
+              "%s fires after the %s the healthy fixture seeds — seedAllHealthy would produce a"
+                  + " PENDING leg and stop meaning what its name says",
+              leg.source(), HEALTHY_AT)
+          .isBeforeOrEqualTo(HEALTHY_AT);
+    }
+    assertThat(HEALTHY_AT)
+        .as("and it must still be before the 18:59 check, or the fixture is in the future")
+        .isBefore(LocalTime.of(18, 59));
   }
 
   /**
@@ -706,8 +917,7 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
     clearCanaryRun(day);
     seedAllHealthy(day);
 
-    NtfyClient ntfy = mock(NtfyClient.class);
-    when(ntfy.trySend(any(), any(), any())).thenReturn(true);
+    NtfyClient ntfy = ntfyThatSends(true);
     EveningChainCanary c = canary(fixedAt(day, 18, 59), true, ntfy);
     c.check();
     c.check(); // a second fire the same evening must stand down, not re-publish
@@ -733,8 +943,7 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
     // anAgedRunningRowIsStuckNotPending for why the fixture used to have to be an impossible one.
     seedRun(day, IngestRunLedger.SOURCE_MANAS_SCREEN, "RUNNING", 18, 45); // aged -> stuck
 
-    NtfyClient ntfy = mock(NtfyClient.class);
-    when(ntfy.trySend(any(), any(), any())).thenReturn(true);
+    NtfyClient ntfy = ntfyThatSends(true);
     canary(fixedAt(day, 18, 59), true, ntfy).check();
 
     verify(ntfy)
@@ -766,8 +975,7 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
     deleteSource(day, IngestRunLedger.SOURCE_DATA_QUALITY);
     seedRunRange(day, IngestRunLedger.SOURCE_DATA_QUALITY, "FAILURE", 18, 50, 18, 51);
 
-    NtfyClient ntfy = mock(NtfyClient.class);
-    when(ntfy.trySend(any(), any(), any())).thenReturn(true);
+    NtfyClient ntfy = ntfyThatSends(true);
     canary(fixedAt(day, 18, 59), true, ntfy).check();
 
     ArgumentCaptor<String> title = ArgumentCaptor.forClass(String.class);
@@ -803,8 +1011,7 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
     clearCanaryRun(day);
     seedAllHealthy(day);
 
-    NtfyClient ntfy = mock(NtfyClient.class);
-    when(ntfy.trySend(any(), any(), any())).thenReturn(false);
+    NtfyClient ntfy = ntfyThatSends(false);
     EveningChainCanary c = canary(fixedAt(day, 18, 59), true, ntfy);
 
     c.check();
@@ -818,6 +1025,35 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
     // still the de-duplication, it just no longer promises a retry.
     c.check();
     verify(ntfy, times(1)).trySend(any(), any(), any());
+  }
+
+  /**
+   * A blank ntfy topic is a NO-OP, not a lost message (review minor, 2026-08-17). {@code
+   * NtfyClient#trySend} returns false BOTH for "the POST failed" and for "no topic is configured",
+   * and {@code publish} could not tell them apart — so an unconfigured stack took the delivery-failure
+   * branch every evening: the claim left {@code CLAIMED}, and an ERROR log announcing that "tonight's
+   * message is LOST" about a message nothing was ever going to send.
+   *
+   * <p>The fixture is the default mock deliberately: {@code isConfigured()} answers false, which is
+   * exactly the shape a topic-less client has. Pre-fix this reached {@code trySend} and settled
+   * CLAIMED; the two assertions below are the two halves of that.
+   */
+  @Test
+  void anUnconfiguredNtfyTopicIsANoOpNotALostMessage() {
+    LocalDate day = dayBefore(3);
+    clearWindow(day);
+    clearCanaryRun(day);
+    seedAllHealthy(day);
+
+    NtfyClient unconfigured = mock(NtfyClient.class); // no topic: isConfigured() == false
+    canary(fixedAt(day, 18, 59), true, unconfigured).check();
+
+    verify(unconfigured, never()).trySend(any(), any(), any());
+    assertThat(canaryRunState(day))
+        .as(
+            "nothing was owed a delivery, so the day resolves DONE — leaving it CLAIMED records a"
+                + " loss that never happened and logs one every evening")
+        .isEqualTo("DONE");
   }
 
   @Test
@@ -899,6 +1135,23 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
     return canary(clock, live, mock(NtfyClient.class));
   }
 
+  /**
+   * A mock ntfy that IS configured (a topic is set) and reports {@code delivered} for every send.
+   *
+   * <p>⚠️ The {@code isConfigured} stub is load-bearing, not boilerplate: since the blank-topic fix
+   * {@code publish} treats an unconfigured client as a no-op, so a bare {@code mock(NtfyClient.class)}
+   * — whose {@code isConfigured()} defaults to false — makes the canary send NOTHING and every
+   * {@code verify(ntfy).trySend(...)} below fail for a reason that has nothing to do with what the
+   * test is about. {@link #anUnconfiguredNtfyTopicIsANoOpNotALostMessage} is where that default is
+   * the point rather than an accident.
+   */
+  private static NtfyClient ntfyThatSends(boolean delivered) {
+    NtfyClient ntfy = mock(NtfyClient.class);
+    when(ntfy.isConfigured()).thenReturn(true);
+    when(ntfy.trySend(any(), any(), any())).thenReturn(delivered);
+    return ntfy;
+  }
+
   private EveningChainCanary canary(Clock clock, boolean live, NtfyClient ntfy) {
     return canary(jdbc, clock, live, true, true, ntfy);
   }
@@ -960,10 +1213,38 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
     return values.isEmpty() ? null : values.get(0);
   }
 
+  /**
+   * Every leg with a terminal row inside the evening window.
+   *
+   * <p>⚠️ This used to seed 18:45–18:46 and that is no longer "healthy" for six of the nine (review
+   * Critical B, 2026-08-17). Each leg now admits only rows at or after its OWN trigger cron ({@link
+   * EveningChainCanary.ExpectedLeg}), and those crons run 18:45 (bhavcopy + the two screeners it
+   * drives) through 18:51 (breadth) — so an 18:45 row is BEFORE the boundary for the three NSE pulls,
+   * market-context, data-quality and breadth, and would read PENDING. {@link #HEALTHY_AT} is one
+   * literal minute after the latest of them and before the 18:59 check; {@link
+   * #theHealthyFixtureClearsEveryLegsOwnBoundary} is the ratchet that reds if a cron ever moves past
+   * it, rather than letting this fixture quietly stop meaning what its name says.
+   */
   private void seedAllHealthy(LocalDate day) {
-    for (String source : EveningChainCanary.EXPECTED) {
-      seedRunRange(day, source, "SUCCESS", 18, 45, 18, 46);
+    for (EveningChainCanary.ExpectedLeg leg : EveningChainCanary.EXPECTED) {
+      seedRunRange(
+          day,
+          leg.source(),
+          "SUCCESS",
+          HEALTHY_AT.getHour(),
+          HEALTHY_AT.getMinute(),
+          HEALTHY_AT.plusMinutes(1).getHour(),
+          HEALTHY_AT.plusMinutes(1).getMinute());
     }
+  }
+
+  /** The leg's trigger-cron fire time on {@code day} — its {@code expectedNotBefore}, as a wall clock. */
+  private static LocalTime firesAt(EveningChainCanary.ExpectedLeg leg, LocalDate day) {
+    ZonedDateTime fire =
+        CronExpression.parse(leg.cronDefault()).next(day.atStartOfDay(Ist.ZONE));
+    assertThat(fire).as("%s's cron must fire on %s", leg.source(), day).isNotNull();
+    assertThat(fire.toLocalDate()).isEqualTo(day);
+    return fire.toLocalTime();
   }
 
   /** {@code finishedAt} null means still RUNNING; pass e.g. {@code 18, 45} for 18:45 IST. */
@@ -1035,7 +1316,7 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
    * #theWindowPreCleanIsSourceScopedNotADaySweep} pins.
    */
   private void clearWindow(LocalDate day) {
-    EveningChainCanary.EXPECTED.forEach(source -> deleteSource(day, source));
+    EveningChainCanary.EXPECTED.forEach(leg -> deleteSource(day, leg.source()));
   }
 
   /**
@@ -1149,6 +1430,72 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
             + SERVICE
             + ".environment — the passthrough is missing and the container falls back to the"
             + " annotation default with no error (#653)");
+  }
+
+  private static EveningChainCanary.ExpectedLeg legFor(String source) {
+    return EveningChainCanary.EXPECTED.stream()
+        .filter(l -> l.source().equals(source))
+        .findFirst()
+        .orElseThrow(() -> new AssertionError("no expected leg for " + source));
+  }
+
+  /**
+   * The default a market-data {@code @Scheduled} annotation carries for {@code cronProperty} — read
+   * out of the SOURCE TEXT, so it is the producer's own literal rather than a third hand-kept copy.
+   *
+   * <p>Text, not reflection, and deliberately: reflection would need a property-to-class map, which
+   * is itself a copy that can drift, and the whole point is to have no such map. Same technique as
+   * {@code OperatingWindowTest} in strategy-signal, which walks both services' sources for exactly
+   * this reason.
+   *
+   * <p>FAILS on zero matches (the producer's property was renamed or removed, so the canary is
+   * judging rows against a schedule nothing reads) and on two or more (ambiguous — the boundary would
+   * silently pick one), rather than degrading to a skip.
+   */
+  private static String scheduledDefaultFor(String cronProperty) throws IOException {
+    Pattern placeholder = Pattern.compile("\\$\\{" + Pattern.quote(cronProperty) + ":([^}\"]+)}");
+    Set<String> found = new LinkedHashSet<>();
+    // BOTH services: two of the twelve legs are produced by strategy-signal (review Major C).
+    for (String service : List.of(SERVICE, "strategy-signal-service")) {
+      Path main = repoRoot().resolve("services/" + service + "/src/main/java");
+      try (var paths = Files.walk(main)) {
+        for (Path file : paths.filter(p -> p.toString().endsWith(".java")).toList()) {
+          Matcher m = placeholder.matcher(Files.readString(file, StandardCharsets.UTF_8));
+          while (m.find()) {
+            found.add(m.group(1));
+          }
+        }
+      }
+    }
+    if (found.size() != 1) {
+      return fail(
+          "expected exactly ONE @Scheduled default for "
+              + cronProperty
+              + " across both services' src/main/java, found "
+              + found
+              + " — the boundary cron this canary mirrors must have exactly one producer");
+    }
+    return found.iterator().next();
+  }
+
+  /**
+   * ⚠️ The two strategy-signal crons must ALSO be mirrored into market-data's compose environment,
+   * or this container cannot resolve them and the boundary silently falls back to the compiled
+   * default — #653, one service over. Compose's value is what the live container gets, so this is
+   * the copy that decides the boundary in production; {@link #eachLegMirrorsItsProducersScheduledDefault}
+   * only pins the compiled fallback.
+   */
+  @Test
+  void everyLegsCronIsResolvableFromThisServicesComposeEnvironment() throws IOException {
+    for (EveningChainCanary.ExpectedLeg leg : EveningChainCanary.EXPECTED) {
+      String envName = leg.cronProperty().toUpperCase(Locale.ROOT).replace('.', '_').replace('-', '_');
+      assertThat(composeEnvironmentDefault(envName))
+          .as(
+              "%s (%s) has no passthrough under services.%s.environment — the canary would judge %s"
+                  + " against the compiled default while .env moved the job",
+              leg.cronProperty(), envName, SERVICE, leg.source())
+          .isEqualTo(leg.cronDefault());
+    }
   }
 
   /** Walks up from the working directory to the repo root. FAILS rather than skipping if absent. */

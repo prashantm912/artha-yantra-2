@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.insights;
 
+import in.arthayantra.strategysignal.schedule.EveningLegReporter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -30,9 +31,11 @@ public class InsightSweeper {
   private static final Logger log = LoggerFactory.getLogger(InsightSweeper.class);
 
   private final InsightEngine engine;
+  private final EveningLegReporter legs;
 
-  public InsightSweeper(InsightEngine engine) {
+  public InsightSweeper(InsightEngine engine, EveningLegReporter legs) {
     this.engine = engine;
+    this.legs = legs;
   }
 
   /** 15-min data-trust sweep (§2.3 scheduled sweeps). */
@@ -102,20 +105,18 @@ public class InsightSweeper {
   /** 18:56-IST strategy-evidence sweep — STRATEGY_EVIDENCE, after the 18:55 graduation eval (§5.2). */
   @Scheduled(cron = "${artha.insights.strategy-evidence-cron:0 56 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void strategyEvidenceSweep() {
-    try {
-      engine.runStrategyEvidenceSweep();
-    } catch (RuntimeException e) {
-      log.warn("insight strategy-evidence sweep failed: {}", e.toString());
-    }
+    // Reported to market-data's 18:59 evening-chain check (review Major C, 2026-08-17), which
+    // announced "safe to shut down" without being able to see this sweep at all. The reporter keeps
+    // the previous behaviour exactly — run the body, catch RuntimeException, log a warn — and adds a
+    // ledger row for the outcome. It never throws, so the schedule is as safe as it was.
+    legs.report(EveningLegReporter.SOURCE_INSIGHT_STRATEGY_EVIDENCE, engine::runStrategyEvidenceSweep);
   }
 
   /** 18:57-IST sell-decision sweep — SELL_DECISION, after the swing batch persists V037 (§5.3). */
   @Scheduled(cron = "${artha.insights.sell-decision-cron:0 57 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void sellDecisionSweep() {
-    try {
-      engine.runSellDecisionSweep();
-    } catch (RuntimeException e) {
-      log.warn("insight sell-decision sweep failed: {}", e.toString());
-    }
+    // The sharpest of the five: it STARTS two minutes before the 18:59 check that announced the
+    // chain finished. Same reporting wrapper, same swallow-and-warn behaviour as before.
+    legs.report(EveningLegReporter.SOURCE_INSIGHT_SELL_DECISION, engine::runSellDecisionSweep);
   }
 }

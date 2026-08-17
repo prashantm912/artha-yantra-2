@@ -46,6 +46,20 @@ public class NtfyClient {
   }
 
   /**
+   * Whether a topic is configured at all, i.e. whether {@link #trySend} can ever do anything.
+   *
+   * <p>Exists because {@link #trySend}'s {@code false} conflates two situations a caller whose own
+   * bookkeeping depends on delivery must tell apart: a POST that failed (retry-worthy, worth an
+   * ERROR) and a client with no topic, where nothing was owed and nothing was lost. Mock stacks run
+   * with no topic by design, so without this an unconfigured stack logs a delivery failure every time
+   * a canary publishes. Deliberately a separate question rather than a third {@code trySend} return
+   * value: {@code trySend} answers "did the POST succeed", and "no topic" is not an answer to it.
+   */
+  public boolean isConfigured() {
+    return topic != null && !topic.isBlank();
+  }
+
+  /**
    * Like {@link #send}, but reports whether the POST actually succeeded instead of swallowing
    * the outcome — for a caller whose own durability guarantee depends on delivery having
    * happened (e.g. confirming a claimed publish only once the push is actually out), rather
@@ -62,7 +76,7 @@ public class NtfyClient {
    *     configured (mock mode — nothing was sent, by design) or the POST itself failed.
    */
   public boolean trySend(String title, String priority, String message) {
-    if (topic == null || topic.isBlank()) {
+    if (!isConfigured()) {
       return false;
     }
     try {

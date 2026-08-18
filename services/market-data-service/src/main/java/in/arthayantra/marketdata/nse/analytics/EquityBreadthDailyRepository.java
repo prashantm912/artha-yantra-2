@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.nse.analytics;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.time.LocalDate;
@@ -45,7 +46,7 @@ public class EquityBreadthDailyRepository {
                avg(close_price) OVER w50  AS sma50,  count(*) OVER w50  AS n50,
                avg(close_price) OVER w200 AS sma200, count(*) OVER w200 AS n200
         FROM nse_eod_bhavcopy
-        WHERE series = 'EQ' AND trade_date > ? AND trade_date <= ?
+        WHERE %s AND trade_date > ? AND trade_date <= ?
         WINDOW w50  AS (PARTITION BY symbol ORDER BY trade_date ROWS 49  PRECEDING),
                w200 AS (PARTITION BY symbol ORDER BY trade_date ROWS 199 PRECEDING)
       )
@@ -63,7 +64,8 @@ public class EquityBreadthDailyRepository {
       WHERE trade_date >= ?
       GROUP BY trade_date
       ORDER BY trade_date
-      """;
+      """
+          .formatted(CashEquityUniverse.SERIES_PREDICATE);
 
   private static final String UPSERT =
       """

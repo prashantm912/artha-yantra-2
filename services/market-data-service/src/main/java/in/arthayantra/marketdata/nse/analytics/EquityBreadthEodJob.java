@@ -51,7 +51,7 @@ public class EquityBreadthEodJob {
       NseEodBhavcopyRepository bhavcopy,
       IngestRunLedger ledger,
       @Value("${artha.breadth.materialize.enabled:true}") boolean enabled,
-      @Value("${artha.breadth.backfill-days:180}") int backfillDays) {
+      @Value("${artha.breadth.backfill-days:240}") int backfillDays) {
     this.repository = repository;
     this.bhavcopy = bhavcopy;
     this.ledger = ledger;
@@ -79,7 +79,9 @@ public class EquityBreadthEodJob {
     // into the catch so a fold failure is recorded, not vanished.
     Long runId = null;
     try {
-      LocalDate watermark = bhavcopy.maxTradeDate();
+      // Cash-scoped, to match the cash-scoped population compute() now folds (H24 PR-6). This is
+      // the second half of the mixed-watermark pair the ledger names; DataQualityEodJob was PR-5.
+      LocalDate watermark = bhavcopy.maxCashTradeDate();
       if (watermark == null) {
         log.info("breadth materialization skipped ({}) — no bhavcopy rows yet", trigger);
         return;

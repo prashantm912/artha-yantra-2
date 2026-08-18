@@ -4,6 +4,7 @@ import in.arthayantra.marketdata.equitydaily.AdjustedEquityDailySql;
 import in.arthayantra.marketdata.screener.ScreenCoverageFloor;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -81,7 +82,7 @@ public class ManasScreenService {
   /** The latest daily bhavcopy trade date (IST calendar date). */
   public LocalDate latestScreenDate() {
     return jdbc.queryForObject(
-        "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series IN ('EQ','BE')",
+        "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE " + CashEquityUniverse.SERIES_PREDICATE,
         LocalDate.class);
   }
 
@@ -190,7 +191,7 @@ public class ManasScreenService {
     return asOf == null
         ? latestScreenDate()
         : jdbc.queryForObject(
-            "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series IN ('EQ','BE')"
+            "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE " + CashEquityUniverse.SERIES_PREDICATE
                 + " AND trade_date <= ?::date",
             LocalDate.class,
             java.sql.Date.valueOf(asOf));

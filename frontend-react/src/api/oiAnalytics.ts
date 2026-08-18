@@ -799,7 +799,7 @@ export function useOiBuzz(index: string | null, date?: string | null) {
 }
 
 /** Market breadth for one date (oipulse Equity → Breadth): advance/decline + delivery-% leaders from
- * the EQ bhavcopy. 422 DATA_GAP (no bhavcopy for that date) → null → the page renders its empty state. */
+ * the EQ+BE cash bhavcopy. 422 DATA_GAP (no bhavcopy for that date) → null → the page renders its empty state. */
 export function useBreadth(date: string | null) {
   return useQuery({
     queryKey: ['breadth', date],

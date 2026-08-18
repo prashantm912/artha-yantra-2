@@ -30,9 +30,8 @@ import org.springframework.stereotype.Service;
  * {@code EquityIndexContributionService} ({@code BreadthController:63-68} explains why a
  * full-bhavcopy date read can never express the §12.3 "advances &gt; 32" rule intraday).
  *
- * <p>Measured on live 2026-08-18 for trade date 2026-08-17 — advances 1,193 → 1,294, declines
- * 1,401 → 1,521, unchanged 30 → 38, total 2,624 → <b>2,853</b> (+229 names that were being counted
- * by neither side).
+ * <p>The measured before/after for the session this shipped on lives in the PR, not here — a
+ * javadoc that restates one session's counts reads as stale within weeks.
  *
  * <p>⚠️ Two of the three reads do NOT move numerically, and the reasons differ — worth stating
  * because H24's plan predicted one of them and got the other backwards:
@@ -48,6 +47,12 @@ import org.springframework.stereotype.Service;
  *       anyway: it is correct the day NSE publishes a delivery figure for a BE name, and it keeps
  *       all three reads on one population rather than leaving a lone EQ-only filter to be
  *       misread later as deliberate.
+ *   <li><b>Interim divergence, by sequencing.</b> Until H24 PR-6 converts
+ *       {@code EquityBreadthDailyRepository:48}, the breadth PAGE shows this EQ+BE summary above an
+ *       EQ-only history chart drawn from {@code equity_breadth_daily}. The page self-describes
+ *       (its chart caption still says "from the EQ bhavcopy") and PR-3..6 deploy as ONE batch, so
+ *       the mismatch exists between commits and never in a running stack — but it is real in the
+ *       repo and is the reason PR-6 is not optional.
  * </ul>
  */
 @Service

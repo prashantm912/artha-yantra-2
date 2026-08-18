@@ -102,7 +102,7 @@ public class InsightEngine {
   }
 
   /** The data-trust sweep (called by {@link InsightSweeper}). Fail-soft. */
-  public int runTrustSweep() {
+  public SweepResult runTrustSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
     return run(GenerationContext.forTrust(trustService.snapshot(), now), now);
   }
@@ -112,7 +112,7 @@ public class InsightEngine {
    * (open bracketed positions over stalled feed instruments, the §12 interim health/data trigger).
    * Fail-soft.
    */
-  public int runRiskSweep() {
+  public SweepResult runRiskSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
     StaleTickSnapshot staleTick = portfolioReader.staleTickScan(contextClient.staleFeedKeys());
     return run(GenerationContext.forRisk(bookHeatReader.read(), staleTick, now), now);
@@ -124,7 +124,7 @@ public class InsightEngine {
    * (the session's rejections closest to firing). Every digest read is fail-soft — an absent digest
    * simply yields no crossing for that underlying (§6.5 honest degrade). Fail-soft overall.
    */
-  public int runContextSweep() {
+  public SweepResult runContextSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
     List<MarketContext.OptionsShift> shifts = new java.util.ArrayList<>();
     for (String underlying : props.context().underlyings()) {
@@ -135,19 +135,19 @@ public class InsightEngine {
   }
 
   /** The EOD sweep (called by {@link InsightSweeper}): REJECTION_RAIL_TREND + HYGIENE. Fail-soft. */
-  public int runEodSweep() {
+  public SweepResult runEodSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
     return run(GenerationContext.forEod(rejectionReader.railTrendScan(), portfolioReader.hygieneScan(), now), now);
   }
 
   /** The T-1 expiry sweep (called by {@link InsightSweeper}): EXPIRY_EVENT. Fail-soft. */
-  public int runExpirySweep() {
+  public SweepResult runExpirySweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
     return run(GenerationContext.forExpiry(portfolioReader.expiryScan(), now), now);
   }
 
   /** The weekly quality-report job (called by {@link InsightSweeper}): QUALITY_REPORT. Fail-soft. */
-  public int runQualityReport() {
+  public SweepResult runQualityReport() {
     OffsetDateTime now = OffsetDateTime.now(clock);
     return run(GenerationContext.forQuality(repository.qualityStats(props), now), now);
   }
@@ -157,7 +157,7 @@ public class InsightEngine {
    * evaluator): STRATEGY_EVIDENCE. Reads today's graduation board vs yesterday's persisted snapshot
    * (§5.2), writes today's snapshot + any crossing insight. Fail-soft.
    */
-  public int runStrategyEvidenceSweep() {
+  public SweepResult runStrategyEvidenceSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
     return run(GenerationContext.forStrategyEvidence(strategyEvidenceReader.strategyEvidenceScan(), now), now);
   }
@@ -166,7 +166,7 @@ public class InsightEngine {
    * The sell-decision sweep (called by {@link InsightSweeper}, after the swing batches persist V037):
    * SELL_DECISION over the unacknowledged SELL rows (§5.3). Fail-soft.
    */
-  public int runSellDecisionSweep() {
+  public SweepResult runSellDecisionSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
     return run(GenerationContext.forSellDecision(strategyEvidenceReader.sellDecisionScan(), now), now);
   }
@@ -181,13 +181,13 @@ public class InsightEngine {
   /**
    * Run every generator over the context and persist each candidate (idempotent upsert).
    *
-   * <p>Returns the number of candidates that reached a durable row, so the caller can say so out
-   * loud. <b>A zero return is a real answer, not an absence</b> — that distinction is the whole
+   * <p>Returns what actually happened, split NEW vs REFRESHED, so the caller can say so out loud. <b>A zero return is a real answer, not an absence</b> — that distinction is the whole
    * point (ledger H25): before this, a sweep that ran and legitimately found nothing was
    * byte-identical, from outside, to a sweep that never fired at all.
    */
-  private int run(GenerationContext ctx, OffsetDateTime now) {
-    int written = 0;
+  private SweepResult run(GenerationContext ctx, OffsetDateTime now) {
+    int fresh = 0;
+    int refreshed = 0;
     for (InsightGenerator gen : generators) {
       List<InsightCandidate> candidates;
       try {
@@ -197,16 +197,39 @@ public class InsightEngine {
         continue;
       }
       for (InsightCandidate c : candidates) {
-        if (persist(c, now)) {
-          written++;
+        switch (persist(c, now)) {
+          case NEW -> fresh++;
+          case REFRESHED -> refreshed++;
+          case FAILED -> {
+            /* already logged at WARN inside persist */
+          }
         }
       }
     }
-    return written;
+    return new SweepResult(fresh, refreshed);
   }
 
-  /** Returns true iff the candidate reached the durable row; false means it was logged and dropped. */
-  private boolean persist(InsightCandidate c, OffsetDateTime now) {
+  /**
+   * What one sweep did. ⚠️ {@code refreshed} is NOT a second insight — the upsert re-stamps an
+   * existing OPEN row on its dedupe key, so a single persistent condition refreshes on EVERY sweep.
+   * Reporting the two separately is the point: a log line saying "1 insight" every 5 minutes reads
+   * as 288 insights a day, and a number that will be trusted must not need a footnote.
+   */
+  public record SweepResult(int fresh, int refreshed) {
+    @Override
+    public String toString() {
+      return fresh + " new / " + refreshed + " refreshed";
+    }
+  }
+
+  /** Whether a candidate became a NEW row, refreshed an existing one, or never landed. */
+  enum Persisted {
+    NEW,
+    REFRESHED,
+    FAILED
+  }
+
+  private Persisted persist(InsightCandidate c, OffsetDateTime now) {
     try {
       OffsetDateTime cooldownUntil = c.cooldownMinutes() == null ? null : now.plusMinutes(c.cooldownMinutes());
       // The delivery decision needs the prior occurrence BEFORE the upsert overwrites/replaces it.
@@ -263,10 +286,10 @@ public class InsightEngine {
       if (upsert.inserted() || escalated || cooldownExpired) {
         publisher.publish(upsert.insight());
       }
-      return true;
+      return upsert.inserted() ? Persisted.NEW : Persisted.REFRESHED;
     } catch (RuntimeException e) {
       log.warn("insight persist failed ({}): {}", c.dedupeKey(), e.toString());
-      return false;
+      return Persisted.FAILED;
     }
   }
 

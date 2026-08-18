@@ -12,11 +12,14 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Ledger H25: a sweep that ran and legitimately found nothing must be distinguishable from a sweep
@@ -39,19 +42,55 @@ class InsightSweepCountIntegrationTest extends StrategySignalIntegrationTestBase
 
   @Autowired private InsightRepository repository;
   @Autowired private ObjectMapper objectMapper;
+  @Autowired private JdbcTemplate jdbc;
 
-  @Test
-  void aSweepWithNothingToReportReturnsZeroRatherThanSayingNothing() {
-    assertThat(runSellDecisionSweepOver(List.of())).isZero();
+  /**
+   * ⚠️ The ITs share ONE singleton DB with no per-method cleanup, and state survives surefire
+   * RERUNS as well as methods. Without this, {@link #aSweepWithOneUnacknowledgedSellReportsItAsNEW}
+   * passes in isolation and fails in the full suite (or on a second run) because the row it expects
+   * to be NEW already exists from the previous pass — measured, not hypothesised: that is exactly
+   * how it first failed. The dedupe key is {@code SELL_DECISION:<sellDecisionId>}, so purging this
+   * class's two ids is sufficient and touches nothing else.
+   */
+  @BeforeEach
+  @AfterEach
+  void purgeOwnInsights() {
+    jdbc.update("DELETE FROM insights WHERE dedupe_key IN (?,?)", "SELL_DECISION:1", "SELL_DECISION:2");
   }
 
   @Test
-  void aSweepWithOneUnacknowledgedSellReturnsOne() {
-    assertThat(runSellDecisionSweepOver(List.of(sell(1L)))).isEqualTo(1);
+  void aSweepWithNothingToReportSaysSoRatherThanSayingNothing() {
+    InsightEngine.SweepResult r = runSellDecisionSweepOver(List.of());
+    assertThat(r.fresh()).isZero();
+    assertThat(r.refreshed()).isZero();
+    assertThat(r).hasToString("0 new / 0 refreshed");
+  }
+
+  @Test
+  void aSweepWithOneUnacknowledgedSellReportsItAsNEW() {
+    InsightEngine.SweepResult r = runSellDecisionSweepOver(List.of(sell(1L)));
+    assertThat(r.fresh()).isEqualTo(1);
+    assertThat(r.refreshed()).isZero();
+  }
+
+  /**
+   * The discriminating case, and the reason the count is split. A single persistent condition
+   * REFRESHES its existing OPEN row on every sweep — so an implementation that simply counted
+   * candidates (or counted every non-throwing persist as a write) would report "1 insight" here,
+   * forever, every five minutes, and an operator would read that as 288 insights a day.
+   */
+  @Test
+  void theSameSellOnASecondSweepIsAREFRESH_NOT_ASECONDINSIGHT() {
+    runSellDecisionSweepOver(List.of(sell(2L)));
+
+    InsightEngine.SweepResult again = runSellDecisionSweepOver(List.of(sell(2L)));
+
+    assertThat(again.fresh()).isZero();
+    assertThat(again.refreshed()).isEqualTo(1);
   }
 
   /** Builds the engine the same way {@code StaleTickDedupeIntegrationTest} does, one generator. */
-  private int runSellDecisionSweepOver(List<SellDecisionInputs.SellRow> sells) {
+  private InsightEngine.SweepResult runSellDecisionSweepOver(List<SellDecisionInputs.SellRow> sells) {
     StrategyEvidenceReader evidenceReader = mock(StrategyEvidenceReader.class);
     when(evidenceReader.sellDecisionScan())
         .thenReturn(new SellDecisionInputs(LocalDate.of(2026, 8, 18), sells));

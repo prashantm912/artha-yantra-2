@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.context;
 
+import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -18,8 +19,15 @@ import org.springframework.stereotype.Repository;
  * services because those are another module's internal types (cross-module deps target base-package
  * types only in this service).
  *
+ * <p>⚠️ Every fold here reads the EQ+BE cash universe ({@link CashEquityUniverse}) — H24 PR-4,
+ * which converted all NINE reads in one change. They move together on purpose: two of them
+ * ({@link #latestSession}, {@link #priorSession}) are {@code max(trade_date)} PINS for the other
+ * seven, and <b>widening a population without widening its pin is the mixed-watermark defect</b>
+ * H24 names at {@code EquityBreadthEodJob:82} + {@code DataQualityEodJob:103}. Splitting this file
+ * across PRs would have created that defect for the duration.
+ *
  * <p>Idioms match {@code nse.analytics}: plain {@link JdbcTemplate}, positional {@code ?} params,
- * {@code series = 'EQ'}, {@code java.sql.Date.valueOf} binds, IST-safe {@code (col AT TIME ZONE
+ * {@code CashEquityUniverse.SERIES_PREDICATE}, {@code java.sql.Date.valueOf} binds, IST-safe {@code (col AT TIME ZONE
  * 'Asia/Kolkata')::date} casts (never a bare {@code ::date}). Every windowed fold carries a lower
  * {@code trade_date} bound so the {@code ROW_NUMBER} scan is chunk-pruned, not full-table.
  */
@@ -32,16 +40,19 @@ public class EquityContextRepository {
     this.jdbc = jdbc;
   }
 
-  /** The latest EQ bhavcopy session (null when the table is empty). */
+  /** The latest cash-equity (EQ+BE) bhavcopy session (null when the table is empty). */
   public LocalDate latestSession() {
     return jdbc.queryForObject(
-        "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series = 'EQ'", LocalDate.class);
+        "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE " + CashEquityUniverse.SERIES_PREDICATE,
+        LocalDate.class);
   }
 
-  /** The EQ session strictly before {@code date} that has data (null when none). */
+  /** The cash-equity session strictly before {@code date} that has data (null when none). */
   public LocalDate priorSession(LocalDate date) {
     return jdbc.query(
-            "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series = 'EQ' AND trade_date < ?",
+            "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE "
+                + CashEquityUniverse.SERIES_PREDICATE
+                + " AND trade_date < ?",
             (rs, n) -> rs.getObject(1, LocalDate.class),
             java.sql.Date.valueOf(date))
         .stream()
@@ -49,7 +60,7 @@ public class EquityContextRepository {
         .orElse(null);
   }
 
-  /** Advances/declines/unchanged/total for one EQ session (0 total ⇒ no session). */
+  /** Advances/declines/unchanged/total for one cash-equity session (0 total ⇒ no session). */
   public record AdCounts(int advances, int declines, int unchanged, int total) {}
 
   public AdCounts advanceDecline(LocalDate date) {
@@ -58,7 +69,9 @@ public class EquityContextRepository {
             + " count(*) FILTER (WHERE close_price < prev_close) AS dec,"
             + " count(*) FILTER (WHERE close_price = prev_close) AS unch,"
             + " count(*) AS total"
-            + " FROM nse_eod_bhavcopy WHERE trade_date = ? AND series = 'EQ' AND prev_close IS NOT NULL",
+            + " FROM nse_eod_bhavcopy WHERE trade_date = ? AND "
+            + CashEquityUniverse.SERIES_PREDICATE
+            + " AND prev_close IS NOT NULL",
         (rs, n) -> new AdCounts(rs.getInt("adv"), rs.getInt("dec"), rs.getInt("unch"), rs.getInt("total")),
         java.sql.Date.valueOf(date));
   }
@@ -66,14 +79,15 @@ public class EquityContextRepository {
   /** One session's advance/decline counts (for the breadth-thrust moving average). */
   public record AdSession(LocalDate tradeDate, int advances, int declines) {}
 
-  /** The last {@code sessions} EQ sessions on/before {@code date}, newest first. */
+  /** The last {@code sessions} cash-equity sessions on/before {@code date}, newest first. */
   public List<AdSession> advDecSeries(LocalDate date, int sessions) {
     return jdbc.query(
         "SELECT trade_date,"
             + " count(*) FILTER (WHERE close_price > prev_close) AS adv,"
             + " count(*) FILTER (WHERE close_price < prev_close) AS dec"
             + " FROM nse_eod_bhavcopy"
-            + " WHERE series = 'EQ' AND prev_close IS NOT NULL AND trade_date <= ?"
+            + " WHERE " + CashEquityUniverse.SERIES_PREDICATE
+            + " AND prev_close IS NOT NULL AND trade_date <= ?"
             + " GROUP BY trade_date ORDER BY trade_date DESC LIMIT ?",
         (rs, n) -> new AdSession(rs.getObject("trade_date", LocalDate.class), rs.getInt("adv"), rs.getInt("dec")),
         java.sql.Date.valueOf(date),
@@ -94,7 +108,8 @@ public class EquityContextRepository {
             + "  SELECT symbol, close_price,"
             + "         ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn"
             + "  FROM nse_eod_bhavcopy"
-            + "  WHERE series = 'EQ' AND trade_date <= ? AND trade_date > (?::date - INTERVAL '110 days')),"
+            + "  WHERE " + CashEquityUniverse.SERIES_PREDICATE
+            + "    AND trade_date <= ? AND trade_date > (?::date - INTERVAL '110 days')),"
             + " per_symbol AS ("
             + "  SELECT symbol,"
             + "         max(close_price) FILTER (WHERE rn = 1) AS last_close,"
@@ -131,7 +146,7 @@ public class EquityContextRepository {
             + "  SELECT symbol, deliv_per,"
             + "         ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn"
             + "  FROM nse_eod_bhavcopy"
-            + "  WHERE series = 'EQ' AND deliv_per IS NOT NULL"
+            + "  WHERE " + CashEquityUniverse.SERIES_PREDICATE + " AND deliv_per IS NOT NULL"
             + "    AND trade_date <= ? AND trade_date > (?::date - INTERVAL '45 days')),"
             + " stats AS ("
             + "  SELECT symbol,"
@@ -169,7 +184,8 @@ public class EquityContextRepository {
   public List<SessionChange> sectorSessionChange(LocalDate date) {
     return jdbc.query(
         "SELECT symbol, close_price, prev_close FROM nse_eod_bhavcopy"
-            + " WHERE trade_date = ? AND series = 'EQ' AND prev_close > 0",
+            + " WHERE trade_date = ? AND " + CashEquityUniverse.SERIES_PREDICATE
+            + " AND prev_close > 0",
         (rs, n) ->
             new SessionChange(
                 rs.getString("symbol"), rs.getBigDecimal("close_price"), rs.getBigDecimal("prev_close")),
@@ -189,7 +205,8 @@ public class EquityContextRepository {
             + "  SELECT symbol, close_price,"
             + "         ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn"
             + "  FROM nse_eod_bhavcopy"
-            + "  WHERE series = 'EQ' AND trade_date <= ? AND trade_date > (?::date - INTERVAL '45 days'))"
+            + "  WHERE " + CashEquityUniverse.SERIES_PREDICATE
+            + "    AND trade_date <= ? AND trade_date > (?::date - INTERVAL '45 days'))"
             + " SELECT symbol,"
             + "        max(close_price) FILTER (WHERE rn = 1) AS c0,"
             + "        max(close_price) FILTER (WHERE rn = ?) AS c_prior"
@@ -215,7 +232,8 @@ public class EquityContextRepository {
     args.addAll(members);
     return jdbc.query(
         "SELECT symbol, close_price, prev_close FROM nse_eod_bhavcopy"
-            + " WHERE trade_date = ? AND series = 'EQ' AND prev_close > 0 AND symbol IN ("
+            + " WHERE trade_date = ? AND " + CashEquityUniverse.SERIES_PREDICATE
+            + " AND prev_close > 0 AND symbol IN ("
             + placeholders
             + ")",
         (rs, n) ->

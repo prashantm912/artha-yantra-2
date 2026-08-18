@@ -14,9 +14,12 @@
 --
 -- ⚠️ DO NOT DEPLOY THIS WITHOUT THE backfill-days RAISE IN THE SAME PR. That config was 180 while
 -- the table already spanned 217 days, so this TRUNCATE on its own SILENTLY DROPS ~37 days of
--- history. EquityBreadthEodJob:54 raises the default to 240 here. There is no env override for the
--- knob -- verified against `docker inspect ay-market-data` -- so the @Value default IS the deployed
--- value, and raising the default is the whole of the fix.
+-- history. EquityBreadthEodJob:54 raises the default to 240 here. The @Value default IS the
+-- deployed value: deploy/docker-compose.yml:420 passes through ARTHA_BREADTH_MATERIALIZE_CRON and
+-- nothing else under that prefix, and `docker inspect ay-market-data-service` confirms
+-- ARTHA_BREADTH_BACKFILL_DAYS is absent from the running container. Raising the default is
+-- therefore the whole of the fix -- but if a passthrough for the knob is ever added this comment
+-- goes stale, and the deployed value must be re-read rather than assumed from the source.
 --
 -- (This file briefly rode PR-5 by accident and was pulled back out before that PR merged. Had it
 -- landed there, the migration would have run WITHOUT the raise above -- which is the exact loss

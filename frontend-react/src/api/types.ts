@@ -805,7 +805,7 @@ export interface BreadthDeliveryRow {
   pctChange: string | null;
 }
 
-/** GET /api/v1/market/breadth?date= — advance/decline + delivery-% leaders from the EQ bhavcopy. */
+/** GET /api/v1/market/breadth?date= — advance/decline + delivery-% leaders from the EQ+BE cash bhavcopy. */
 export interface Breadth {
   summary: BreadthSummary;
   topDelivery: BreadthDeliveryRow[];

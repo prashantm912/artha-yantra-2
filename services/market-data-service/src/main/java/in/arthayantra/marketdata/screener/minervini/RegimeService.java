@@ -20,8 +20,10 @@ import org.springframework.stereotype.Service;
  * alone. It read {@code series = 'EQ'} until H24 PR-2, which advised the owner off a regime
  * computed over a population 9.2% narrower than the one the screens it gates actually rank
  * ({@code TrendTemplateService:81} and {@code ManasScreenService:84} are both EQ+BE) and than the
- * one the paper books trade. This value is carried in the funnel payload
- * ({@code MinerviniFunnelService:62,129}), so it gates the OWNER's judgement, not the engine.
+ * one the paper books trade. This value is carried in BOTH funnel payloads
+ * ({@code MinerviniFunnelService:62,129} and {@code ManasFunnelService:73,169}) and rendered as a
+ * badge on both screener pages, so it gates the OWNER's judgement, not the engine — no Java branch
+ * reads the verdict string.
  *
  * <p>The widening is numerically small but structurally required: measured on live 2026-08-18 over
  * the shipped 10-day window, EQ-only read adv 6,477 / dec 8,226 = 0.4405 and EQ+BE reads adv 7,127
@@ -31,8 +33,9 @@ import org.springframework.stereotype.Service;
  *
  * <p>NULL columns cannot distort the counts: {@code count(*) FILTER (WHERE ...)} skips a row whose
  * comparison is NULL, so a bar with no {@code prev_close} lands in neither adv nor dec. (Measured
- * the same day, BE carries {@code prev_close} on 3,522 of 3,522 recent rows, so it is a real vote
- * rather than a silent abstention.) There is no {@code ORDER BY} here, so the NULLs-sort-first
+ * 2026-08-18, BE carries {@code prev_close} on 54,613 of 54,613 rows — the whole series, so it is a
+ * real vote rather than a silent abstention. Quoted all-time because a window-relative count is not
+ * re-derivable by a later reader.) There is no {@code ORDER BY} here, so the NULLs-sort-first
  * hazard that constrains {@code BreadthService:92} does not apply to this site.
  */
 @Service
@@ -49,7 +52,7 @@ public class RegimeService {
         count(*) FILTER (WHERE close_price < prev_close) AS dec,
         count(DISTINCT trade_date) AS sessions
       FROM nse_eod_bhavcopy
-      WHERE %s AND trade_date <= ?::date AND trade_date > (?::date - ?)
+      WHERE (%s) AND trade_date <= ?::date AND trade_date > (?::date - ?)
       """
           .formatted(CashEquityUniverse.SERIES_PREDICATE);
 

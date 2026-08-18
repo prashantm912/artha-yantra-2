@@ -71,8 +71,9 @@ public class NseEodBhavcopyRepository {
    * against the prior day's to report symbols "absent vs prior day", so an EQ-only read counted an
    * NSE surveillance move EQ→BE as a DISAPPEARANCE — the symbol is present and trading, merely
    * reclassified. Measured on the latest session pair: <b>3 reported drops, of which 2 were
-   * migrations, not absences</b>, and 413 symbols changed between EQ and BE in the trailing 120
-   * days. It fails in the ALARMING direction, and it also depresses the {@code bhavcopy_eq}
+   * migrations, not absences</b>, and ~400+ symbols changed between EQ and BE in the trailing
+   * ~120 days (measured 2026-08-18; the exact count depends on whether the window is counted in
+   * calendar days or sessions, and the table gap-fills, so it will not reproduce to the digit). It fails in the ALARMING direction, and it also depresses the {@code bhavcopy_eq}
    * coverage ratio against its 0.98 floor.
    */
   public Set<String> cashSymbolsOn(LocalDate date) {

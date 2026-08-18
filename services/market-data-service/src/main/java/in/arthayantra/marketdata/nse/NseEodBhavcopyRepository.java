@@ -4,6 +4,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -17,10 +18,36 @@ public class NseEodBhavcopyRepository {
     this.jdbc = jdbc;
   }
 
-  /** Newest {@code trade_date} present — the catch-up watermark; null when the table is empty. */
+  /**
+   * Newest {@code trade_date} present in ANY series — the catch-up watermark; null when the table is
+   * empty.
+   *
+   * <p>⚠️ Series-agnostic ON PURPOSE, and it must stay that way: the backfill catch-up
+   * ({@code BhavcopyBackfillService:334,396}) asks "did we fetch this day at all", which is a
+   * question about the FILE, not about the cash universe. A day whose file landed with only
+   * non-cash rows was still fetched.
+   *
+   * <p>⚠️ But a CONSUMER that pairs this watermark with a cash-universe population has a
+   * mixed-watermark defect by construction — H24 names {@code DataQualityEodJob:103} and
+   * {@code EquityBreadthEodJob:82} as the two instances. Those want {@link #maxCashTradeDate()}.
+   */
   public LocalDate maxTradeDate() {
     return jdbc.query(
         "SELECT max(trade_date) AS d FROM nse_eod_bhavcopy",
+        rs -> rs.next() ? rs.getObject("d", LocalDate.class) : null);
+  }
+
+  /**
+   * Newest {@code trade_date} carrying CASH-EQUITY rows ({@link CashEquityUniverse}) — the watermark
+   * for any consumer whose population is the cash universe, so that watermark and population agree.
+   *
+   * <p>Measured 2026-08-18: identical to {@link #maxTradeDate()} on live, and there is no date in
+   * the table's whole span carrying non-cash rows without cash rows. The two can only diverge on a
+   * partial-file day — which is exactly the day a data-quality report must not silently score.
+   */
+  public LocalDate maxCashTradeDate() {
+    return jdbc.query(
+        "SELECT max(trade_date) AS d FROM nse_eod_bhavcopy WHERE " + CashEquityUniverse.SERIES_PREDICATE,
         rs -> rs.next() ? rs.getObject("d", LocalDate.class) : null);
   }
 
@@ -36,11 +63,23 @@ public class NseEodBhavcopyRepository {
         from, to);
   }
 
-  /** EQ-series symbols present on one settled trade date, sorted for deterministic diff output. */
-  public Set<String> eqSymbolsOn(LocalDate date) {
+  /**
+   * Cash-equity (EQ+BE) symbols present on one settled trade date, sorted for deterministic diff
+   * output.
+   *
+   * <p>⚠️ Was {@code eqSymbolsOn}, EQ-only, until H24 PR-5. Its one consumer diffs today's set
+   * against the prior day's to report symbols "absent vs prior day", so an EQ-only read counted an
+   * NSE surveillance move EQ→BE as a DISAPPEARANCE — the symbol is present and trading, merely
+   * reclassified. Measured on the latest session pair: <b>3 reported drops, of which 2 were
+   * migrations, not absences</b>, and 413 symbols changed between EQ and BE in the trailing 120
+   * days. It fails in the ALARMING direction, and it also depresses the {@code bhavcopy_eq}
+   * coverage ratio against its 0.98 floor.
+   */
+  public Set<String> cashSymbolsOn(LocalDate date) {
     return new TreeSet<>(
         jdbc.query(
-            "SELECT symbol FROM nse_eod_bhavcopy WHERE trade_date = ? AND series = 'EQ'",
+            "SELECT symbol FROM nse_eod_bhavcopy WHERE trade_date = ? AND "
+                + CashEquityUniverse.SERIES_PREDICATE,
             (rs, n) -> rs.getString("symbol"),
             java.sql.Date.valueOf(date)));
   }

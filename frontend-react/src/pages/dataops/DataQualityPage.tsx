@@ -14,7 +14,9 @@ import { cn } from '../../lib/cn.ts';
 const SCOPE_SECTIONS = [
   { scope: 'chain_capture', label: 'Chain capture' },
   { scope: 'intraday_1m', label: 'Intraday 1m' },
-  { scope: 'bhavcopy_eq', label: 'Bhavcopy EQ' },
+  // Scope KEY stays 'bhavcopy_eq' -- it is persisted in data_quality rows and renaming it would
+  // orphan every historical row. Only the LABEL moves, since the population is EQ+BE (H24 PR-5).
+  { scope: 'bhavcopy_eq', label: 'Bhavcopy cash (EQ+BE)' },
 ] as const;
 
 function StatusBadge({ ok }: { ok: boolean }) {

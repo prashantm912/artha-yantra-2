@@ -100,7 +100,8 @@ public class DataQualityEodJob {
     }
     Long runId = null;
     try {
-      LocalDate day = bhavcopy.maxTradeDate();
+      // Cash-scoped watermark, to match the cash-scoped population this job then diffs (H24 PR-5).
+      LocalDate day = bhavcopy.maxCashTradeDate();
       if (day == null) {
         log.info("data-quality report skipped ({}) — no bhavcopy rows yet", trigger);
         return;
@@ -177,9 +178,9 @@ public class DataQualityEodJob {
 
   private void addBhavcopyRows(
       LocalDate day, OffsetDateTime computedAt, List<DataQualityRow> rows) {
-    Set<String> today = bhavcopy.eqSymbolsOn(day);
+    Set<String> today = bhavcopy.cashSymbolsOn(day);
     LocalDate priorDay = bhavcopy.prevTradeDate(day);
-    Set<String> prior = priorDay == null ? Set.of() : bhavcopy.eqSymbolsOn(priorDay);
+    Set<String> prior = priorDay == null ? Set.of() : bhavcopy.cashSymbolsOn(priorDay);
     Set<String> dropped = new TreeSet<>(prior);
     dropped.removeAll(today);
     for (String symbol : dropped) {

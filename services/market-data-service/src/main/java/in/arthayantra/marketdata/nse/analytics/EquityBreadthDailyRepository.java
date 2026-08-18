@@ -1,7 +1,7 @@
 package in.arthayantra.marketdata.nse.analytics;
 
-import io.swagger.v3.oas.annotations.media.Schema;
 import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.time.LocalDate;

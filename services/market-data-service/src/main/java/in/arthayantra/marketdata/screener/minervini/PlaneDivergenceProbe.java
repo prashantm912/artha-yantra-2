@@ -1,9 +1,9 @@
 package in.arthayantra.marketdata.screener.minervini;
 
 import in.arthayantra.marketdata.equitydaily.AdjustedEquityDailySql;
+import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
-import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;

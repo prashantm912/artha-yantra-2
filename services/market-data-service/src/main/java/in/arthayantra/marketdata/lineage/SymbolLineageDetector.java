@@ -1,7 +1,7 @@
 package in.arthayantra.marketdata.lineage;
 
-import java.math.BigDecimal;
 import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import org.slf4j.Logger;

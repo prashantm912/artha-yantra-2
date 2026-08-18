@@ -418,6 +418,12 @@ services:
       ARTHA_DATA_QUALITY_EOD_CRON: "${ARTHA_DATA_QUALITY_EOD_CRON:-0 50 18 * * MON-FRI}"
       # equity breadth fold
       ARTHA_BREADTH_MATERIALIZE_CRON: "${ARTHA_BREADTH_MATERIALIZE_CRON:-0 51 18 * * MON-FRI}"
+      # VALUE IS THE CODE DEFAULT, BYTE FOR BYTE - this line changes nothing about live behaviour,
+      # it only makes the knob reachable from .env (#653). Added with V058 (H24 PR-6), which
+      # TRUNCATEs equity_breadth_daily and lets the boot pass refill it bounded by this number:
+      # if it turns out wrong on deploy night, correcting it must not require a Maven build while
+      # the table sits empty.
+      ARTHA_BREADTH_BACKFILL_DAYS: "${ARTHA_BREADTH_BACKFILL_DAYS:-240}"
       # bhavcopy-vs-Kite close reconciliation
       ARTHA_BHAVCOPY_CLOSE_CRON: "${ARTHA_BHAVCOPY_CLOSE_CRON:-0 58 18 * * MON-FRI}"
       # Coverage floor for that canary: below this many comparable symbols it never reports GREEN.

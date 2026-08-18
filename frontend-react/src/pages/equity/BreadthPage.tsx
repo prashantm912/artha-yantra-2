@@ -31,7 +31,7 @@ function BreadthStat({ label, value }: { label: string; value: string }) {
 const ETF_NAME = /BEES|ETF|IETF|ILIQ|LIQUID|GOLDSHARE|ADD$/i;
 
 // Equity → Breadth (oipulse): advance/decline + average delivery% + the delivery-% leaders for one
-// trade date, read from the NSE EQ-series EOD bhavcopy (BreadthController). EOD only — the date defaults
+// trade date, read from the NSE cash (EQ+BE) EOD bhavcopy (BreadthController). EOD only — the date defaults
 // to the last completed weekday session; the owner picks any past date to value-verify. 422 (no bhavcopy
 // for that date) renders the empty state.
 
@@ -130,7 +130,7 @@ export function BreadthPage() {
         help="Counts how many stocks rose vs fell on a session and lists the delivery-% leaders — more advances than declines signals a broadly strong day."
         subtitle={
           <>
-            NSE EQ-series EOD bhavcopy · advance/decline + delivery-% leaders
+            NSE cash (EQ+BE) EOD bhavcopy · advance/decline + delivery-% leaders
             {data ? ` · ${summary?.tradeDate}` : ''}
           </>
         }
@@ -199,8 +199,8 @@ export function BreadthPage() {
       <BeatBlock className="mt-6">
         <h2 className="mb-1 text-h3 text-ay-text">Breadth history</h2>
         <p className="mb-2 text-caption text-ay-muted">
-          Advance/decline + % of stocks above their 50-day MA, materialized nightly from the EQ
-          bhavcopy. The series accrues forward from deploy.
+          Advance/decline + % of stocks above their 50-day MA, materialized nightly from the EQ+BE
+          cash bhavcopy. The series accrues forward from deploy.
         </p>
         <BreadthHistoryChart />
       </BeatBlock>

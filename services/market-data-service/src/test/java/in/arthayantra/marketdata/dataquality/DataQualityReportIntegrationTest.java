@@ -53,6 +53,14 @@ class DataQualityReportIntegrationTest extends MarketDataIntegrationTestBase {
    * this fixture exercises the cash-scoped watermark rather than only the cash-scoped population.
    */
   private static final String NON_CASH_LATER = "DQNONCASH2198";
+  /**
+   * H24 PR-6: a non-cash row on a date BETWEEN prior and day. The series-agnostic prevTradeDate()
+   * returned this date, whose cash set is empty -- so `expected` was 0, `ok` short-circuited to
+   * TRUE, and zero dropout rows were emitted. The check went silently green on exactly the kind of
+   * day it exists to catch.
+   */
+  private static final String NON_CASH_BETWEEN = "DQNCMID2198";
+  private static final LocalDate BETWEEN = LocalDate.of(2198, 7, 15);
 
   @Autowired JdbcTemplate jdbc;
   @Autowired TradingBuckets buckets;
@@ -73,6 +81,8 @@ class DataQualityReportIntegrationTest extends MarketDataIntegrationTestBase {
     // The job must score DAY. On the agnostic watermark it scored DAY+1, where the cash set is
     // EMPTY -- so every prior symbol reported "absent vs prior day" at once.
     seedBhavcopy(DAY.plusDays(1), NON_CASH_LATER, "BZ");
+    // A BZ-only date BETWEEN prior and day: prevCashTradeDate must step OVER it to PRIOR.
+    seedBhavcopy(BETWEEN, NON_CASH_BETWEEN, "BZ");
 
     OffsetDateTime from = DAY.atTime(9, 15).atOffset(Ist.OFFSET);
     OffsetDateTime to = DAY.atTime(15, 30).atOffset(Ist.OFFSET);
@@ -135,6 +145,9 @@ class DataQualityReportIntegrationTest extends MarketDataIntegrationTestBase {
     assertThat(dropout.expected()).isEqualTo(1);
     assertThat(dropout.present()).isZero();
     assertThat(dropout.ok()).isFalse();
+    // PRIOR, not the BZ-only 2198-07-15 sitting between them: prevCashTradeDate stepped over it.
+    // On the agnostic form the prior cash set is EMPTY, so `expected` is 0, `ok` short-circuits to
+    // TRUE and this dropout row does not exist at all.
     assertThat(dropout.detail()).isEqualTo("absent vs prior day 2198-07-13");
 
     // The population is the CASH universe (EQ+BE), so the migrated name counts on BOTH sides:
@@ -209,11 +222,12 @@ class DataQualityReportIntegrationTest extends MarketDataIntegrationTestBase {
     jdbc.update("DELETE FROM candles WHERE exchange='NSE' AND tradingsymbol=?", INDEX);
     jdbc.update("DELETE FROM options_chain_snapshots WHERE underlying=?", CHAIN);
     jdbc.update(
-        "DELETE FROM nse_eod_bhavcopy WHERE symbol IN (?,?,?,?)",
+        "DELETE FROM nse_eod_bhavcopy WHERE symbol IN (?,?,?,?,?)",
         KEPT_EQ,
         DROPPED_EQ,
         MIGRATED_EQ_TO_BE,
-        NON_CASH_LATER);
+        NON_CASH_LATER,
+        NON_CASH_BETWEEN);
   }
 
   private int dataQualityLedgerRows() {

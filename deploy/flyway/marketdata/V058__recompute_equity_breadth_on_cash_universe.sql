@@ -21,6 +21,15 @@
 -- therefore the whole of the fix -- but if a passthrough for the knob is ever added this comment
 -- goes stale, and the deployed value must be re-read rather than assumed from the source.
 --
+-- ⚠️ THE PAIRING HAS AN EXPIRY, AND IT IS 23 DAYS FROM WRITING. The cold-start floor is
+-- `watermark - 240` computed at REFILL time, while the table's own floor (2026-01-12) is fixed.
+-- 2026-08-17 - 240d = 2025-12-20, which clears it by 23 days. Apply this on or after ~2026-09-09
+-- and the TRUNCATE silently shortens the series again, with a shorter chart as the only tell.
+-- If this has not been applied by then, RE-MEASURE the span and re-derive the number; do not
+-- trust 240. (Raising it far higher is not free either: the fold can only emit SMA-200 counts
+-- where 200 sessions of history exist, so a much deeper floor just adds leading days with
+-- sma200_universe = 0.)
+--
 -- (This file briefly rode PR-5 by accident and was pulled back out before that PR merged. Had it
 -- landed there, the migration would have run WITHOUT the raise above -- which is the exact loss
 -- this comment exists to prevent.)

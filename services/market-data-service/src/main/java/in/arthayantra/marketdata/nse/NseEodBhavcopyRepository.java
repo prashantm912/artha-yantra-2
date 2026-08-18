@@ -85,10 +85,23 @@ public class NseEodBhavcopyRepository {
             java.sql.Date.valueOf(date)));
   }
 
-  /** Previous settled trade date with any bhavcopy rows, or null on cold start. */
-  public LocalDate prevTradeDate(LocalDate before) {
+  /**
+   * Previous settled trade date carrying CASH-EQUITY rows, or null on cold start.
+   *
+   * <p>⚠️ Was series-agnostic until H24 PR-6, and the pairing was the LAST residual of the
+   * mixed-watermark defect this row exists to close — inside the very method PR-5 rewrote. Its one
+   * consumer feeds the result straight into {@link #cashSymbolsOn}, so on a partial-file day the
+   * agnostic form returned a date with no cash rows, {@code prior} came back EMPTY, and
+   * {@code DataQualityEodJob}'s {@code ok} flag short-circuits to TRUE on {@code expected == 0}.
+   * <b>The data-quality check went silently green on exactly the day it exists to catch</b>, which
+   * is strictly worse than the false-alarm direction PR-5 fixed. Unreachable on today's data — no
+   * date in the table's span carries non-cash rows without cash rows — but it is the same
+   * "measured unreachable" argument that justified deferring the watermark, and it costs one line.
+   */
+  public LocalDate prevCashTradeDate(LocalDate before) {
     return jdbc.query(
-        "SELECT max(trade_date) AS d FROM nse_eod_bhavcopy WHERE trade_date < ?",
+        "SELECT max(trade_date) AS d FROM nse_eod_bhavcopy WHERE trade_date < ? AND "
+            + CashEquityUniverse.SERIES_PREDICATE,
         rs -> rs.next() ? rs.getObject("d", LocalDate.class) : null,
         java.sql.Date.valueOf(before));
   }

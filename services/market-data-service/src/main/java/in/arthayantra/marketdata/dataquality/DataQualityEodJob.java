@@ -199,7 +199,7 @@ public class DataQualityEodJob {
   private void addBhavcopyRows(
       LocalDate day, OffsetDateTime computedAt, List<DataQualityRow> rows) {
     Set<String> today = bhavcopy.cashSymbolsOn(day);
-    LocalDate priorDay = bhavcopy.prevTradeDate(day);
+    LocalDate priorDay = bhavcopy.prevCashTradeDate(day);
     Set<String> prior = priorDay == null ? Set.of() : bhavcopy.cashSymbolsOn(priorDay);
     Set<String> dropped = new TreeSet<>(prior);
     dropped.removeAll(today);

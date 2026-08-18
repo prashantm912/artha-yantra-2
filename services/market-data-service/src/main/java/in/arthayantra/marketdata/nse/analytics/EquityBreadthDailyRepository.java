@@ -11,7 +11,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * Reads + materializes the daily market-breadth fold ({@code equity_breadth_daily}, V044). The fold
- * is self-contained in the NSE EQ-series bhavcopy: advance/decline from close-vs-prev-close, average
+ * is self-contained in the NSE cash (EQ+BE) bhavcopy: advance/decline from close-vs-prev-close, average
  * delivery%, and the above-50/200-SMA counts from a window over the SAME table (no cross-source
  * candle join). Idempotent upsert keyed by {@code trade_date}.
  */
@@ -35,7 +35,7 @@ public class EquityBreadthDailyRepository {
   // has its window (≈ 200 trading days ≈ 290 calendar days; 400 is a comfortable margin over holidays).
   private static final int SMA_WARMUP_DAYS = 400;
 
-  // Folds breadth for EVERY EQ trade_date in [from, to] in one scan. The window functions warm up from
+  // Folds breadth for EVERY cash trade_date in [from, to] in one scan. The window functions warm up from
   // SMA_WARMUP_DAYS before `from`, then the outer WHERE restricts the emitted rows to the wanted range.
   // above_sma50/200 are counted only where the per-symbol window has >= the full lookback of rows
   // (n50/n200), so a short-history name is excluded from BOTH the numerator and the universe denominator.
@@ -88,7 +88,7 @@ public class EquityBreadthDailyRepository {
     this.jdbc = jdbc;
   }
 
-  /** Folds breadth from the EQ bhavcopy for every trading day in {@code [from, to]} (SMA-warmed). */
+  /** Folds breadth from the EQ+BE cash bhavcopy for every trading day in {@code [from, to]} (SMA-warmed). */
   public List<BreadthDay> compute(LocalDate from, LocalDate to) {
     Date warmupStart = Date.valueOf(from.minusDays(SMA_WARMUP_DAYS));
     return jdbc.query(

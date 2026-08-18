@@ -49,8 +49,23 @@ public final class CashEquityUniverse {
   /**
    * The cash-equity series predicate, for an UNALIASED {@code nse_eod_bhavcopy} reference.
    *
-   * <p>No alias-qualified variant exists yet because no caller needs one; add one when a real
-   * aliased call site adopts this, not before.
+   * <p>For an ALIASED reference use {@link #qualified(String)}.
    */
   public static final String SERIES_PREDICATE = "series IN ('EQ','BE')";
+
+  /**
+   * The same predicate against an ALIASED {@code nse_eod_bhavcopy} reference — {@code
+   * qualified("b")} yields {@code b.series IN ('EQ','BE')}.
+   *
+   * <p>Added when the first real aliased call sites adopted this, which is the condition the
+   * previous javadoc set for adding it: {@code AdjustedEquityDailySql.GEOMETRY_SYMBOL_SQL},
+   * {@code SymbolLineageDetector.DETECT_SQL} and {@code PlaneDivergenceProbe.SQL} all join
+   * bhavcopy as {@code b} and had their own copy of the literal.
+   *
+   * <p>⚠️ Cited by FIELD, not by line: the previous version of this note carried line numbers that
+   * the very PR adding it had already moved.
+   */
+  public static String qualified(String alias) {
+    return alias + "." + SERIES_PREDICATE;
+  }
 }

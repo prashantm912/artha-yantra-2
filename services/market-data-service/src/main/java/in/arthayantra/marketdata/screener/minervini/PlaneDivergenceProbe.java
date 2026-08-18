@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.screener.minervini;
 
 import in.arthayantra.marketdata.equitydaily.AdjustedEquityDailySql;
+import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -140,7 +141,7 @@ public class PlaneDivergenceProbe {
           + AdjustedEquityDailySql.factorLateral("b", "trade_date")
           + """
             WHERE b.symbol IN (SELECT symbol FROM cand)
-              AND b.series IN ('EQ','BE')
+              AND %s
               AND b.trade_date <= ?::date
               AND b.trade_date >  (?::date - ?)
             ),
@@ -159,6 +160,7 @@ public class PlaneDivergenceProbe {
                   AND c.bucket <  (?::date + 1)::timestamp AT TIME ZONE 'Asia/Kolkata'
               ) cb
             """
+              .formatted(CashEquityUniverse.qualified("b"))
           + AdjustedEquityDailySql.factorLateral("cb", "d")
           + """
             ),

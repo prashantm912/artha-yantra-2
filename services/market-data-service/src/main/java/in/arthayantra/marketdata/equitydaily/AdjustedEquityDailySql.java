@@ -73,11 +73,12 @@ public final class AdjustedEquityDailySql {
         SELECT symbol, trade_date AS bucket, close_price AS close, high_price AS high,
                low_price AS low, ttl_trd_qnty AS volume
         FROM nse_eod_bhavcopy
-        WHERE series IN ('EQ','BE')
+        WHERE %s
           AND trade_date <= ?::date
           AND trade_date >  (?::date - 420)
       ) b
       """
+              .formatted(CashEquityUniverse.SERIES_PREDICATE)
           + factorLateral("b", "bucket");
 
   /**
@@ -204,12 +205,13 @@ public final class AdjustedEquityDailySql {
         SELECT symbol, series, trade_date AS bucket, close_price AS close, high_price AS high,
                low_price AS low, ttl_trd_qnty AS volume
         FROM nse_eod_bhavcopy
-        WHERE series IN ('EQ','BE')
+        WHERE %s
           AND trade_date <= ?::date
           AND trade_date >  (?::date - 420)
       ) b
       LEFT JOIN terminal t ON t.orig = b.symbol AND b.bucket < t.first_switch
       """
+              .formatted(CashEquityUniverse.SERIES_PREDICATE)
           + LINEAGE_FACTOR_LATERAL
           + "ORDER BY COALESCE(t.cur, b.symbol), b.bucket, (t.cur IS NULL) DESC,\n"
           + "         b.symbol DESC, b.series DESC\n";
@@ -256,9 +258,10 @@ public final class AdjustedEquityDailySql {
           + factorLateral("b", "trade_date")
           + """
       WHERE b.symbol = ?
-        AND b.series IN ('EQ','BE')
+        AND %s
         AND b.trade_date <= ?::date
         AND b.trade_date >  (?::date - ?)
       ORDER BY b.trade_date ASC
-      """;
+      """
+              .formatted(CashEquityUniverse.qualified("b"));
 }

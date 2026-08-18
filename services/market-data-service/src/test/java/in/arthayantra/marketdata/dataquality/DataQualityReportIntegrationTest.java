@@ -46,6 +46,13 @@ class DataQualityReportIntegrationTest extends MarketDataIntegrationTestBase {
   private static final String CHAIN = "DQ-CHAIN-2198";
   private static final String KEPT_EQ = "DQKEEP2198";
   private static final String DROPPED_EQ = "DQDROP2198";
+  /** H24 PR-5: present on both days, but NSE moved it EQ -> BE overnight. Not a dropout. */
+  private static final String MIGRATED_EQ_TO_BE = "DQMIGR2198";
+  /**
+   * H24 PR-5: a LATER date carrying only a non-cash series. It makes the two watermarks diverge, so
+   * this fixture exercises the cash-scoped watermark rather than only the cash-scoped population.
+   */
+  private static final String NON_CASH_LATER = "DQNONCASH2198";
 
   @Autowired JdbcTemplate jdbc;
   @Autowired TradingBuckets buckets;
@@ -58,7 +65,14 @@ class DataQualityReportIntegrationTest extends MarketDataIntegrationTestBase {
     purge();
     seedBhavcopy(PRIOR, KEPT_EQ);
     seedBhavcopy(PRIOR, DROPPED_EQ);
+    seedBhavcopy(PRIOR, MIGRATED_EQ_TO_BE);
     seedBhavcopy(DAY, KEPT_EQ);
+    // Same symbol, same tape, new series. 413 symbols did this in the trailing 120 days on live.
+    seedBhavcopy(DAY, MIGRATED_EQ_TO_BE, "BE");
+    // A BZ (non-cash) row one day LATER: maxTradeDate() sees DAY+1, maxCashTradeDate() sees DAY.
+    // The job must score DAY. On the agnostic watermark it scored DAY+1, where the cash set is
+    // EMPTY -- so every prior symbol reported "absent vs prior day" at once.
+    seedBhavcopy(DAY.plusDays(1), NON_CASH_LATER, "BZ");
 
     OffsetDateTime from = DAY.atTime(9, 15).atOffset(Ist.OFFSET);
     OffsetDateTime to = DAY.atTime(15, 30).atOffset(Ist.OFFSET);
@@ -106,6 +120,8 @@ class DataQualityReportIntegrationTest extends MarketDataIntegrationTestBase {
     int ledgerRowsBefore = dataQualityLedgerRows();
     job.scheduled();
 
+    // Scored DAY, not the later BZ-only date -- the cash-scoped watermark. On the agnostic
+    // watermark this read would be empty, because the report would have been written for DAY+1.
     List<DataQualityRow> rows = repository.findByDate(DAY);
     assertThat(rows).hasSize(4);
 
@@ -121,11 +137,21 @@ class DataQualityReportIntegrationTest extends MarketDataIntegrationTestBase {
     assertThat(dropout.ok()).isFalse();
     assertThat(dropout.detail()).isEqualTo("absent vs prior day 2198-07-13");
 
+    // The population is the CASH universe (EQ+BE), so the migrated name counts on BOTH sides:
+    // expected {KEPT, DROPPED, MIGRATED} = 3, present {KEPT, MIGRATED} = 2. EQ-only would read 2/1.
     DataQualityRow summary = row(rows, "bhavcopy_eq", "__SUMMARY__");
-    assertThat(summary.expected()).isEqualTo(2);
-    assertThat(summary.present()).isEqualTo(1);
-    assertThat(summary.coveragePct()).isEqualByComparingTo("50.00");
+    assertThat(summary.expected()).isEqualTo(3);
+    assertThat(summary.present()).isEqualTo(2);
+    assertThat(summary.coveragePct()).isEqualByComparingTo("66.67");
     assertThat(summary.ok()).isFalse();
+
+    // H24 PR-5, the load-bearing assertion: an EQ -> BE surveillance move is NOT a disappearance.
+    // EQ-only reports it as "absent vs prior day" -- a false alarm, and it drags the coverage
+    // ratio toward the 0.98 floor. Measured on live: 2 of the latest session's 3 reported drops
+    // were migrations, not absences.
+    assertThat(rows)
+        .filteredOn(r -> "bhavcopy_eq".equals(r.scope()) && MIGRATED_EQ_TO_BE.equals(r.symbol()))
+        .isEmpty();
 
     DataQualityRow chain = row(rows, "chain_capture", CHAIN);
     assertThat(chain.expected()).isEqualTo(2);
@@ -166,11 +192,16 @@ class DataQualityReportIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   private void seedBhavcopy(LocalDate date, String symbol) {
+    seedBhavcopy(date, symbol, "EQ");
+  }
+
+  private void seedBhavcopy(LocalDate date, String symbol, String series) {
     jdbc.update(
         "INSERT INTO nse_eod_bhavcopy (trade_date,symbol,series)"
-            + " VALUES (?,?,'EQ') ON CONFLICT DO NOTHING",
+            + " VALUES (?,?,?) ON CONFLICT DO NOTHING",
         java.sql.Date.valueOf(date),
-        symbol);
+        symbol,
+        series);
   }
 
   private void purge() {
@@ -178,7 +209,11 @@ class DataQualityReportIntegrationTest extends MarketDataIntegrationTestBase {
     jdbc.update("DELETE FROM candles WHERE exchange='NSE' AND tradingsymbol=?", INDEX);
     jdbc.update("DELETE FROM options_chain_snapshots WHERE underlying=?", CHAIN);
     jdbc.update(
-        "DELETE FROM nse_eod_bhavcopy WHERE symbol IN (?,?)", KEPT_EQ, DROPPED_EQ);
+        "DELETE FROM nse_eod_bhavcopy WHERE symbol IN (?,?,?,?)",
+        KEPT_EQ,
+        DROPPED_EQ,
+        MIGRATED_EQ_TO_BE,
+        NON_CASH_LATER);
   }
 
   private int dataQualityLedgerRows() {

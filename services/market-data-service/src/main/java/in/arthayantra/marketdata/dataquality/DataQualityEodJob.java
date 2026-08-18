@@ -100,7 +100,28 @@ public class DataQualityEodJob {
     }
     Long runId = null;
     try {
-      LocalDate day = bhavcopy.maxTradeDate();
+      // Cash-scoped watermark, to match the cash-scoped population this job then diffs (H24 PR-5).
+      LocalDate day = bhavcopy.maxCashTradeDate();
+      // ⚠️ The two watermarks diverging means a day landed with non-cash rows and NO cash rows --
+      // a partial file. Scoping the watermark stops this job scoring that day, which is right, but
+      // on its own it would turn a deafening failure (thousands of "absent vs prior day" rows) into
+      // a DEBUG-level skip. Say so out loud instead: less destructive is not the same as safer.
+      LocalDate anySeries = bhavcopy.maxTradeDate();
+      // `day == null` is the STRICTLY WORSE case, not an exemption: non-cash rows exist and no cash
+      // row does anywhere, and without this clause the job would fall through to the "no bhavcopy
+      // rows yet" log below, which would be false.
+      if (anySeries != null && (day == null || day.isBefore(anySeries))) {
+        // Deliberately does NOT claim to have scored `day`: in the dominant divergence path `day` is
+        // the prior settled session, which the previous run already scored, so `hasRowsFor(day)`
+        // short-circuits below and this run writes nothing. Only the unscored half is asserted.
+        log.warn(
+            "bhavcopy watermark divergence — newest cash-equity date {} is behind the newest date"
+                + " in any series {}; the later day landed with no EQ/BE rows (partial file?)."
+                + " {} is left unscored.",
+            day,
+            anySeries,
+            anySeries);
+      }
       if (day == null) {
         log.info("data-quality report skipped ({}) — no bhavcopy rows yet", trigger);
         return;
@@ -177,9 +198,9 @@ public class DataQualityEodJob {
 
   private void addBhavcopyRows(
       LocalDate day, OffsetDateTime computedAt, List<DataQualityRow> rows) {
-    Set<String> today = bhavcopy.eqSymbolsOn(day);
+    Set<String> today = bhavcopy.cashSymbolsOn(day);
     LocalDate priorDay = bhavcopy.prevTradeDate(day);
-    Set<String> prior = priorDay == null ? Set.of() : bhavcopy.eqSymbolsOn(priorDay);
+    Set<String> prior = priorDay == null ? Set.of() : bhavcopy.cashSymbolsOn(priorDay);
     Set<String> dropped = new TreeSet<>(prior);
     dropped.removeAll(today);
     for (String symbol : dropped) {

@@ -1,0 +1,26 @@
+-- H24 PR-6. equity_breadth_daily is a MATERIALIZED fold over nse_eod_bhavcopy, and every row in it
+-- was computed with a `series = 'EQ'` population. PR-6 widens that fold to the EQ+BE cash universe,
+-- so the stored rows are now wrong -- not stale by a day, but computed over the wrong universe.
+--
+-- Truncating is what makes the series HOMOGENEOUS. Leaving the rows and letting the incremental job
+-- correct forward would produce a chart with a silent discontinuity at the deploy date: EQ-only to
+-- the left, EQ+BE to the right, no marker, and the jump would read as a market event rather than a
+-- units change. Measured on live 2026-08-18: the widening moves a session's total from 2,624 to
+-- 2,853 (+8.7%), which is exactly the size of step that looks like news.
+--
+-- EquityBreadthEodJob's boot pass refills it: with the table empty, latestDate() is null and the job
+-- backfills `artha.breadth.backfill-days` of history in one SMA-warmed scan (compute() derives its
+-- own warmup window from `from`, so the SMA-50/200 counts are correct from the first output day).
+--
+-- ⚠️ DO NOT DEPLOY THIS WITHOUT THE backfill-days RAISE IN THE SAME PR. That config was 180 while
+-- the table already spanned 217 days, so this TRUNCATE on its own SILENTLY DROPS ~37 days of
+-- history. EquityBreadthEodJob:54 raises the default to 240 here. There is no env override for the
+-- knob -- verified against `docker inspect ay-market-data` -- so the @Value default IS the deployed
+-- value, and raising the default is the whole of the fix.
+--
+-- (This file briefly rode PR-5 by accident and was pulled back out before that PR merged. Had it
+-- landed there, the migration would have run WITHOUT the raise above -- which is the exact loss
+-- this comment exists to prevent.)
+--
+-- Plain table, not a hypertable (checked), so TRUNCATE needs no Timescale-specific handling.
+TRUNCATE TABLE equity_breadth_daily;

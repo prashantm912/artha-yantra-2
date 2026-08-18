@@ -102,6 +102,21 @@ public class DataQualityEodJob {
     try {
       // Cash-scoped watermark, to match the cash-scoped population this job then diffs (H24 PR-5).
       LocalDate day = bhavcopy.maxCashTradeDate();
+      // ⚠️ The two watermarks diverging means a day landed with non-cash rows and NO cash rows --
+      // a partial file. Scoping the watermark stops this job scoring that day, which is right, but
+      // on its own it would turn a deafening failure (thousands of "absent vs prior day" rows) into
+      // a DEBUG-level skip. Say so out loud instead: less destructive is not the same as safer.
+      LocalDate anySeries = bhavcopy.maxTradeDate();
+      if (anySeries != null && day != null && day.isBefore(anySeries)) {
+        log.warn(
+            "bhavcopy watermark divergence — newest cash-equity date {} is behind the newest date"
+                + " in any series {}; the later day landed with no EQ/BE rows (partial file?)."
+                + " Scoring {} and leaving {} unscored.",
+            day,
+            anySeries,
+            day,
+            anySeries);
+      }
       if (day == null) {
         log.info("data-quality report skipped ({}) — no bhavcopy rows yet", trigger);
         return;

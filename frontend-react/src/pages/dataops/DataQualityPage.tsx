@@ -87,7 +87,7 @@ function BhavcopySummary({ row }: { row: CompletenessRow }) {
   return (
     <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-ay-border bg-surface-1 px-3 py-2">
       <span className="font-medium tabular-nums text-ay-text">
-        {row.present.toLocaleString('en-IN')}/{row.expected.toLocaleString('en-IN')} EQ symbols
+        {row.present.toLocaleString('en-IN')}/{row.expected.toLocaleString('en-IN')} cash symbols
       </span>
       <span className="tabular-nums text-ay-muted">{coverage(row.coveragePct)}</span>
       <StatusBadge ok={row.ok} />

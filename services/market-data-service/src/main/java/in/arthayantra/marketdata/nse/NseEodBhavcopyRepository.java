@@ -1,10 +1,10 @@
 package in.arthayantra.marketdata.nse;
 
+import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
-import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 

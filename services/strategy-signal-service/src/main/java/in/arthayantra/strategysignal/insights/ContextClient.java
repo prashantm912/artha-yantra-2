@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -168,8 +169,23 @@ public class ContextClient {
         return Optional.empty();
       }
       return Optional.of(objectMapper.readTree(body));
+    } catch (HttpClientErrorException.NotFound e) {
+      // A 404 here is an EXPECTED, permanent shape, not a fault: the endpoint answers only for
+      // underlyings it has option expiries for. DEBUG deliberately, because the alternative is 28
+      // WARN lines every weekday (the context sweep is `0 */15 9-15 * * MON-FRI`), and a WARN that
+      // fires on schedule trains the reader to ignore WARNs -- which is the exact property this
+      // class's siblings were just changed to protect.
+      //
+      // ⚠️ It is currently hiding a REAL defect, and that is recorded rather than re-buried:
+      // `artha.insights.context.underlyings` is [NIFTY, SENSEX] (application.yml:268) but the
+      // canonical name is `NIFTY 50` -- measured 2026-08-18, NIFTY 404s and `NIFTY 50` returns 200,
+      // and `strategy.insights` holds ZERO NIFTY-scoped CONTEXT_SHIFT rows in the entire history of
+      // the feature. Fixing the name is a BEHAVIOUR change (insights that have never fired would
+      // start), so it is a ledger item, not a line in an observability PR.
+      log.debug("insight trust read {} — no such digest (returning empty)", path);
+      return Optional.empty();
     } catch (Exception e) {
-      log.debug("insight trust read {} unavailable: {}", path, e.getMessage());
+      log.warn("insight trust read {} FAILED (returning empty): {}", path, e.toString());
       return Optional.empty();
     }
   }

@@ -62,7 +62,7 @@ public class PortfolioReader {
       return new HygieneInputs(
           hygieneCfg.windowDays(), unrated == null ? 0 : unrated, unJournaled == null ? 0 : unJournaled);
     } catch (RuntimeException e) {
-      log.debug("insight hygiene read unavailable: {}", e.getMessage());
+      log.warn("insight hygiene read FAILED (returning zeros): {}", e.getMessage());
       return new HygieneInputs(hygieneCfg.windowDays(), 0, 0);
     }
   }
@@ -120,7 +120,7 @@ public class PortfolioReader {
       return new ExpirySnapshot(
           today, expiring, next == null ? null : next.date(), next == null ? null : next.name());
     } catch (RuntimeException e) {
-      log.debug("insight expiry read unavailable: {}", e.getMessage());
+      log.warn("insight expiry read FAILED (returning empty): {}", e.getMessage());
       return new ExpirySnapshot(today, List.of(), null, null);
     }
   }
@@ -164,7 +164,7 @@ public class PortfolioReader {
               .toList();
       return new StaleTickSnapshot(stalled);
     } catch (RuntimeException e) {
-      log.debug("insight stale-tick read unavailable: {}", e.getMessage());
+      log.warn("insight stale-tick read FAILED (returning empty): {}", e.getMessage());
       return new StaleTickSnapshot(List.of());
     }
   }

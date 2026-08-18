@@ -17,9 +17,27 @@ the two 2026-07-02 audits (both fix queues fully closed) and the open-PR/issue l
 **Read this first, then the enumeration recipe below.** This block answers *"what is in flight right
 now"*, which the recipe deliberately does not.
 
-**Live stack:** healthy. `market-data` carries **#1394** (`9b3a52e7`, deployed 15:36 IST, live-probed).
-Every other service is on its pre-existing image — **no other deploy is pending.** The Kite session
-is valid to 2026-08-18 06:00 IST; it will need the owner's daily re-login tomorrow morning.
+**Live stack:** healthy. ⚠️ **H24 + H25 DEPLOYED 2026-08-18 15:30 IST — market-data, strategy-signal and
+frontend all recreated.** V058 applied (`now at version v058`) and all four post-deploy probes passed
+EXACTLY as predicted: `equity_breadth_daily` **160 rows / 2025-12-22 → 2026-08-17** (was 146 /
+2026-01-12), `ingest_runs` **SUCCESS / 160** at 15:30:40, and the decisive one — totals moved
+**2463 → 2713** and **2624 → 2853**, which is the only probe that proves the POPULATION widened rather
+than the plumbing working. Live `GET /breadth?date=` serves 1294/1521/2853; the Minervini regime serves
+**HOSTILE / 0.4404** (the exact EQ+BE figure PR-2 predicted; EQ-only computed 0.4405). BE delivery pages
+200 (`AUTOIND`), EQ control 200 (`CUPID`), **0 ERROR lines** in either service. H25's deliverable is live
+and emitting: `insight trust sweep: 0 new / 0 refreshed` — the line that could not exist yesterday.
+flyway-init and market-data were recreated back-to-back so the old binary never had a window before the
+18:51 cron; measured empty-window ~10 s.
+
+⚠️ **H24 IS NOT DONE YET, AND THIS IS THE DURABLE RECORD OF WHY.** The probes cover the BOOT-PASS refill.
+What is unobserved is the first INCREMENTAL evening run: **18:50 data-quality** (first on PR-5's
+cash-scoped population — its `__SUMMARY__` denominator should widen to ~2713 scale) and **18:51 breadth**
+(first incremental on the widened fold). A session-only cron is set for 19:02 IST, **but it dies with the
+session** — if it did not run, do these checks manually before flipping the row: `ingest_runs` for
+`EQUITY_BREADTH` + `DATA_QUALITY`, `data_quality_days` scope `bhavcopy_eq`, and
+`grep 'insight .* sweep:'` on strategy-signal (every sweep now logs `N new / M refreshed`, so **absence
+of a line means it did not run**). ⚠️ A breadth dedup-skip logs at DEBUG and writes NO `ingest_runs` row —
+an absent row is the failure signature, not evidence of nothing to do.
 
 **Held for the Codex slot on 2026-08-20 — STRICT ORDER, and the owner ruled 2026-08-17 that ALL
 FIVE queue rather than relaxing to same-vendor:**

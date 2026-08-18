@@ -1,9 +1,9 @@
 package in.arthayantra.marketdata.context;
 
+import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
-import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 

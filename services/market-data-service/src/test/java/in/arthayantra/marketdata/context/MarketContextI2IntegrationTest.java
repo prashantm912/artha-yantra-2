@@ -181,7 +181,11 @@ class MarketContextI2IntegrationTest extends MarketDataIntegrationTestBase {
         .andExpect(jsonPath("$.advanceDecline.declines").value(2))
         .andExpect(jsonPath("$.advanceDecline.total").value(3))
         .andExpect(jsonPath("$.aboveMa.universe20").value(3))
-        .andExpect(jsonPath("$.aboveMa.above20").value(1));
+        .andExpect(jsonPath("$.aboveMa.above20").value(1))
+        // advDecSeries is the third fold that MATERIALLY widens, and it is externally observable.
+        // Three-way discriminating in this fixture: EQ-only 0.5000, EQ+BE 0.3333, +SM 0.5000.
+        // String, not number — ArthaJacksonAutoConfiguration serializes BigDecimal via ToString.
+        .andExpect(jsonPath("$.breadthThrust.advRatioMa").value("0.3333"));
   }
 
   @Test

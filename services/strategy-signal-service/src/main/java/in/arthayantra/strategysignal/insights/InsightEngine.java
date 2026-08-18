@@ -102,9 +102,9 @@ public class InsightEngine {
   }
 
   /** The data-trust sweep (called by {@link InsightSweeper}). Fail-soft. */
-  public void runTrustSweep() {
+  public int runTrustSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
-    run(GenerationContext.forTrust(trustService.snapshot(), now), now);
+    return run(GenerationContext.forTrust(trustService.snapshot(), now), now);
   }
 
   /**
@@ -112,10 +112,10 @@ public class InsightEngine {
    * (open bracketed positions over stalled feed instruments, the §12 interim health/data trigger).
    * Fail-soft.
    */
-  public void runRiskSweep() {
+  public int runRiskSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
     StaleTickSnapshot staleTick = portfolioReader.staleTickScan(contextClient.staleFeedKeys());
-    run(GenerationContext.forRisk(bookHeatReader.read(), staleTick, now), now);
+    return run(GenerationContext.forRisk(bookHeatReader.read(), staleTick, now), now);
   }
 
   /**
@@ -124,32 +124,32 @@ public class InsightEngine {
    * (the session's rejections closest to firing). Every digest read is fail-soft — an absent digest
    * simply yields no crossing for that underlying (§6.5 honest degrade). Fail-soft overall.
    */
-  public void runContextSweep() {
+  public int runContextSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
     List<MarketContext.OptionsShift> shifts = new java.util.ArrayList<>();
     for (String underlying : props.context().underlyings()) {
       contextClient.optionsShift(exchangeFor(underlying), underlying).ifPresent(shifts::add);
     }
     MarketContext market = new MarketContext(shifts, contextClient.marketStructure().orElse(null));
-    run(GenerationContext.forContext(market, rejectionReader.nearMissScan(), now), now);
+    return run(GenerationContext.forContext(market, rejectionReader.nearMissScan(), now), now);
   }
 
   /** The EOD sweep (called by {@link InsightSweeper}): REJECTION_RAIL_TREND + HYGIENE. Fail-soft. */
-  public void runEodSweep() {
+  public int runEodSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
-    run(GenerationContext.forEod(rejectionReader.railTrendScan(), portfolioReader.hygieneScan(), now), now);
+    return run(GenerationContext.forEod(rejectionReader.railTrendScan(), portfolioReader.hygieneScan(), now), now);
   }
 
   /** The T-1 expiry sweep (called by {@link InsightSweeper}): EXPIRY_EVENT. Fail-soft. */
-  public void runExpirySweep() {
+  public int runExpirySweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
-    run(GenerationContext.forExpiry(portfolioReader.expiryScan(), now), now);
+    return run(GenerationContext.forExpiry(portfolioReader.expiryScan(), now), now);
   }
 
   /** The weekly quality-report job (called by {@link InsightSweeper}): QUALITY_REPORT. Fail-soft. */
-  public void runQualityReport() {
+  public int runQualityReport() {
     OffsetDateTime now = OffsetDateTime.now(clock);
-    run(GenerationContext.forQuality(repository.qualityStats(props), now), now);
+    return run(GenerationContext.forQuality(repository.qualityStats(props), now), now);
   }
 
   /**
@@ -157,18 +157,18 @@ public class InsightEngine {
    * evaluator): STRATEGY_EVIDENCE. Reads today's graduation board vs yesterday's persisted snapshot
    * (§5.2), writes today's snapshot + any crossing insight. Fail-soft.
    */
-  public void runStrategyEvidenceSweep() {
+  public int runStrategyEvidenceSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
-    run(GenerationContext.forStrategyEvidence(strategyEvidenceReader.strategyEvidenceScan(), now), now);
+    return run(GenerationContext.forStrategyEvidence(strategyEvidenceReader.strategyEvidenceScan(), now), now);
   }
 
   /**
    * The sell-decision sweep (called by {@link InsightSweeper}, after the swing batches persist V037):
    * SELL_DECISION over the unacknowledged SELL rows (§5.3). Fail-soft.
    */
-  public void runSellDecisionSweep() {
+  public int runSellDecisionSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
-    run(GenerationContext.forSellDecision(strategyEvidenceReader.sellDecisionScan(), now), now);
+    return run(GenerationContext.forSellDecision(strategyEvidenceReader.sellDecisionScan(), now), now);
   }
 
   /** The index exchange for an underlying's insight scope (SENSEX → BSE, else NSE). */
@@ -178,8 +178,16 @@ public class InsightEngine {
         : "NSE";
   }
 
-  /** Run every generator over the context and persist each candidate (idempotent upsert). */
-  private void run(GenerationContext ctx, OffsetDateTime now) {
+  /**
+   * Run every generator over the context and persist each candidate (idempotent upsert).
+   *
+   * <p>Returns the number of candidates that reached a durable row, so the caller can say so out
+   * loud. <b>A zero return is a real answer, not an absence</b> — that distinction is the whole
+   * point (ledger H25): before this, a sweep that ran and legitimately found nothing was
+   * byte-identical, from outside, to a sweep that never fired at all.
+   */
+  private int run(GenerationContext ctx, OffsetDateTime now) {
+    int written = 0;
     for (InsightGenerator gen : generators) {
       List<InsightCandidate> candidates;
       try {
@@ -189,12 +197,16 @@ public class InsightEngine {
         continue;
       }
       for (InsightCandidate c : candidates) {
-        persist(c, now);
+        if (persist(c, now)) {
+          written++;
+        }
       }
     }
+    return written;
   }
 
-  private void persist(InsightCandidate c, OffsetDateTime now) {
+  /** Returns true iff the candidate reached the durable row; false means it was logged and dropped. */
+  private boolean persist(InsightCandidate c, OffsetDateTime now) {
     try {
       OffsetDateTime cooldownUntil = c.cooldownMinutes() == null ? null : now.plusMinutes(c.cooldownMinutes());
       // The delivery decision needs the prior occurrence BEFORE the upsert overwrites/replaces it.
@@ -251,8 +263,10 @@ public class InsightEngine {
       if (upsert.inserted() || escalated || cooldownExpired) {
         publisher.publish(upsert.insight());
       }
+      return true;
     } catch (RuntimeException e) {
       log.warn("insight persist failed ({}): {}", c.dedupeKey(), e.toString());
+      return false;
     }
   }
 

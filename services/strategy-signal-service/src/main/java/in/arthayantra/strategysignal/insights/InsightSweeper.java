@@ -24,6 +24,18 @@ import org.springframework.stereotype.Component;
  * caught here too.
  */
 @Component
+/**
+ * ⚠️ EVERY sweep here logs at INFO on SUCCESS, including a zero result, and that is deliberate.
+ *
+ * <p>Until ledger H25 none of them did — only {@code log.warn} on failure — so a sweep that ran and
+ * legitimately found nothing was <b>indistinguishable from outside from one that never fired at
+ * all</b>. That cost a whole owner-requested investigation on 2026-08-18: the 18:57 sell-decision
+ * sweep was reported as having "left no log line and no row", and proving it had in fact run
+ * correctly took a code read plus four DB queries, because the only positive evidence available was
+ * a SIBLING method on this same bean having written rows one minute earlier.
+ *
+ * <p>"0 insight(s) written" is a real answer. Absence of a line now means the sweep did not run.
+ */
 @ConditionalOnProperty(name = "artha.signals.engine-enabled", havingValue = "true", matchIfMissing = true)
 public class InsightSweeper {
 
@@ -39,7 +51,7 @@ public class InsightSweeper {
   @Scheduled(fixedDelay = 900_000, initialDelay = 200_000)
   public void trustSweep() {
     try {
-      engine.runTrustSweep();
+      log.info("insight trust sweep: {} insight(s) written", engine.runTrustSweep());
     } catch (RuntimeException e) {
       log.warn("insight trust sweep failed: {}", e.toString());
     }
@@ -49,7 +61,7 @@ public class InsightSweeper {
   @Scheduled(fixedDelay = 300_000, initialDelay = 240_000)
   public void riskSweep() {
     try {
-      engine.runRiskSweep();
+      log.info("insight risk sweep: {} insight(s) written", engine.runRiskSweep());
     } catch (RuntimeException e) {
       log.warn("insight risk sweep failed: {}", e.toString());
     }
@@ -59,7 +71,7 @@ public class InsightSweeper {
   @Scheduled(cron = "${artha.insights.context-cron:0 */15 9-15 * * MON-FRI}", zone = "Asia/Kolkata")
   public void contextSweep() {
     try {
-      engine.runContextSweep();
+      log.info("insight context sweep: {} insight(s) written", engine.runContextSweep());
     } catch (RuntimeException e) {
       log.warn("insight context sweep failed: {}", e.toString());
     }
@@ -69,7 +81,7 @@ public class InsightSweeper {
   @Scheduled(cron = "${artha.insights.eod-cron:0 5 16 * * MON-FRI}", zone = "Asia/Kolkata")
   public void eodSweep() {
     try {
-      engine.runEodSweep();
+      log.info("insight EOD sweep: {} insight(s) written", engine.runEodSweep());
     } catch (RuntimeException e) {
       log.warn("insight EOD sweep failed: {}", e.toString());
     }
@@ -79,7 +91,7 @@ public class InsightSweeper {
   @Scheduled(cron = "${artha.insights.expiry-cron:0 30 15 * * MON-FRI}", zone = "Asia/Kolkata")
   public void expirySweep() {
     try {
-      engine.runExpirySweep();
+      log.info("insight expiry sweep: {} insight(s) written", engine.runExpirySweep());
     } catch (RuntimeException e) {
       log.warn("insight expiry sweep failed: {}", e.toString());
     }
@@ -93,7 +105,7 @@ public class InsightSweeper {
   @Scheduled(cron = "${artha.insights.quality-cron:0 12 18 * * FRI}", zone = "Asia/Kolkata")
   public void qualityReport() {
     try {
-      engine.runQualityReport();
+      log.info("insight quality report sweep: {} insight(s) written", engine.runQualityReport());
     } catch (RuntimeException e) {
       log.warn("insight quality report failed: {}", e.toString());
     }
@@ -103,7 +115,7 @@ public class InsightSweeper {
   @Scheduled(cron = "${artha.insights.strategy-evidence-cron:0 56 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void strategyEvidenceSweep() {
     try {
-      engine.runStrategyEvidenceSweep();
+      log.info("insight strategy-evidence sweep: {} insight(s) written", engine.runStrategyEvidenceSweep());
     } catch (RuntimeException e) {
       log.warn("insight strategy-evidence sweep failed: {}", e.toString());
     }
@@ -113,7 +125,7 @@ public class InsightSweeper {
   @Scheduled(cron = "${artha.insights.sell-decision-cron:0 57 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void sellDecisionSweep() {
     try {
-      engine.runSellDecisionSweep();
+      log.info("insight sell-decision sweep: {} insight(s) written", engine.runSellDecisionSweep());
     } catch (RuntimeException e) {
       log.warn("insight sell-decision sweep failed: {}", e.toString());
     }

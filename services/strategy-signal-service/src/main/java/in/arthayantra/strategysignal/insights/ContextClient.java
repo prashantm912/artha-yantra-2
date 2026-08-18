@@ -169,7 +169,7 @@ public class ContextClient {
       }
       return Optional.of(objectMapper.readTree(body));
     } catch (Exception e) {
-      log.debug("insight trust read {} unavailable: {}", path, e.getMessage());
+      log.warn("insight trust read {} FAILED (returning empty): {}", path, e.getMessage());
       return Optional.empty();
     }
   }

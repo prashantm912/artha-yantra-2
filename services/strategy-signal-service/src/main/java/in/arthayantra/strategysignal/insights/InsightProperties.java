@@ -145,7 +145,15 @@ public record InsightProperties(
       @DefaultValue("45") int shiftCooldownMinutes,
       @DefaultValue("60") int structureCooldownMinutes) {
 
-    private static final List<String> DEFAULT_UNDERLYINGS = List.of("NIFTY", "SENSEX");
+    /**
+     * ⚠️ {@code NIFTY 50}, not {@code NIFTY} (chip task_ffefe53e). The canonical instrument key is
+     * the one {@code marketdata.instruments} is keyed by, and the options-digest endpoint 404s on
+     * anything else — measured live 2026-08-19: {@code name=NIFTY} → 404, {@code name=NIFTY 50} →
+     * 200. Because {@link ContextClient} fail-softs a 404 to an empty Optional, the bare name was a
+     * SILENT miss: {@code strategy.insights} holds four underlying-scoped CONTEXT_SHIFT rows in the
+     * entire history of the feature and every one is {@code BSE:SENSEX}.
+     */
+    private static final List<String> DEFAULT_UNDERLYINGS = List.of("NIFTY 50", "SENSEX");
 
     public Context {
       underlyings = underlyings == null || underlyings.isEmpty() ? DEFAULT_UNDERLYINGS : underlyings;

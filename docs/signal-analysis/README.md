@@ -290,6 +290,18 @@ Run in order; each answers one question. Canned SQL in §6.
     the 460,005 opening bucket, 11.9% of the 141,245 next one), so any pct that quiets the thick
     half leaves the thin half WARNing with no partner left to corroborate it — manufacturing the
     unpaired shape instead of removing it. Pinned by test; leave it at 0.
+    ⚠️ **AMENDED 2026-08-19 — a THIRD benign-adjacent class: RECONNECT INFLATION.** The boot-fresh
+    opening-bucket class has a mid-session sibling: after a ticker outage + reconnect, the tick-agg
+    baseline reset attributes the outage-gap's cumulative traded volume to the reconnect minute, so
+    the canary fires ONE unpaired WARN whose magnitude ≈ the volume traded during the gap. First
+    observed 2026-08-19: reconnect 13:27:51 IST after a ~25-min Kite outage → WARN on the 13:27
+    bucket, in-memory 1m sum 70,590 vs broker 3m bar 7,085 (shortfall −63,505, ~10×). Two
+    discriminators: (a) a `kite ticker connected` / feed-watchdog restart line within the WARN's
+    bucket, and (b) the DB 1m bars for the bucket sum EXACTLY to the canary's 3m value (the broker
+    side is correct — the inflation lives only in the in-memory 1m mirror, so the rails, which read
+    the broker-corrected 3m rollup, are untouched). An unpaired mid-session WARN with NO adjacent
+    reconnect remains the alarming shape (the same session's 14:54 −910 and 15:09 −8,970 are
+    unexplained and on watch as NEW-6).
 18. **Identify the SIGNAL CONTRACT from the data before running any ground-truth query** (added
     2026-07-27) — the live scalper signal series is the **dated front future**, and
     `FuturesUniverseResolver` rolls it at the ~08:40 IST re-resolve near monthly expiry. On 2026-07-27

@@ -265,7 +265,8 @@ artha:
     # I2 — context breadth + rejection intelligence (INT §6.2/§4.2/§2.2/§10.2). YAML-only knobs (still
     # shadow mode); every value is hashed into config_hash, so a threshold change is visible in each row.
     context:
-      underlyings: [NIFTY, SENSEX]      # options-digest underlyings scanned per 15-min context sweep
+      underlyings: [NIFTY 50, SENSEX]   # options-digest underlyings scanned per 15-min context sweep
+                                        # CANONICAL keys only — a bare `NIFTY` 404s and fail-softs silently (task_ffefe53e)
       pcr-delta: 0.15                   # |ΔPCR since open| crossing → CONTEXT_SHIFT
       max-pain-drift: 50                # |max-pain drift| (index points) since open → CONTEXT_SHIFT
       straddle-pct: 20                  # |ATM straddle Δ%| vs open → CONTEXT_SHIFT

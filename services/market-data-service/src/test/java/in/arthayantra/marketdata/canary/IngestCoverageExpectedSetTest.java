@@ -47,17 +47,22 @@ class IngestCoverageExpectedSetTest {
             new ExpectedSource(IngestRunLedger.SOURCE_MINERVINI_SCREEN, Policy.SCREENER),
             new ExpectedSource(IngestRunLedger.SOURCE_MANAS_SCREEN, Policy.SCREENER),
             new ExpectedSource(IngestRunLedger.SOURCE_OPTIONS_SNAPSHOT_CAPTURE, Policy.CAPTURE),
-            new ExpectedSource(IngestRunLedger.SOURCE_EQUITY_BREADTH, Policy.REQUIRE_SUCCESS));
+            new ExpectedSource(IngestRunLedger.SOURCE_EQUITY_BREADTH, Policy.MATERIALIZED_DAY));
   }
 
   /**
-   * The two sources that write to {@code ingest_runs} and are deliberately NOT registered yet.
+   * The THREE sources that write to {@code ingest_runs} and are deliberately NOT registered.
    *
    * <p>Named here rather than left implicit because the EQUITY_BREADTH gap was invisible precisely
-   * because nothing wrote down that it was missing. Registering these is a separate decision — both
-   * would need their own policy reasoning, and neither has the measured miss that justified
-   * EQUITY_BREADTH — but the next person to read this file should find out from the file, not from
-   * an outage.
+   * because nothing wrote down that it was missing. Registering any of them is a separate decision:
+   * each needs its own policy reasoning, and none has the measured miss that prompted EQUITY_BREADTH.
+   *
+   * <p>⚠️ This said "two" in the first cut, and review caught the third. {@code
+   * OPTIONS_SNAPSHOT_PRUNE} declares its source as a LOCAL constant ({@code
+   * OptionsSnapshotPruneJob:57}) rather than an {@link IngestRunLedger} one, so a sweep of that
+   * class's constants — which is how the first list was built — cannot see it. A file whose stated
+   * purpose is "find out from the file, not from an outage" must not itself be the incomplete
+   * record, so the literal is spelled out here.
    */
   @Test
   @DisplayName("the deliberately-unregistered writers are still deliberately unregistered")
@@ -66,6 +71,8 @@ class IngestCoverageExpectedSetTest {
         IngestCoverageCanary.EXPECTED.stream().map(ExpectedSource::source).toList();
     assertThat(registered)
         .doesNotContain(
-            IngestRunLedger.SOURCE_MARKET_CONTEXT_DAY, IngestRunLedger.SOURCE_DATA_QUALITY);
+            IngestRunLedger.SOURCE_MARKET_CONTEXT_DAY,
+            IngestRunLedger.SOURCE_DATA_QUALITY,
+            "OPTIONS_SNAPSHOT_PRUNE");
   }
 }

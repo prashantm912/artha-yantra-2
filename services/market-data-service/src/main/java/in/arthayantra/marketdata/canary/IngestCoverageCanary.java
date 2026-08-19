@@ -161,6 +161,32 @@ public class IngestCoverageCanary {
      * strength of a counter that was never about this date.
      */
     SCREENER,
+    /**
+     * The day's MATERIALIZED ROW is the criterion, not the run row.
+     *
+     * <p>⚠️ Added 2026-08-19 with {@code EQUITY_BREADTH}, whose first cut used {@link
+     * #REQUIRE_SUCCESS} and was wrong in BOTH directions — caught in review before merge, and it is
+     * the THIRD time this class has had to move a policy off the run row.
+     *
+     * <p>{@code EquityBreadthEodJob} is watermark-driven: it computes {@code [latest..watermark]},
+     * so its run row says nothing about WHICH day it covered. Concretely, under REQUIRE_SUCCESS:
+     *
+     * <ul>
+     *   <li><b>GREEN with no data for the day</b> — a run stamped day D that computed only D-1
+     *       (the day's cash bhavcopy had not landed by the 18:51 cron) still records SUCCESS on D.
+     *   <li><b>RED with the data present</b> — the dedup skip returns BEFORE {@code ledger.start}
+     *       ({@code EquityBreadthEodJob:94}), so a no-op run records NOTHING; and a boot catch-up
+     *       that materializes D is stamped D+1. Measured: 2026-08-12 has no EQUITY_BREADTH row at
+     *       all, and 2026-08-13 carries TWO — 15:45 (a boot pass) and the 18:51 cron. The 08-12
+     *       data was not missed; it was materialized late and stamped elsewhere.
+     * </ul>
+     *
+     * <p>That second mode is the same shape {@link #SCREENER} documents and the same lesson {@link
+     * #BHAVCOPY_BOTH_EXCHANGES_ADVANCED} learned the hard way: <b>measure the artifact, not the
+     * step.</b> The run-row ladder still runs when the artifact is ABSENT, so the policy keeps its
+     * ability to say WHY.
+     */
+    MATERIALIZED_DAY,
     /** Exactly one accumulating per-day row; green only when it captured rows. */
     CAPTURE
   }
@@ -263,7 +289,7 @@ public class IngestCoverageCanary {
           // caught. REQUIRE_SUCCESS rather than a rows_written floor on purpose: the incremental
           // evening run legitimately writes 2 rows, and BHAVCOPY_BOTH_EXCHANGES_ADVANCED's own
           // javadoc records what happens when a policy guesses at a row count it did not measure.
-          new ExpectedSource(IngestRunLedger.SOURCE_EQUITY_BREADTH, Policy.REQUIRE_SUCCESS));
+          new ExpectedSource(IngestRunLedger.SOURCE_EQUITY_BREADTH, Policy.MATERIALIZED_DAY));
 
   private static final Logger log = LoggerFactory.getLogger(IngestCoverageCanary.class);
 
@@ -723,6 +749,31 @@ public class IngestCoverageCanary {
     return null;
   }
 
+  /**
+   * The materialized artifact for one trade date. Mirrors {@link #screenerStored} deliberately: same
+   * shape, same "null means ABSENT, fall through to the run-row ladder" contract.
+   */
+  private SourceCoverage materializedStored(ExpectedSource expected, LocalDate tradingDay) {
+    String table = materializedTable(expected.source());
+    if (table == null) {
+      return red(
+          expected,
+          "MATERIALIZED_DAY policy has no output table mapped for this source — coverage cannot be"
+              + " assessed");
+    }
+    Long stored =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM " + table + " WHERE trade_date = ?", Long.class, tradingDay);
+    if (stored == null || stored == 0) {
+      return null;
+    }
+    return green(expected, "materialized for this trading day (" + stored + " row(s))");
+  }
+
+  private static String materializedTable(String source) {
+    return IngestRunLedger.SOURCE_EQUITY_BREADTH.equals(source) ? "equity_breadth_daily" : null;
+  }
+
   /** A screen's stored artifact for one trade date: how many rows, and when they were computed. */
   private record ScreenOutput(long rows, Instant computedAt) {}
 
@@ -778,6 +829,15 @@ public class IngestCoverageCanary {
 
   private SourceCoverage assess(
       ExpectedSource expected, List<RunRow> rows, Instant now, LocalDate tradingDay) {
+    if (expected.policy() == Policy.MATERIALIZED_DAY) {
+      // Same reasoning as SCREENER below: the artifact for the trade date settles it, whatever the
+      // run rows say — including when there are NONE, because the dedup skip records nothing and a
+      // boot catch-up is stamped the following day.
+      SourceCoverage stored = materializedStored(expected, tradingDay);
+      if (stored != null) {
+        return stored;
+      }
+    }
     if (expected.policy() == Policy.SCREENER) {
       // Output for the trade date settles it, whatever the run rows say — including when there are
       // none because the work was done by the next morning's catch-up. Only when the artifact is
@@ -813,6 +873,16 @@ public class IngestCoverageCanary {
             maxRows > 0
                 ? green(expected, "captured " + maxRows + " option rows")
                 : red(expected, "capture-session recorded 0 rows on a trading day");
+        // Reached only with NO materialized row for this trade date, so a SUCCESS run covered a
+        // DIFFERENT day — the watermark had not reached this one. The run count is not evidence
+        // about this date and must not green it.
+        case MATERIALIZED_DAY ->
+            red(
+                expected,
+                success.size()
+                    + " SUCCESS run(s) but nothing materialized for "
+                    + tradingDay
+                    + " — the run covered another day (watermark had not advanced)");
       };
     }
     // No SUCCESS row: distinguish a crashed run from an outright miss.
@@ -833,9 +903,12 @@ public class IngestCoverageCanary {
       // the one the reader must act on — is the OUTPUT's, not the row's.
       return red(
           expected,
-          expected.policy() == Policy.SCREENER
-              ? "no screen output stored for the trading day, and no ingest run recorded"
-              : "no ingest run recorded for the trading day");
+          switch (expected.policy()) {
+            case SCREENER -> "no screen output stored for the trading day, and no ingest run recorded";
+            case MATERIALIZED_DAY ->
+                "nothing materialized for the trading day, and no ingest run recorded";
+            default -> "no ingest run recorded for the trading day";
+          });
     }
     String statuses = rows.stream().map(RunRow::status).distinct().collect(Collectors.joining(","));
     return red(expected, rows.size() + " run(s) but none SUCCESS (statuses: " + statuses + ")");

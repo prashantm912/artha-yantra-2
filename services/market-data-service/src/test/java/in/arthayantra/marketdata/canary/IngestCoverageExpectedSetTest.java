@@ -16,10 +16,13 @@ import org.junit.jupiter.api.Test;
  * <p>⚠️ Why this exists. {@code EQUITY_BREADTH} wrote to {@code marketdata.ingest_runs} from #686
  * and was never in {@link IngestCoverageCanary#EXPECTED}, so a session where it did not run was not
  * merely un-alerted — it was <b>unobservable</b>, because both the canary and {@link
- * IngestHealthBoard} derive their entire source list from that constant. Measured over the 21
- * weekdays 2026-07-21..2026-08-18: 20 SUCCESS, and 2026-08-12 with no run at all on a full trading
- * day. Nothing in the repo would have failed if the source had been dropped again, which is the
- * shape this file closes.
+ * IngestHealthBoard} derive their entire source list from that constant. Nothing in the repo would
+ * have failed if the source had been dropped again, which is the shape this file closes.
+ *
+ * <p>⚠️ An earlier version of this note cited "2026-08-12 with no run at all on a full trading day"
+ * as the justifying miss. That is literally true and reads as a miss, but it was NOT one — the day
+ * was materialized late and stamped 2026-08-13. See {@code Policy#MATERIALIZED_DAY}. The datum is
+ * load-bearing for the POLICY choice, not for this ratchet, which stands on its own.
  *
  * <p>The set is asserted by CONTENT, not just size: a count alone is satisfied by swapping one
  * source for another, and the thing worth pinning is that a specific source is still watched.

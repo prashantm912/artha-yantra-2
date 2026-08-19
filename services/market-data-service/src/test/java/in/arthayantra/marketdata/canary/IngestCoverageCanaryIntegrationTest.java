@@ -239,7 +239,10 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     seedCapture(target, 5200L);
     // the run row is gone — dedup-skipped, or written by the next day's catch-up...
     deleteSource(target, IngestRunLedger.SOURCE_EQUITY_BREADTH);
-    // ...but seedBatchesHealthy already materialized the day, which is what actually matters.
+    // ...and the row was materialized by a boot pass the FOLLOWING morning, which is the exact
+    // production event this policy exists for: 2026-08-12 had no run row, and 2026-08-13 carried an
+    // off-cron 15:45 pass alongside its own 18:51 cron.
+    seedBreadthRow(target, target.plusDays(1).atTime(15, 45));
 
     IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
 
@@ -248,6 +251,9 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
         .as("breadth for this day EXISTS — a missing run row must not red it")
         .isEqualTo("GREEN");
     assertThat(cov.detail()).contains("materialized for this trading day");
+    // The lateness must reach the reader: late-but-done is not the same as same-day, and without
+    // this the when(...) rendering could be reverted with the whole suite still green.
+    assertThat(cov.detail()).contains("LATE, T+1 catch-up");
     assertThat(report.status()).isEqualTo("GREEN");
   }
 
@@ -1193,7 +1199,7 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     // seedScreenRows above, and for the same reason: the run row does not identify the day it
     // covered.
     seedBatch(day, IngestRunLedger.SOURCE_EQUITY_BREADTH, "SUCCESS", 2L, true);
-    seedBreadthRow(day);
+    seedBreadthRow(day, day.atTime(18, 51));
     // The SCREENER policy reads the OUTPUT tables, not the run rows — a healthy day must seed both
     // (same reason seedBhavRows exists for the bhavcopy policy). Computed the same evening.
     seedScreenRows(day, day.atTime(19, 1));
@@ -1227,11 +1233,19 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
   }
 
   /** The materialized breadth row MATERIALIZED_DAY actually reads. Minimal columns only. */
-  private void seedBreadthRow(LocalDate day) {
+  /**
+   * ⚠️ {@code computedAt} is EXPLICIT, mirroring {@link #seedScreenRows}. The first cut omitted it
+   * and fell to the DDL default {@code now()}, which against a 2026-01-13 target rendered
+   * "LATE, T+218 catch-up" on every healthy fixture AND changed daily — a nondeterministic fixture
+   * that was harmless only because nothing asserted the string yet.
+   */
+  private void seedBreadthRow(LocalDate day, java.time.LocalDateTime computedAtIst) {
     jdbc.update(
-        "INSERT INTO equity_breadth_daily (trade_date, advances, declines, unchanged, total)"
-            + " VALUES (?, 1, 1, 0, 2) ON CONFLICT (trade_date) DO NOTHING",
-        day);
+        "INSERT INTO equity_breadth_daily (trade_date, advances, declines, unchanged, total,"
+            + " computed_at) VALUES (?, 1, 1, 0, 2, ?)"
+            + " ON CONFLICT (trade_date) DO UPDATE SET computed_at = EXCLUDED.computed_at",
+        day,
+        computedAtIst.atZone(Ist.ZONE).toOffsetDateTime());
   }
 
   /** Drops the materialized breadth row for {@code day} — the "breadth never landed" shape. */

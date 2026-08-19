@@ -132,6 +132,45 @@ class CashEquitySubscriptionRatchetTest {
     assertThat(((ApiException) thrown).httpStatus()).isEqualTo(400);
   }
 
+  /**
+   * ⚠️ H29 (#1424) changed the POPULATION that reaches this ratchet, and that is exactly the kind of
+   * change #1251 exists to catch.
+   *
+   * <p>27 actively-traded NSE BE-series equities previously died one step EARLIER — {@code
+   * TokenResolverAdapter} could not resolve them at all, because Kite carries them under a {@code
+   * -BE} suffixed tradingsymbol and every consumer we own uses the bare symbol. So unresolvability
+   * was a SECOND, independent barrier between them and {@code ticks:last}. The fallback removes it,
+   * deliberately, and this ratchet is now the ONLY thing standing there.
+   *
+   * <p>⚠️ <b>READ WHAT THIS PINS, AND WHAT IT CANNOT.</b> It mocks {@link InstrumentTokenResolver}
+   * wholesale, so {@code TokenResolverAdapter} — the only production class #1424 touches — is never
+   * constructed here. <b>Measured: this test passes with the {@code -BE} fallback removed
+   * (9/9, compile-errors 0).</b> It therefore does NOT pin the H29 linkage, and calling it that
+   * would be exactly the tautology {@link #fixtureRegistry} was built to escape.
+   *
+   * <p>What it DOES pin is forward: a resolvable NSE cash equity is refused with a 400, whatever
+   * route delivered it. That is worth having now that resolution is no longer a second barrier —
+   * but the fallback's own half (the twin yields a non-{@code INDICES} segment) is pinned where it
+   * can actually redden, in {@code TokenResolverBeSuffixTest}.
+   */
+  @Test
+  void aResolvableCashEquityIsRefusedWhateverRouteResolvedIt() {
+    assertThatThrownBy(
+            () ->
+                registryWhereEverythingIsA("EQ", "NSE")
+                    .subscribe(
+                        "ui",
+                        key("NSE", "KANORICHEM"),
+                        SubscriptionMode.QUOTE,
+                        SubscriptionPriority.UI))
+        .as("a BE equity that newly RESOLVES must not newly SUBSCRIBE")
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("NSE:KANORICHEM")
+        .hasMessageContaining("#1251")
+        .extracting(t -> ((ApiException) t).httpStatus())
+        .isEqualTo(400);
+  }
+
   @Test
   void theReplayPathCannotRestoreACashEquityHold() {
     // SubscriptionReplayer calls the same overload for every persisted hold, so a hold written

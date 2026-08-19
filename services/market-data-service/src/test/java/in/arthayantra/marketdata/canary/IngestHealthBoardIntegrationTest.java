@@ -79,7 +79,11 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
     assertThat(report.tradingDays()).isEqualTo(3);
     assertThat(report.toDay()).isEqualTo(d1);
     assertThat(report.fromDay()).isEqualTo(d3);
-    assertThat(report.sources()).hasSize(8);
+    // 9 since EQUITY_BREADTH was registered (chip task_1e319725). This fixture does not seed it, so
+    // it pivots RED across the window — which is the point worth keeping: the board derives its rows
+    // from IngestCoverageCanary.EXPECTED, so a newly registered source appears here with no board
+    // change at all, and an unseeded one reads RED rather than being silently absent.
+    assertThat(report.sources()).hasSize(9);
 
     SourceHealth fii = find(report, IngestRunLedger.SOURCE_NSE_FII_DII);
     assertThat(fii.status()).isEqualTo("GREEN"); // newest day is healthy

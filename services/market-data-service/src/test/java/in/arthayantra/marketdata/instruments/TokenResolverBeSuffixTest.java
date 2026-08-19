@@ -60,6 +60,10 @@ class TokenResolverBeSuffixTest {
 
     assertThat(got).isPresent();
     assertThat(got.get().instrumentToken()).isEqualTo(2510081L);
+    assertThat(got.get().isIndex())
+        .as("the twin is a cash equity, and THAT is what makes the #1251 ratchet fire on it —"
+            + " the whole clean-tier ruling rests on this segment propagating")
+        .isFalse();
     assertThat(fallbackCount())
         .as("the fallback must be COUNTED — the defect it fixes was invisible because it fail-softed")
         .isEqualTo(1.0);

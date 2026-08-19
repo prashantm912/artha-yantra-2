@@ -142,17 +142,19 @@ class CashEquitySubscriptionRatchetTest {
    * was a SECOND, independent barrier between them and {@code ticks:last}. The fallback removes it,
    * deliberately, and this ratchet is now the ONLY thing standing there.
    *
-   * <p>The refusal path itself is unchanged — the segment is still {@code NSE}, so {@code isIndex()}
-   * is still false. What is new is that these symbols arrive at all. Nothing pinned that, and the
-   * observable contract moved with it: for these 27 the API answer goes from 404
-   * NOT_FOUND_INSTRUMENT to 400 VALIDATION_FAILED. Refusal to refusal, which is correct — but it is
-   * a different refusal, and it must stay one.
+   * <p>⚠️ <b>READ WHAT THIS PINS, AND WHAT IT CANNOT.</b> It mocks {@link InstrumentTokenResolver}
+   * wholesale, so {@code TokenResolverAdapter} — the only production class #1424 touches — is never
+   * constructed here. <b>Measured: this test passes with the {@code -BE} fallback removed
+   * (9/9, compile-errors 0).</b> It therefore does NOT pin the H29 linkage, and calling it that
+   * would be exactly the tautology {@link #fixtureRegistry} was built to escape.
+   *
+   * <p>What it DOES pin is forward: a resolvable NSE cash equity is refused with a 400, whatever
+   * route delivered it. That is worth having now that resolution is no longer a second barrier —
+   * but the fallback's own half (the twin yields a non-{@code INDICES} segment) is pinned where it
+   * can actually redden, in {@code TokenResolverBeSuffixTest}.
    */
   @Test
-  void aSymbolThatOnlyResolvesViaItsBeTwinIsStillRefused() {
-    // The resolver here returns what the REAL adapter now returns for a bare BE symbol: a resolved
-    // token whose segment is NSE (the -BE twin is the same company on the same exchange, so it is a
-    // cash equity, not an index).
+  void aResolvableCashEquityIsRefusedWhateverRouteResolvedIt() {
     assertThatThrownBy(
             () ->
                 registryWhereEverythingIsA("EQ", "NSE")
@@ -164,7 +166,9 @@ class CashEquitySubscriptionRatchetTest {
         .as("a BE equity that newly RESOLVES must not newly SUBSCRIBE")
         .isInstanceOf(ApiException.class)
         .hasMessageContaining("NSE:KANORICHEM")
-        .hasMessageContaining("#1251");
+        .hasMessageContaining("#1251")
+        .extracting(t -> ((ApiException) t).httpStatus())
+        .isEqualTo(400);
   }
 
   @Test

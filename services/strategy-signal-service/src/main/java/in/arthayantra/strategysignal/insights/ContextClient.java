@@ -176,12 +176,11 @@ public class ContextClient {
       // fires on schedule trains the reader to ignore WARNs -- which is the exact property this
       // class's siblings were just changed to protect.
       //
-      // ⚠️ It is currently hiding a REAL defect, and that is recorded rather than re-buried:
-      // `artha.insights.context.underlyings` is [NIFTY, SENSEX] (application.yml:268) but the
-      // canonical name is `NIFTY 50` -- measured 2026-08-18, NIFTY 404s and `NIFTY 50` returns 200,
-      // and `strategy.insights` holds ZERO NIFTY-scoped CONTEXT_SHIFT rows in the entire history of
-      // the feature. Fixing the name is a BEHAVIOUR change (insights that have never fired would
-      // start), so it is a ledger item, not a line in an observability PR.
+      // ⚠️ This carve-out DID hide a real defect for the whole life of the feature: the configured
+      // underlying was a bare `NIFTY`, which is not a canonical instrument key, so half the sweep
+      // 404-ed here silently and never produced a row. Fixed in this commit; ContextUnderlyingNames
+      // Test now fails the build on a non-canonical name, so the carve-out can go back to covering
+      // only what it was written for -- an underlying that genuinely has no option expiries.
       log.debug("insight trust read {} — no such digest (returning empty)", path);
       return Optional.empty();
     } catch (Exception e) {

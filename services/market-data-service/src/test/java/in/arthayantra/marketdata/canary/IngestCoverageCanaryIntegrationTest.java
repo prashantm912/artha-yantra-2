@@ -125,7 +125,7 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
 
     assertThat(report.status()).isEqualTo("GREEN");
     assertThat(report.sources())
-        .hasSize(8)
+        .hasSize(9) // +EQUITY_BREADTH, registered 2026-08-19 (chip task_1e319725)
         .allSatisfy(s -> assertThat(s.status()).isEqualTo("GREEN"));
   }
 
@@ -1138,6 +1138,10 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     seedBatch(day, IngestRunLedger.SOURCE_INSTRUMENT_SYNC, "SUCCESS", 90000L, true);
     seedBatch(day, IngestRunLedger.SOURCE_MINERVINI_SCREEN, "SUCCESS", 96L, true);
     seedBatch(day, IngestRunLedger.SOURCE_MANAS_SCREEN, "SUCCESS", 40L, true);
+    // EQUITY_BREADTH (chip task_1e319725). REQUIRE_SUCCESS, and the row count is deliberately small:
+    // the live incremental evening run writes 2, so a fixture seeding a large number would encode a
+    // floor the policy does not have.
+    seedBatch(day, IngestRunLedger.SOURCE_EQUITY_BREADTH, "SUCCESS", 2L, true);
     // The SCREENER policy reads the OUTPUT tables, not the run rows — a healthy day must seed both
     // (same reason seedBhavRows exists for the bhavcopy policy). Computed the same evening.
     seedScreenRows(day, day.atTime(19, 1));

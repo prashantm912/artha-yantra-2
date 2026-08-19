@@ -40,9 +40,12 @@ import org.springframework.stereotype.Component;
  * <p>Per-source expectation (verified against the A4 writers' live semantics, 2026-07-10):
  *
  * <ul>
- *   <li><b>REQUIRE_SUCCESS</b> (NSE FII/DII, participant-OI, FII-derivative, bhavcopy, instrument
- *       sync) — ≥1 {@code SUCCESS} row in the day (boot-pull count varies with restarts, so the
- *       floor is one, not two). No success ⇒ RED.
+ *   <li><b>REQUIRE_SUCCESS</b> (NSE FII/DII, participant-OI, FII-derivative, instrument sync,
+ *       equity breadth) — ≥1 {@code SUCCESS} row in the day (boot-pull count varies with restarts,
+ *       so the floor is one, not two). No success ⇒ RED.
+ *   <li><b>BHAVCOPY_BOTH_EXCHANGES_ADVANCED</b> (bhavcopy) — see the policy's own javadoc. ⚠️ This
+ *       list named bhavcopy under REQUIRE_SUCCESS until 2026-08-19; #1327 moved it on 2026-08-08 and
+ *       the summary was never updated, so the doc described a weaker rule than the code enforced.
  *   <li><b>SCREENER</b> (Minervini, Manas) — screen OUTPUT stored for the trade date is GREEN,
  *       whenever the run happened; with no output, a same-day {@code SUCCESS} that wrote 0 rows is a
  *       data-starved skip ⇒ YELLOW (audit reviewer note: an empty screen is not the same as a
@@ -251,7 +254,16 @@ public class IngestCoverageCanary {
           new ExpectedSource(IngestRunLedger.SOURCE_INSTRUMENT_SYNC, Policy.REQUIRE_SUCCESS),
           new ExpectedSource(IngestRunLedger.SOURCE_MINERVINI_SCREEN, Policy.SCREENER),
           new ExpectedSource(IngestRunLedger.SOURCE_MANAS_SCREEN, Policy.SCREENER),
-          new ExpectedSource(IngestRunLedger.SOURCE_OPTIONS_SNAPSHOT_CAPTURE, Policy.CAPTURE));
+          new ExpectedSource(IngestRunLedger.SOURCE_OPTIONS_SNAPSHOT_CAPTURE, Policy.CAPTURE),
+          // EQUITY_BREADTH — registered 2026-08-19 (chip task_1e319725). It has written to
+          // ingest_runs since #686 and was never expected here, so its absence was unobservable:
+          // measured over the 21 weekdays 2026-07-21..2026-08-18, 20 are SUCCESS and 2026-08-12 has
+          // NO RUN AT ALL — a full trading day (3,308 nse_eod_bhavcopy rows) on which every other
+          // audited source succeeded. That is one real, silently-missed session this would have
+          // caught. REQUIRE_SUCCESS rather than a rows_written floor on purpose: the incremental
+          // evening run legitimately writes 2 rows, and BHAVCOPY_BOTH_EXCHANGES_ADVANCED's own
+          // javadoc records what happens when a policy guesses at a row count it did not measure.
+          new ExpectedSource(IngestRunLedger.SOURCE_EQUITY_BREADTH, Policy.REQUIRE_SUCCESS));
 
   private static final Logger log = LoggerFactory.getLogger(IngestCoverageCanary.class);
 

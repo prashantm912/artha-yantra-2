@@ -178,9 +178,16 @@ public class ContextClient {
       //
       // ⚠️ This carve-out DID hide a real defect for the whole life of the feature: the configured
       // underlying was a bare `NIFTY`, which is not a canonical instrument key, so half the sweep
-      // 404-ed here silently and never produced a row. Fixed in this commit; ContextUnderlyingNames
-      // Test now fails the build on a non-canonical name, so the carve-out can go back to covering
-      // only what it was written for -- an underlying that genuinely has no option expiries.
+      // 404-ed here silently and never produced a row. Fixed in this commit;
+      // ContextUnderlyingNamesTest now fails the build on a non-canonical name IN EITHER COMMITTED
+      // COPY (the yml list and InsightProperties.DEFAULT_UNDERLYINGS), so the carve-out can go back
+      // to covering only what it was written for -- an underlying that genuinely has no option
+      // expiries. ⚠️ NOT covered: a runtime property override. `artha.insights` is
+      // @ConfigurationProperties, so relaxed binding would accept ARTHA_INSIGHTS_CONTEXT_UNDERLYINGS
+      // from any property source and a source-file test cannot see a bound value. None exists today
+      // (compose carries only the delivery flags and two crons), but adding a fifth ARTHA_INSIGHTS_*
+      // passthrough is exactly the low-ceremony change that would bypass the guard while this
+      // comment still says do not look here.
       log.debug("insight trust read {} — no such digest (returning empty)", path);
       return Optional.empty();
     } catch (Exception e) {

@@ -40,15 +40,21 @@ import org.springframework.stereotype.Component;
  * <p>Per-source expectation (verified against the A4 writers' live semantics, 2026-07-10):
  *
  * <ul>
- *   <li><b>REQUIRE_SUCCESS</b> (NSE FII/DII, participant-OI, FII-derivative, bhavcopy, instrument
- *       sync) — ≥1 {@code SUCCESS} row in the day (boot-pull count varies with restarts, so the
- *       floor is one, not two). No success ⇒ RED.
+ *   <li><b>REQUIRE_SUCCESS</b> (NSE FII/DII, participant-OI, FII-derivative, instrument sync) —
+ *       ≥1 {@code SUCCESS} row in the day (boot-pull count varies with restarts, so the floor is
+ *       one, not two). No success ⇒ RED.
+ *   <li><b>BHAVCOPY_BOTH_EXCHANGES_ADVANCED</b> (bhavcopy) — see the policy's own javadoc. ⚠️ This
+ *       list named bhavcopy under REQUIRE_SUCCESS until 2026-08-19; #1327 moved it on 2026-08-08 and
+ *       the summary was never updated, so the doc described a weaker rule than the code enforced.
  *   <li><b>SCREENER</b> (Minervini, Manas) — screen OUTPUT stored for the trade date is GREEN,
  *       whenever the run happened; with no output, a same-day {@code SUCCESS} that wrote 0 rows is a
  *       data-starved skip ⇒ YELLOW (audit reviewer note: an empty screen is not the same as a
  *       healthy one), and anything else ⇒ RED.
  *   <li><b>CAPTURE</b> (options snapshot) — exactly one accumulating row per IST session day; RED
  *       unless it is present with {@code rows_written > 0}.
+ *   <li><b>MATERIALIZED_DAY</b> (equity breadth) — the day's row in the output table is GREEN
+ *       whenever the run happened; the run-row ladder answers only when the artifact is ABSENT. See
+ *       the policy's own javadoc for why a run row cannot be the criterion here.
  * </ul>
  *
  * <p>Universal to every source: a stuck {@code RUNNING} row (never finished, older than
@@ -158,6 +164,32 @@ public class IngestCoverageCanary {
      * strength of a counter that was never about this date.
      */
     SCREENER,
+    /**
+     * The day's MATERIALIZED ROW is the criterion, not the run row.
+     *
+     * <p>⚠️ Added 2026-08-19 with {@code EQUITY_BREADTH}, whose first cut used {@link
+     * #REQUIRE_SUCCESS} and was wrong in BOTH directions — caught in review before merge, and it is
+     * the THIRD time this class has had to move a policy off the run row.
+     *
+     * <p>{@code EquityBreadthEodJob} is watermark-driven: it computes {@code [latest..watermark]},
+     * so its run row says nothing about WHICH day it covered. Concretely, under REQUIRE_SUCCESS:
+     *
+     * <ul>
+     *   <li><b>GREEN with no data for the day</b> — a run stamped day D that computed only D-1
+     *       (the day's cash bhavcopy had not landed by the 18:51 cron) still records SUCCESS on D.
+     *   <li><b>RED with the data present</b> — the dedup skip returns BEFORE {@code ledger.start}
+     *       ({@code EquityBreadthEodJob:94}), so a no-op run records NOTHING; and a boot catch-up
+     *       that materializes D is stamped D+1. Measured: 2026-08-12 has no EQUITY_BREADTH row at
+     *       all, and 2026-08-13 carries TWO — 15:45 (a boot pass) and the 18:51 cron. The 08-12
+     *       data was not missed; it was materialized late and stamped elsewhere.
+     * </ul>
+     *
+     * <p>That second mode is the same shape {@link #SCREENER} documents and the same lesson {@link
+     * #BHAVCOPY_BOTH_EXCHANGES_ADVANCED} learned the hard way: <b>measure the artifact, not the
+     * step.</b> The run-row ladder still runs when the artifact is ABSENT, so the policy keeps its
+     * ability to say WHY.
+     */
+    MATERIALIZED_DAY,
     /** Exactly one accumulating per-day row; green only when it captured rows. */
     CAPTURE
   }
@@ -251,7 +283,18 @@ public class IngestCoverageCanary {
           new ExpectedSource(IngestRunLedger.SOURCE_INSTRUMENT_SYNC, Policy.REQUIRE_SUCCESS),
           new ExpectedSource(IngestRunLedger.SOURCE_MINERVINI_SCREEN, Policy.SCREENER),
           new ExpectedSource(IngestRunLedger.SOURCE_MANAS_SCREEN, Policy.SCREENER),
-          new ExpectedSource(IngestRunLedger.SOURCE_OPTIONS_SNAPSHOT_CAPTURE, Policy.CAPTURE));
+          new ExpectedSource(IngestRunLedger.SOURCE_OPTIONS_SNAPSHOT_CAPTURE, Policy.CAPTURE),
+          // EQUITY_BREADTH — registered 2026-08-19 (chip task_1e319725). It has written to
+          // ingest_runs since #686 and was never expected here, so its absence was unobservable:
+          // both this canary and IngestHealthBoard derive their whole source list from this constant.
+          //
+          // ⚠️ MATERIALIZED_DAY, and the first cut of this registration got that wrong. It used
+          // REQUIRE_SUCCESS, justified by "2026-08-12 has no run row on a full trading day, so this
+          // would have caught a real miss". That justification is REFUTED: 08-13 carries TWO runs,
+          // 15:45 (an off-cron boot pass) and the 18:51 cron, so 08-12's data was materialized late
+          // and stamped elsewhere. A run-row policy would have false-RED-ed healthy data at a
+          // measured 1-in-21 sessions. The run row does not identify the day it covered.
+          new ExpectedSource(IngestRunLedger.SOURCE_EQUITY_BREADTH, Policy.MATERIALIZED_DAY));
 
   private static final Logger log = LoggerFactory.getLogger(IngestCoverageCanary.class);
 
@@ -711,6 +754,47 @@ public class IngestCoverageCanary {
     return null;
   }
 
+  /**
+   * The materialized artifact for one trade date. Mirrors {@link #screenerStored} deliberately: same
+   * shape, same "null means ABSENT, fall through to the run-row ladder" contract.
+   */
+  private SourceCoverage materializedStored(ExpectedSource expected, LocalDate tradingDay) {
+    String table = materializedTable(expected.source());
+    if (table == null) {
+      return red(
+          expected,
+          "MATERIALIZED_DAY policy has no output table mapped for this source — coverage cannot be"
+              + " assessed");
+    }
+    MaterializedDay out =
+        jdbc.queryForObject(
+            "SELECT count(*) AS rows_stored, max(computed_at) AS computed_at FROM "
+                + table
+                + " WHERE trade_date = ?",
+            (rs, n) ->
+                new MaterializedDay(
+                    rs.getLong("rows_stored"), instantOrNull(rs.getTimestamp("computed_at"))),
+            tradingDay);
+    if (out == null || out.rows() == 0) {
+      return null;
+    }
+    // Renders WHEN, for the same reason screenerStored does: breadth is ROUTINELY materialized a
+    // day late by the boot pass, so a GREEN that cannot distinguish same-day from T+3 trades a
+    // false RED for a blind GREEN. ⚠️ Weaker evidence than the screeners': the job recomputes from
+    // `latest` each run, so computed_at is the last RE-compute, not first materialization.
+    return green(
+        expected,
+        "materialized for this trading day (" + out.rows() + " row(s)), "
+            + when(out.computedAt(), tradingDay));
+  }
+
+  /** One day's materialized artifact: how many rows, and when they were last computed. */
+  private record MaterializedDay(long rows, Instant computedAt) {}
+
+  private static String materializedTable(String source) {
+    return IngestRunLedger.SOURCE_EQUITY_BREADTH.equals(source) ? "equity_breadth_daily" : null;
+  }
+
   /** A screen's stored artifact for one trade date: how many rows, and when they were computed. */
   private record ScreenOutput(long rows, Instant computedAt) {}
 
@@ -766,6 +850,15 @@ public class IngestCoverageCanary {
 
   private SourceCoverage assess(
       ExpectedSource expected, List<RunRow> rows, Instant now, LocalDate tradingDay) {
+    if (expected.policy() == Policy.MATERIALIZED_DAY) {
+      // Same reasoning as SCREENER below: the artifact for the trade date settles it, whatever the
+      // run rows say — including when there are NONE, because the dedup skip records nothing and a
+      // boot catch-up is stamped the following day.
+      SourceCoverage stored = materializedStored(expected, tradingDay);
+      if (stored != null) {
+        return stored;
+      }
+    }
     if (expected.policy() == Policy.SCREENER) {
       // Output for the trade date settles it, whatever the run rows say — including when there are
       // none because the work was done by the next morning's catch-up. Only when the artifact is
@@ -801,6 +894,16 @@ public class IngestCoverageCanary {
             maxRows > 0
                 ? green(expected, "captured " + maxRows + " option rows")
                 : red(expected, "capture-session recorded 0 rows on a trading day");
+        // Reached only with NO materialized row for this trade date, so a SUCCESS run covered a
+        // DIFFERENT day — the watermark had not reached this one. The run count is not evidence
+        // about this date and must not green it.
+        case MATERIALIZED_DAY ->
+            red(
+                expected,
+                success.size()
+                    + " SUCCESS run(s) but nothing materialized for "
+                    + tradingDay
+                    + " — the run covered another day (watermark had not advanced)");
       };
     }
     // No SUCCESS row: distinguish a crashed run from an outright miss.
@@ -821,9 +924,12 @@ public class IngestCoverageCanary {
       // the one the reader must act on — is the OUTPUT's, not the row's.
       return red(
           expected,
-          expected.policy() == Policy.SCREENER
-              ? "no screen output stored for the trading day, and no ingest run recorded"
-              : "no ingest run recorded for the trading day");
+          switch (expected.policy()) {
+            case SCREENER -> "no screen output stored for the trading day, and no ingest run recorded";
+            case MATERIALIZED_DAY ->
+                "nothing materialized for the trading day, and no ingest run recorded";
+            default -> "no ingest run recorded for the trading day";
+          });
     }
     String statuses = rows.stream().map(RunRow::status).distinct().collect(Collectors.joining(","));
     return red(expected, rows.size() + " run(s) but none SUCCESS (statuses: " + statuses + ")");

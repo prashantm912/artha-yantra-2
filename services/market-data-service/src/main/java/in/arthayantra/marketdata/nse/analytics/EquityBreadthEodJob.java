@@ -27,11 +27,16 @@ import org.springframework.stereotype.Component;
  * Fail-soft: a fold failure is logged, never fatal. Gated by {@code artha.breadth.materialize.enabled}.
  *
  * <p>Registered in the {@code ingest_runs} batch-source ledger under {@code EQUITY_BREADTH}: a {@code
- * RUNNING} → {@code SUCCESS}(rows)/{@code FAILURE} lifecycle via {@link IngestRunLedger#record}. The row
- * is visible on the ingest-health board's last-run join today; registration in {@code
- * IngestCoverageCanary.EXPECTED} (per-trading-day verdicts + the T+1 alert) is DELIBERATELY DEFERRED
- * until this job's first successful live run — adding an unproven source to the REQUIRE matrix would
- * false-RED the 08:45 canary before the first execution (the #745 MarketContextEodJob precedent).
+ * RUNNING} → {@code SUCCESS}(rows)/{@code FAILURE} lifecycle via {@link IngestRunLedger#record}.
+ * <b>Registered in {@code IngestCoverageCanary.EXPECTED} on 2026-08-19 (#1419)</b>, the deferral
+ * condition — a first successful live run — having long since been met.
+ *
+ * <p>⚠️ It is registered under {@code Policy.MATERIALIZED_DAY}, NOT {@code REQUIRE_SUCCESS}, and the
+ * reason is the hazard the deferral note above originally warned about: this job's run row does not
+ * identify the day it covered. The dedup skip below returns before {@code ledger.start}, so a no-op
+ * records nothing, and a boot catch-up materializes the missed day stamped the FOLLOWING one — so a
+ * run-row policy would false-RED a day whose data is present. The canary reads
+ * {@code equity_breadth_daily} for the trade date instead.
  *
  * <p>On the first run the table is empty, so the boot pass backfills {@code backfill-days} of history
  * (the fold is one SMA-warmed scan over the deep cash bhavcopy — cheap, off the critical path); on later

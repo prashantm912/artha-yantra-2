@@ -140,6 +140,16 @@ expect "another deploy/ file does not reach any shard" \
   "deploy/README.md" \
   "market_data=false,backtest=false,strategy_gateway=false"
 
+# --- market-data's application.yml is a CROSS-SHARD test input ---
+# strategy-signal's ContextUnderlyingNamesTest reads market-data's snapshot-underlyings as the
+# canonical instrument vocabulary. The edit it exists to catch — a name dropped or renamed there,
+# touching nothing in strategy-signal — must still run the strategy_gateway shard, or the guard
+# never executes and reds later on an unrelated PR.
+expect "a market-data application.yml edit also runs the shard that asserts against it"   "services/market-data-service/src/main/resources/application.yml"   "market_data=true,backtest=false,strategy_gateway=true,java=true"
+
+# A sibling market-data resource is NOT a cross-shard input and must not fan out.
+expect "another market-data resource does not reach strategy_gateway"   "services/market-data-service/src/main/resources/nse-holidays.csv"   "market_data=true,backtest=false,strategy_gateway=false"
+
 # --- a service no shard owns: named, which ci-java turns into a HARD FAILURE ---
 expect "unowned service fans out and is named" \
   "services/brand-new-service/src/main/java/Foo.java" \

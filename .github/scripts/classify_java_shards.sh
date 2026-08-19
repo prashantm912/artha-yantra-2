@@ -82,6 +82,18 @@ if grep -Eq '^deploy/docker-compose\.yml$' <<<"$files"; then
   strategy_gateway=true
 fi
 
+# market-data's application.yml is a TEST INPUT for the strategy-gateway shard, not only its own:
+#   - strategy-signal's ContextUnderlyingNamesTest reads market-data's `snapshot-underlyings` as the
+#     canonical instrument vocabulary and fails if a configured context underlying is not in it.
+# Without this rule the ONE edit that guard exists to catch — dropping or renaming a name in
+# market-data's list, touching nothing in strategy-signal — runs only the market_data shard, so the
+# guard never executes and the PR merges green. It would then red on an unrelated later PR and blame
+# the wrong author. Same shape as the two rules above; market_data is set by the generic
+# services/market-data-service/ rule already.
+if grep -Eq '^services/market-data-service/src/main/resources/application\.yml$' <<<"$files"; then
+  strategy_gateway=true
+fi
+
 # Every service directory this repo knows about. The four JVM services are mapped to shards
 # above; the two Python services own their own workflows (ci-optimizer / ci-margin) and are
 # listed here so they do not read as unowned. EDIT THIS when a service is added, renamed or

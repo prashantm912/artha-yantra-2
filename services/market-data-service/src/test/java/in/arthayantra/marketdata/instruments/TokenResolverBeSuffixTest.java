@@ -111,6 +111,20 @@ class TokenResolverBeSuffixTest {
   }
 
   @Test
+  @DisplayName("a null tradingsymbol stays a clean miss rather than becoming a 500")
+  void aNullTradingsymbolDoesNotBlowUp() {
+    // SubscribeRequest (SubscriptionsController:23) is a bare record with no @NotBlank/@Valid, so a
+    // body with a null tradingsymbol reaches the resolver. Before the fallback existed this returned
+    // empty and the caller answered a clean 404; the first cut of the fallback called endsWith() on
+    // it and turned that into a 500. Caught in review, and it is the kind of regression a fallback
+    // introduces precisely because it runs on the path that used to just give up.
+    when(repository.findByKey(NSE, null)).thenReturn(Optional.empty());
+
+    assertThat(resolver.resolve(new InstrumentKey(NSE, null))).isEmpty();
+    assertThat(fallbackCount()).isZero();
+  }
+
+  @Test
   @DisplayName("a genuine miss is still a miss — the fallback must not manufacture a resolution")
   void anUnresolvableSymbolStaysUnresolved() {
     // 277 of the 304 shells have NO twin: genuinely delisted. Those must keep failing, or the

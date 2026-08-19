@@ -132,6 +132,41 @@ class CashEquitySubscriptionRatchetTest {
     assertThat(((ApiException) thrown).httpStatus()).isEqualTo(400);
   }
 
+  /**
+   * ⚠️ H29 (#1424) changed the POPULATION that reaches this ratchet, and that is exactly the kind of
+   * change #1251 exists to catch.
+   *
+   * <p>27 actively-traded NSE BE-series equities previously died one step EARLIER — {@code
+   * TokenResolverAdapter} could not resolve them at all, because Kite carries them under a {@code
+   * -BE} suffixed tradingsymbol and every consumer we own uses the bare symbol. So unresolvability
+   * was a SECOND, independent barrier between them and {@code ticks:last}. The fallback removes it,
+   * deliberately, and this ratchet is now the ONLY thing standing there.
+   *
+   * <p>The refusal path itself is unchanged — the segment is still {@code NSE}, so {@code isIndex()}
+   * is still false. What is new is that these symbols arrive at all. Nothing pinned that, and the
+   * observable contract moved with it: for these 27 the API answer goes from 404
+   * NOT_FOUND_INSTRUMENT to 400 VALIDATION_FAILED. Refusal to refusal, which is correct — but it is
+   * a different refusal, and it must stay one.
+   */
+  @Test
+  void aSymbolThatOnlyResolvesViaItsBeTwinIsStillRefused() {
+    // The resolver here returns what the REAL adapter now returns for a bare BE symbol: a resolved
+    // token whose segment is NSE (the -BE twin is the same company on the same exchange, so it is a
+    // cash equity, not an index).
+    assertThatThrownBy(
+            () ->
+                registryWhereEverythingIsA("EQ", "NSE")
+                    .subscribe(
+                        "ui",
+                        key("NSE", "KANORICHEM"),
+                        SubscriptionMode.QUOTE,
+                        SubscriptionPriority.UI))
+        .as("a BE equity that newly RESOLVES must not newly SUBSCRIBE")
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("NSE:KANORICHEM")
+        .hasMessageContaining("#1251");
+  }
+
   @Test
   void theReplayPathCannotRestoreACashEquityHold() {
     // SubscriptionReplayer calls the same overload for every persisted hold, so a hold written

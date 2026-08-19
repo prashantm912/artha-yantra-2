@@ -77,7 +77,20 @@ public class TokenResolverAdapter implements InstrumentTokenResolver {
    * BSE has no BE series, so the suffix means nothing there.
    */
   private static boolean isBeFallbackCandidate(InstrumentKey key) {
-    return NSE.equals(key.exchange()) && !key.tradingsymbol().endsWith(BE_SUFFIX);
+    // ⚠️ The null check is not defensive padding — it is a REGRESSION GUARD. SubscribeRequest
+    // (SubscriptionsController:23) is a bare record with no @NotBlank/@Valid, so a body with a null
+    // tradingsymbol reaches here. Before this fallback existed that returned empty and the caller
+    // answered a clean 404; without the check, endsWith() NPEs and it becomes a 500. Caught in
+    // review, 2026-08-19.
+    //
+    // ⚠️ Exact-match on exchange is DELIBERATE, and must not be "fixed" to match
+    // SubscriptionRegistry:184, which trims and upper-cases. Normalizing here would let the
+    // fallback fire for "nse" where the DIRECT lookup cannot — i.e. the backup path would be more
+    // permissive than the path it backs, which is how a fallback starts resolving things the
+    // primary would refuse.
+    return NSE.equals(key.exchange())
+        && key.tradingsymbol() != null
+        && !key.tradingsymbol().endsWith(BE_SUFFIX);
   }
 
   private Optional<TokenInfo> lookup(String exchange, String tradingsymbol) {

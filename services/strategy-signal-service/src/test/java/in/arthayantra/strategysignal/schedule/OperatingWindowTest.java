@@ -64,6 +64,14 @@ class OperatingWindowTest {
     JOBS.put("artha.bhavcopy-close.cron", MD + "canary/BhavcopyCloseCanary.java");
     JOBS.put(
         "artha.minervini.buyable-alerts.cron", MD + "screener/minervini/MinerviniBuyableProducer.java");
+    // The two swing SETTLES. Catalogued 2026-08-19 with ledger H27, which is also the reason they
+    // moved out of 16:00/16:02: they were the only evening jobs this map had never named, so the
+    // collision check could not see them and their hour was never asserted against the tail they
+    // now sit in. Ordering that matters: AFTER artha.bhavcopy.eod-cron (18:45), which writes the
+    // session bar they price off, and BEFORE artha.heartbeat.swing-cron (18:54), which reports
+    // whether they ran.
+    JOBS.put("artha.minervini.swing.cron", SS + "minervini/MinerviniSwingScheduler.java");
+    JOBS.put("artha.manas-arora.swing.cron", SS + "manas/ManasAroraSwingScheduler.java");
     JOBS.put("artha.heartbeat.swing-cron", SS + "signals/SwingBatchHeartbeat.java");
     JOBS.put("artha.graduation.promotion-cron", SS + "paper/GraduationPromotionScheduler.java");
     // ⚠️ No compose passthrough — application.yml only. The reason this test reads annotations.
@@ -75,7 +83,7 @@ class OperatingWindowTest {
     JOBS.put("artha.paper.past-expiry-recon.cron", SS + "paper/PaperScheduler.java");
   }
 
-  private static final int EXPECTED_JOB_COUNT = 16;
+  private static final int EXPECTED_JOB_COUNT = 18;
 
   @Test
   @DisplayName("the catalogue is not silently shrunk")

@@ -62,8 +62,11 @@ public class ManasAroraSwingScheduler {
     }
   }
 
-  /** 16:02 IST settle: evaluate every held stop against this session's own daily bar. */
-  @Scheduled(cron = "${artha.manas-arora.swing.cron:0 2 16 * * MON-FRI}", zone = "Asia/Kolkata")
+  /**
+   * 18:53 IST settle: evaluate every held stop against this session's own daily bar. One minute
+   * behind the Minervini twin, as 16:00/16:02 were — see it for why the hour moved (ledger H27).
+   */
+  @Scheduled(cron = "${artha.manas-arora.swing.cron:0 53 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void run() {
     LocalDate session = LocalDate.now(clock.withZone(IST));
     try {

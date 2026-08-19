@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.swing;
 
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategysignal.signals.FlagSnapshotService;
 import in.arthayantra.strategysignal.signals.SwingBatchAlert;
 import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
@@ -32,6 +33,9 @@ public class SwingBatchRecorder {
 
   private static final Logger log = LoggerFactory.getLogger(SwingBatchRecorder.class);
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
+
+  /** Field, not injected — the same shape SwingBatchCatchUp uses for its own session window. */
+  private static final MarketCalendar CALENDAR = MarketCalendar.nse();
 
   /**
    * When the {@code swing_batch_runs} completeness marker is stamped. The scheduled / on-demand path
@@ -176,6 +180,45 @@ public class SwingBatchRecorder {
     }
   }
 
+  /**
+   * The session this settle must price off — the PIN that stops a stop being evaluated against a
+   * bar that is not this session's (ledger H27).
+   *
+   * <p>⚠️ This used to be {@code null}, which means "settle off whatever the newest bar happens to
+   * be". That reads as harmless and is not: most cash equities have no intraday 1d bar at all, so
+   * before the settle moved past the 18:45 bhavcopy ingest the newest bar was routinely the
+   * PREVIOUS session's. Measured 2026-08-18 across the whole table's lifetime — 69 of 417 minervini
+   * and 17 of 169 manas-arora persisted rows were computed on an earlier session's bar, and on
+   * 08-14/08-17/08-18 it was 14 of 15 every day. Nothing counted it: {@code exitSkipped} covers an
+   * EMPTY series and an out-of-window entry bar, not a series that ends on the wrong day, so the
+   * batch logged "0 exits, 0 exit-skipped" over stale input.
+   *
+   * <p>With the pin, {@code truncateToSession} drops a series that has no bar for this session, the
+   * exit pass retries once, and a still-missing bar becomes {@code exitSkipped} + a
+   * STOP-NOT-EVALUATED error — which keeps the session retryable by the 08:35 catch-up rather than
+   * silently settled. Skipping is the SAFE direction here: the catch-up settles off the session's
+   * own bar, whereas a stale evaluation is wrong in a direction nobody can see.
+   *
+   * <p>Holidays: the crons are MON-FRI, which includes NSE holidays. Pinning a holiday would find
+   * no bar and alert on every holding, so the pin resolves to the latest TRADING day — on a holiday
+   * that is the previous session, whose bar exists, and re-evaluating it is the same no-op the
+   * batch already performed. Fail-open to today past the bundled calendar's horizon: refusing to
+   * settle would be a far worse failure than settling off the newest bar, which is exactly the
+   * pre-fix behaviour.
+   */
+  private LocalDate settleSession() {
+    LocalDate today = LocalDate.now(clock.withZone(IST));
+    try {
+      return CALENDAR.isTradingDay(today) ? today : CALENDAR.previousTradingDay(today);
+    } catch (RuntimeException e) {
+      log.warn(
+          "swing settle: NSE calendar does not cover {} — pinning today unresolved (calendar-cliff):"
+              + " {}",
+          today, e.getMessage());
+      return today;
+    }
+  }
+
   private RunOutcome runLocked(
       SwingDoctrine doctrine,
       LocalDate sessionDate,
@@ -286,7 +329,7 @@ public class SwingBatchRecorder {
   }
 
   /**
-   * The scheduler path with an explicit entry arming — the 16:00 IST settle passes {@code false}.
+   * The scheduler path with an explicit entry arming — the evening settle passes {@code false}.
    *
    * <p>Added rather than reusing one of the snapshot-carrying {@link #runAndRecord} overloads
    * because those hardcode {@code executionArmed = true} for the catch-up's benefit (a historical
@@ -299,7 +342,7 @@ public class SwingBatchRecorder {
   public SwingBatchEngine.SwingRun runScheduled(SwingDoctrine doctrine, boolean entriesEnabled) {
     try {
       SwingBatchEngine.SwingRun result =
-          runAndRecord(doctrine, null, entriesEnabled, MarkerPolicy.ALWAYS).run();
+          runAndRecord(doctrine, settleSession(), entriesEnabled, MarkerPolicy.ALWAYS).run();
       log.info(
           "{} swing batch done: {} strategies, {} candidates, {} entries, {} exits, {} exit-skipped",
           doctrine.batchName(), result.strategies(), result.candidates(), result.entries(),

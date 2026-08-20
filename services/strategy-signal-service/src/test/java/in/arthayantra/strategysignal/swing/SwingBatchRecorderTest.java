@@ -198,14 +198,42 @@ class SwingBatchRecorderTest {
   }
 
   /**
-   * The crons are {@code MON-FRI}, which includes NSE holidays. Pinning the holiday itself would
-   * find no bar for any holding and turn every settle on ~12 days a year into a full sweep of
-   * STOP-NOT-EVALUATED errors — an alert that fires predictably is one nobody reads. So the pin
-   * resolves to the latest TRADING day. 2026-05-28 is Bakri Id, a Thursday; 2026-05-27 is the
-   * Wednesday before it and is itself a session.
+   * ⚠️ A weekday NSE holiday is NOT a settle session, and the FIRST cut of this change got that
+   * wrong in a way no exit-path test could see. It resolved the holiday BACK to the previous
+   * trading day, reasoning that re-evaluating a settled session is a harmless no-op. The exit
+   * evaluation is indeed a no-op; the writes around it are not (cross-vendor review, 2026-08-20):
+   * the run-marker upsert REPLACES the previous session's counters, and the scheduler's intent row
+   * is keyed to TODAY — so the holiday would hold an intent with no marker, which is precisely the
+   * shape {@link SwingBatchCanary} pages "DID NOT RUN" for, repeatedly, about a session that never
+   * traded.
+   *
+   * <p>2026-05-28 is Bakri Id, a Thursday; 2026-05-27 is the Wednesday session before it.
    */
   @Test
-  void aWeekdayHolidayPinsTheLastRealSessionRatherThanTheHoliday() {
+  void aWeekdayHolidayIsNotASettleSession() {
+    SwingBatchRecorder recorder = recorderWith(mock(SwingBatchEngine.class), at(2026, 5, 28));
+
+    assertThat(recorder.scheduledSettleSession())
+        .as("Bakri Id is not a session; the schedulers skip rather than reaching back to 05-27")
+        .isEmpty();
+  }
+
+  @Test
+  void aTradingDayIsItsOwnSettleSession() {
+    // The control. Without it, an always-empty implementation would satisfy the holiday case above
+    // and disable every settle in the year.
+    SwingBatchRecorder recorder = recorderWith(mock(SwingBatchEngine.class), at(2026, 8, 19));
+
+    assertThat(recorder.scheduledSettleSession()).contains(LocalDate.of(2026, 8, 19));
+  }
+
+  /**
+   * A MANUAL run on a holiday still runs, and pins the holiday itself — the pre-fix behaviour. That
+   * keeps the marker on the day it actually ran, so it can never overwrite a real session's row;
+   * the missing bar surfaces as {@code exitSkipped}, which is visible and retryable.
+   */
+  @Test
+  void aManualRunOnAHolidayPinsTheHolidayRatherThanReachingBack() {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);
     SwingDoctrine doctrine = manasDoctrine();
     when(engine.runDaily(eq(doctrine), any(), anyBoolean()))
@@ -213,7 +241,9 @@ class SwingBatchRecorderTest {
 
     recorderWith(engine, at(2026, 5, 28)).runScheduled(doctrine, false);
 
-    assertThat(sessionPassedTo(engine, doctrine)).isEqualTo(LocalDate.of(2026, 5, 27));
+    assertThat(sessionPassedTo(engine, doctrine))
+        .as("never 2026-05-27 — reaching back is what corrupts the previous session's marker")
+        .isEqualTo(LocalDate.of(2026, 5, 28));
   }
 
   @Test

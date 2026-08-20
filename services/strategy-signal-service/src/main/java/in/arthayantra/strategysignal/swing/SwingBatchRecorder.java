@@ -199,23 +199,42 @@ public class SwingBatchRecorder {
    * silently settled. Skipping is the SAFE direction here: the catch-up settles off the session's
    * own bar, whereas a stale evaluation is wrong in a direction nobody can see.
    *
-   * <p>Holidays: the crons are MON-FRI, which includes NSE holidays. Pinning a holiday would find
-   * no bar and alert on every holding, so the pin resolves to the latest TRADING day — on a holiday
-   * that is the previous session, whose bar exists, and re-evaluating it is the same no-op the
-   * batch already performed. Fail-open to today past the bundled calendar's horizon: refusing to
-   * settle would be a far worse failure than settling off the newest bar, which is exactly the
-   * pre-fix behaviour.
+   * <p>⚠️ <b>Holidays: EMPTY, not the previous session.</b> The crons are MON-FRI, which includes
+   * NSE holidays. The first cut of this change resolved a holiday BACK to the previous trading day
+   * on the reasoning that re-evaluating it is the same no-op the batch already performed. That is
+   * true of the exit evaluation and FALSE of everything written alongside it, which is what makes it
+   * a trap rather than a harmless nicety (cross-vendor review of this PR, 2026-08-20):
+   *
+   * <ul>
+   *   <li>The run marker is keyed {@code (batch, run_date)} and its upsert REPLACES the counters
+   *       ({@code SwingBatchRunRepository:56-70}) — so a holiday run would overwrite the previous
+   *       session's real {@code entries}/{@code exits}/{@code exit_skipped}/admission probe with a
+   *       no-op run's. The evidence for the session that actually traded is destroyed.
+   *   <li>The scheduler records its intent under TODAY ({@code MinerviniSwingScheduler:115}), so the
+   *       holiday would hold an intent row with no marker of its own. {@link SwingBatchCanary}
+   *       sweeps exactly that shape and pages "DID NOT RUN" — and its own comment notes a past
+   *       session "can never acquire a run marker", so the page repeats to its ceiling. A false
+   *       alarm promising a catch-up that only ever traverses TRADING sessions.
+   * </ul>
+   *
+   * <p>There is no new close on a holiday, the previous session was settled on its own evening, and
+   * a genuinely missed session is what the 08:35 catch-up exists for. So the honest answer is that a
+   * holiday is not a settle session at all. Callers skip; {@link #runScheduled} pins today so a
+   * MANUAL run on a holiday still behaves as it did pre-fix (no bar, {@code exitSkipped}, visible).
+   *
+   * <p>Fail-open to today past the bundled calendar's horizon: refusing to settle would be a far
+   * worse failure than settling off the newest bar, which is exactly the pre-fix behaviour.
    */
-  private LocalDate settleSession() {
+  public Optional<LocalDate> scheduledSettleSession() {
     LocalDate today = LocalDate.now(clock.withZone(IST));
     try {
-      return CALENDAR.isTradingDay(today) ? today : CALENDAR.previousTradingDay(today);
+      return CALENDAR.isTradingDay(today) ? Optional.of(today) : Optional.empty();
     } catch (RuntimeException e) {
       log.warn(
           "swing settle: NSE calendar does not cover {} — pinning today unresolved (calendar-cliff):"
               + " {}",
           today, e.getMessage());
-      return today;
+      return Optional.of(today);
     }
   }
 
@@ -342,7 +361,14 @@ public class SwingBatchRecorder {
   public SwingBatchEngine.SwingRun runScheduled(SwingDoctrine doctrine, boolean entriesEnabled) {
     try {
       SwingBatchEngine.SwingRun result =
-          runAndRecord(doctrine, settleSession(), entriesEnabled, MarkerPolicy.ALWAYS).run();
+          runAndRecord(
+                  doctrine,
+                  // A MANUAL run on a holiday pins TODAY rather than reaching back: the marker then
+                  // lands on the day it ran, which is what keeps it from overwriting a real session.
+                  scheduledSettleSession().orElseGet(() -> LocalDate.now(clock.withZone(IST))),
+                  entriesEnabled,
+                  MarkerPolicy.ALWAYS)
+              .run();
       log.info(
           "{} swing batch done: {} strategies, {} candidates, {} entries, {} exits, {} exit-skipped",
           doctrine.batchName(), result.strategies(), result.candidates(), result.entries(),

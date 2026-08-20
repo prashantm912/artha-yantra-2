@@ -112,7 +112,20 @@ public class MinerviniSwingScheduler {
    */
   @Scheduled(cron = "${artha.minervini.swing.cron:0 52 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void run() {
-    LocalDate session = LocalDate.now(clock.withZone(IST));
+    // ⚠️ BEFORE the intent write, not after. The cron is MON-FRI so it fires on NSE holidays, and a
+    // holiday has no close to settle. Recording an intent for a day the batch will never mark would
+    // make SwingBatchCanary page "DID NOT RUN" for a session that never existed, repeatedly, and a
+    // past session can never acquire a run marker. The previous session was settled on its own
+    // evening; if it was genuinely missed, the 08:35 catch-up is the remediation path.
+    java.util.Optional<LocalDate> settle = recorder.scheduledSettleSession();
+    if (settle.isEmpty()) {
+      log.info(
+          "{} swing settle skipped — {} is not an NSE trading day (no close to settle)",
+          doctrine.batchName(),
+          LocalDate.now(clock.withZone(IST)));
+      return;
+    }
+    LocalDate session = settle.get();
     try {
       // recordSettled, NOT recordScheduled: this is the AUTHORITATIVE reading and it must overwrite
       // whatever the intraday ticks provisionally observed. The flag can move between 09:05 and

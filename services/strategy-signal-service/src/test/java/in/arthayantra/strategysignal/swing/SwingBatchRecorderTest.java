@@ -150,12 +150,116 @@ class SwingBatchRecorderTest {
             Optional.of(new SwingDoctrine.CandidateSnapshot(LocalDate.of(2026, 7, 17), List.of())));
   }
 
+  /** 18:52 IST on 2026-08-19, a normal Wednesday session. */
+  private static Clock at(int y, int m, int d) {
+    return Clock.fixed(
+        java.time.OffsetDateTime.of(y, m, d, 18, 52, 0, 0, ZoneOffset.ofHoursMinutes(5, 30))
+            .toInstant(),
+        ZoneOffset.UTC);
+  }
+
+  private static SwingBatchRecorder recorderWith(SwingBatchEngine engine, Clock clock) {
+    return new SwingBatchRecorder(
+        engine, mock(SwingBatchRunRepository.class), mock(SwingSellDecisionService.class),
+        mock(FlagSnapshotService.class), new SwingRunMutex(), mock(ApplicationEventPublisher.class),
+        clock);
+  }
+
+  private static LocalDate sessionPassedTo(SwingBatchEngine engine, SwingDoctrine doctrine) {
+    ArgumentCaptor<LocalDate> session = ArgumentCaptor.forClass(LocalDate.class);
+    verify(engine).runDaily(eq(doctrine), session.capture(), anyBoolean());
+    return session.getValue();
+  }
+
+  /**
+   * Ledger H27, and the whole point of the change: the evening settle must PIN the session it is
+   * settling, so a series that does not reach that session is dropped rather than evaluated.
+   *
+   * <p>⚠️ This asserts the pin, NOT its consequence. The consequence — a pinned session with no bar
+   * becomes {@code exitSkipped} + a STOP-NOT-EVALUATED error instead of a silent settle off the
+   * previous session — is the engine's, and is already pinned by {@code
+   * MinerviniSwingEngineTest.catchUpRefusesToSettleOffABarFromTheWrongSession}. What had no test at
+   * all, and is what regressed in #1333, is that the SCHEDULED path reaches that guard: it passed a
+   * literal {@code null}, which means "settle off whatever the newest bar happens to be", and 69 of
+   * 417 persisted minervini rows were computed on an earlier session's bar as a result.
+   */
+  @Test
+  void theEveningSettlePinsTheSessionItIsSettling() {
+    SwingBatchEngine engine = mock(SwingBatchEngine.class);
+    SwingDoctrine doctrine = manasDoctrine();
+    when(engine.runDaily(eq(doctrine), any(), anyBoolean()))
+        .thenReturn(new SwingBatchEngine.SwingRun(1, 0, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty()));
+
+    recorderWith(engine, at(2026, 8, 19)).runScheduled(doctrine, false);
+
+    assertThat(sessionPassedTo(engine, doctrine))
+        .as("a null session means 'settle off the newest bar, whatever day it is' — the H27 defect")
+        .isEqualTo(LocalDate.of(2026, 8, 19));
+  }
+
+  /**
+   * ⚠️ A weekday NSE holiday is NOT a settle session, and the FIRST cut of this change got that
+   * wrong in a way no exit-path test could see. It resolved the holiday BACK to the previous
+   * trading day, reasoning that re-evaluating a settled session is a harmless no-op. The exit
+   * evaluation is indeed a no-op; the writes around it are not (cross-vendor review, 2026-08-20):
+   * the run-marker upsert REPLACES the previous session's counters, and the scheduler's intent row
+   * is keyed to TODAY — so the holiday would hold an intent with no marker, which is precisely the
+   * shape {@link SwingBatchCanary} pages "DID NOT RUN" for, repeatedly, about a session that never
+   * traded.
+   *
+   * <p>2026-05-28 is Bakri Id, a Thursday; 2026-05-27 is the Wednesday session before it.
+   */
+  @Test
+  void aWeekdayHolidayIsNotASettleSession() {
+    SwingBatchRecorder recorder = recorderWith(mock(SwingBatchEngine.class), at(2026, 5, 28));
+
+    assertThat(recorder.scheduledSettleSession())
+        .as("Bakri Id is not a session; the schedulers skip rather than reaching back to 05-27")
+        .isEmpty();
+  }
+
+  @Test
+  void aTradingDayIsItsOwnSettleSession() {
+    // The control. Without it, an always-empty implementation would satisfy the holiday case above
+    // and disable every settle in the year.
+    SwingBatchRecorder recorder = recorderWith(mock(SwingBatchEngine.class), at(2026, 8, 19));
+
+    assertThat(recorder.scheduledSettleSession()).contains(LocalDate.of(2026, 8, 19));
+  }
+
+  /**
+   * {@code runScheduled} on a holiday pins the holiday itself rather than reaching back, so the
+   * marker lands on the day it actually ran and can never overwrite a real session's row; the
+   * missing bar surfaces as {@code exitSkipped}, which is visible and retryable.
+   *
+   * <p>⚠️ <b>This is the runScheduled FALLBACK, not the manual POST path</b> — an earlier name for
+   * this test claimed the latter and was wrong (cross-vendor review round 2, 2026-08-20).
+   * {@code POST /run} goes through {@code MinerviniSwingController:64} →
+   * {@code runAndRecord(doctrine)}, which passes {@code sessionDate = null} and so never reaches
+   * {@link SwingBatchRecorder#scheduledSettleSession()} at all. That path is unchanged by this PR
+   * and keeps its pre-existing "settle off the newest bar" behaviour behind {@code marketHoursGuard}.
+   * Nothing here says anything about it, and the test name must not imply otherwise.
+   */
+  @Test
+  void runScheduledOnAHolidayPinsTheHolidayRatherThanReachingBack() {
+    SwingBatchEngine engine = mock(SwingBatchEngine.class);
+    SwingDoctrine doctrine = manasDoctrine();
+    when(engine.runDaily(eq(doctrine), any(), anyBoolean()))
+        .thenReturn(new SwingBatchEngine.SwingRun(1, 0, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty()));
+
+    recorderWith(engine, at(2026, 5, 28)).runScheduled(doctrine, false);
+
+    assertThat(sessionPassedTo(engine, doctrine))
+        .as("never 2026-05-27 — reaching back is what corrupts the previous session's marker")
+        .isEqualTo(LocalDate.of(2026, 5, 28));
+  }
+
   @Test
   void runScheduledPublishesAFailedAlertWhenTheBatchThrows() {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     SwingDoctrine doctrine = manasDoctrine();
-    when(engine.runDaily(doctrine, null, true)).thenThrow(new IllegalStateException("funnel unreachable"));
+    when(engine.runDaily(eq(doctrine), any(), eq(true))).thenThrow(new IllegalStateException("funnel unreachable"));
 
     SwingBatchRecorder recorder =
         new SwingBatchRecorder(
@@ -177,7 +281,7 @@ class SwingBatchRecorderTest {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     SwingDoctrine doctrine = manasDoctrine();
-    when(engine.runDaily(doctrine, null, true)).thenThrow(new IllegalStateException("boom"));
+    when(engine.runDaily(eq(doctrine), any(), eq(true))).thenThrow(new IllegalStateException("boom"));
     doThrow(new RuntimeException("event bus down")).when(events).publishEvent(any());
 
     SwingBatchRecorder recorder =
@@ -193,7 +297,7 @@ class SwingBatchRecorderTest {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     SwingDoctrine doctrine = manasDoctrine();
-    when(engine.runDaily(doctrine, null, true))
+    when(engine.runDaily(eq(doctrine), any(), eq(true)))
         .thenReturn(
             new SwingBatchEngine.SwingRun(3, 12, 2, 1, 0, SwingBatchEngine.AdmissionProbe.empty()));
 
@@ -215,7 +319,7 @@ class SwingBatchRecorderTest {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);
     SwingDoctrine doctrine = manasDoctrine();
     when(doctrine.enabled()).thenReturn(false);
-    when(engine.runDaily(doctrine, null, true))
+    when(engine.runDaily(eq(doctrine), any(), eq(true)))
         .thenReturn(new SwingBatchEngine.SwingRun(0, 0, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty()));
 
     SwingBatchRecorder recorder =
@@ -227,7 +331,7 @@ class SwingBatchRecorderTest {
     recorder.runScheduled(doctrine);
 
     verify(doctrine, never()).candidateSnapshot();
-    verify(engine).runDaily(doctrine, null, true);
+    verify(engine).runDaily(eq(doctrine), any(), eq(true));
   }
 
   @Test
@@ -242,7 +346,7 @@ class SwingBatchRecorderTest {
     List<DroppedCandidate> dropped = List.of(new DroppedCandidate("ZEEL", 9));
     SwingBatchEngine.AdmissionProbe probe =
         new SwingBatchEngine.AdmissionProbe(5, 8, 6, 2, true, dropped);
-    when(engine.runDaily(doctrine, null, true))
+    when(engine.runDaily(eq(doctrine), any(), eq(true)))
         .thenReturn(new SwingBatchEngine.SwingRun(3, 12, 6, 1, 0, probe));
 
     new SwingBatchRecorder(
@@ -266,7 +370,7 @@ class SwingBatchRecorderTest {
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     SwingDoctrine doctrine = manasDoctrine();
     Clock clock = Clock.fixed(Instant.parse("2026-07-12T04:00:00Z"), ZoneOffset.UTC);
-    when(engine.runDaily(doctrine, null, true))
+    when(engine.runDaily(eq(doctrine), any(), eq(true)))
         .thenReturn(
             new SwingBatchEngine.SwingRun(3, 12, 2, 1, 0, SwingBatchEngine.AdmissionProbe.empty()));
     when(sellDecisions.persist(doctrine)).thenThrow(new RuntimeException("sell-decision store down"));
@@ -328,7 +432,7 @@ class SwingBatchRecorderTest {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     SwingDoctrine doctrine = manasDoctrine();
-    when(engine.runDaily(doctrine, null, true))
+    when(engine.runDaily(eq(doctrine), any(), eq(true)))
         .thenReturn(
             new SwingBatchEngine.SwingRun(
                 4, 139, 0, 0, 0,
@@ -359,7 +463,7 @@ class SwingBatchRecorderTest {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);
     SwingBatchRunRepository runs = mock(SwingBatchRunRepository.class);
     SwingDoctrine doctrine = manasDoctrine();
-    when(engine.runDaily(doctrine, null, true))
+    when(engine.runDaily(eq(doctrine), any(), eq(true)))
         .thenReturn(
             new SwingBatchEngine.SwingRun(
                 1, 2, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty(),

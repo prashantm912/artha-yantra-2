@@ -254,27 +254,42 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   coverage over `marketdata.ingest_runs`, #686/#699), and the scheduled canaries (ingest-coverage
   08:45, notifier-health 08:30, paper reconcilers 08:50/08:52, PartialBucketCanary every 60s — all
   IST) — check these BEFORE hand-digging a "feed looks dead" / "batch missed" report.
-  **Measured schedule, re-read 2026-08-17 from `docker inspect` — #1358 (`34a7d39c`) MOVED EVERY JOB
-  INSIDE 08:00–19:00 IST and the reconcilers to MORNING.** The block that used to sit here listed
-  19:30–21:15 and was ~13 days stale; it had itself been added as a "measured" correction, which is
-  exactly why a dated cron list in a doc cannot be trusted — **re-read `docker inspect` every time
-  the value is load-bearing** (this stale block reached a #1354 review comment and would have driven
-  a whole `expectedNotBefore` table off wrong numbers). Never quote the YAML `${ENV:default}` values;
-  they differ from what is deployed.
-  Morning: **08:30** swing-canary + notifier-health · **08:35** swing-catchup (⚠️ the ONLY path that
-  takes swing ENTRIES — see below) · **08:45** ingest-coverage · **08:50** paper-reconciliation ·
-  **08:52** past-expiry-recon. Afternoon: **16:00** minervini-swing · **16:02** manas-swing ·
-  **16:05** bhavcopy-close-prefetch. Evening: **18:20** upstox-canary · **18:45** bhavcopy-eod ·
-  **18:46** nse-eod · **18:47** minervini-screen · **18:48** manas-screen · **18:49** market-context ·
-  **18:50** data-quality · **18:51** equity-breadth · **18:53** buyable-alerts · **18:54**
-  heartbeat-swing · **18:55** graduation · **18:56**/**18:57** insights · **18:58** bhavcopy-close.
-  ⚠️ **The 16:00 swing batch is an EXITS-ONLY pass and legitimately reports 0 candidates** — the
-  screens that feed it run at 18:47/18:48, so the entries pass is the NEXT MORNING's 08:35 catch-up
-  (`SwingBatchCatchUp:276` guards on `hasRunWithEntries`, not `hasRun`, precisely so the 16:00 marker
-  cannot suppress it). A `swing_catchup_runs` row missing before 08:35 is **not** evidence of a
-  missed batch — reading it that way produced a false "Friday's screens were never consumed" alarm
-  on 2026-08-17. Read `marketdata.ingest_runs` + `marketdata.canary_runs`/`strategy.canary_runs` for
-  the real times, never the defaults.
+  **Measured schedule, re-read 2026-08-20 from `docker inspect`.** #1358 (`34a7d39c`, 08-17) moved
+  every job inside 08:00–19:00 IST and the reconcilers to MORNING; **#1418 (`f9398ed4`, 08-20) then
+  moved the two swing settles 16:00/16:02 → 18:52/18:53 and buyable-alerts 18:53 → 18:59** (ledger
+  H27). ⚠️ **THIS BLOCK HAS NOW BEEN STALE TWICE — treat any dated cron list here as a HINT, and
+  re-read `docker inspect` every time the value is load-bearing.** The 08-17 revision replaced a
+  ~13-day-stale 19:30–21:15 list that had itself been added as a "measured" correction and had
+  already reached a #1354 review comment; this revision replaced three entries that went stale
+  within three days of that. Never quote the YAML `${ENV:default}` values; they differ from what is
+  deployed.
+  Morning: **08:30** swing-canary + notifier-health · **08:35** swing-catchup (⚠️ the only
+  AUTOMATIC path that takes swing ENTRIES — see below) · **08:45** ingest-coverage · **08:50**
+  paper-reconciliation · **08:52** past-expiry-recon. Afternoon: **16:05** bhavcopy-close-prefetch.
+  Evening: **18:20** upstox-canary · **18:45** bhavcopy-eod · **18:46** nse-eod · **18:47**
+  minervini-screen · **18:48** manas-screen · **18:49** market-context · **18:50** data-quality ·
+  **18:51** equity-breadth · **18:52** minervini-swing-settle · **18:53** manas-swing-settle ·
+  **18:54** heartbeat-swing · **18:55** graduation · **18:56**/**18:57** insights · **18:58**
+  bhavcopy-close · **18:59** buyable-alerts. Also `ARTHA_HEARTBEAT_SESSION` every 10 min 09:00–15:59.
+  ⚠️ **The swing settle is an EXITS-ONLY pass and legitimately reports 0 candidates AND 0 exits** —
+  the entries pass is the NEXT MORNING's 08:35 catch-up (`SwingBatchCatchUp:276` guards on
+  `hasRunWithEntries`, not `hasRun`, precisely so the settle marker cannot suppress it).
+  ⚠️ **"Only path" is wrong and was corrected in cross-vendor review 2026-08-20: 08:35 is the only
+  AUTOMATIC entry path.** The manual `POST /api/v1/signals/<batch>-swing/run` controllers
+  (`MinerviniSwingController:64`, `ManasAroraSwingController:64`) call `runAndRecord(doctrine)` →
+  `entriesEnabled = true` with `sessionDate = null`, so they take entries and never reach
+  `scheduledSettleSession()`. Reason about entry paths as TWO, not one.
+  ⚠️ **WHY 18:52 AND NOT 16:00, because the hour is load-bearing (H27):** most cash equities have no
+  intraday 1d bar at all — their session bar is written by the **18:45 bhavcopy EOD ingest**. At
+  16:00 the settle priced every held stop off the PREVIOUS session's close and still reported a
+  clean "0 exits, 0 exit-skipped". Measured 08-20 after the move: STALE bars fell 10 → 4 and a real
+  stop fired at 18:52:06 (INOXINDIA, exit price = that day's close exactly).
+  ⚠️ **Judge a settle on the STALE-bar count and `exit_skipped`, NEVER on the exit count** — 0 exits
+  is the common correct outcome, and reading it as failure is the exact misreading H27 exists to
+  prevent. A `swing_catchup_runs` row missing before 08:35 is **not** evidence of a missed batch —
+  reading it that way produced a false "Friday's screens were never consumed" alarm on 2026-08-17.
+  Read `marketdata.ingest_runs` + `marketdata.canary_runs`/`strategy.canary_runs` for the real times,
+  never the defaults.
 - **3m reads are a read-time 1m→3m rollup** (`CandleRepository.rangeRolledFromOneMinute`, #365): the
   live SignalEngine 3m-primary depends on this rollup. The unused `candles_3m` cagg + its refresh
   policy were DROPPED (V027, #427) — 3m has no materialized view; only the 1m base feeds it.
@@ -347,8 +362,21 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   unmapped keys" — that comment is FALSE; there is no delegate and unmapped keys are silently absent.**
   Composite primary+fallback is unbuilt — but **W-U4 is NO LONGER declined: the owner reversed it
   2026-08-17 and asked for Upstox primary + Kite as a rate-limit fallback (ledger H26).** Building that
-  composite is the item; the blocker is instrument identity, not candles. Drift caught by
-  3 contract canaries (Kite/Upstox/OpenAlgo, CONSUMED-field sentinels). Full map: `docs/symbol-normalization.md`.
+  composite is the item; the blocker is instrument identity, not candles. ⚠️ **H26's OUTAGE argument is
+  GONE as of 2026-08-20** — the recurring "Kite outages" of 08-19/08-20 were the HOST's outbound network:
+  five destinations failed in the same window (Kite REST, Kite WS, **Upstox**, Telegram, the liveness
+  heartbeat). Upstox-primary would have bought nothing. The row survives on rate limits and removing the
+  daily 06:00 Kite login; do not re-justify it on resilience.
+  ⚠️ **BE-series NSE equities resolve through a `-BE` twin (H29, #1424, live since 2026-08-20).** Kite's
+  canonical NSE tradingsymbol for a BE-series stock carries a `-BE` suffix while bhavcopy/screens/swing
+  books use the BARE symbol, so `marketdata.instruments` holds both — a tokenless bare row and a tokened
+  `<SYM>-BE` row. `TokenResolverAdapter` falls back to the twin on NSE only, never recursing, never on BSE,
+  and COUNTS every fallback (`ay_instrument_be_suffix_fallback_total`) because the original defect was
+  invisible precisely by fail-softing. ⚠️ **It keys on `instrument_token IS NULL`, which is the NARROWER
+  half of the population (ledger H36): all four affected bare rows are `is_active = f`, but two carry NULL
+  tokens (fixed) and two carry STALE ones Kite rejects as `invalid token` (NOT fixed — `DIACABS`,
+  `MENONBE` 400 every evening).** Drift caught by 3 contract canaries (Kite/Upstox/OpenAlgo,
+  CONSUMED-field sentinels). Full map: `docs/symbol-normalization.md`.
 - **Run the Playwright e2e vs a running mock stack:** `cd e2e &&
   E2E_OWNER_PASSWORD=<your .env owner pw> npx playwright test` — global-setup reuses a
   healthy stack and won't overwrite an existing `.env`; the helper password defaults to

@@ -20,10 +20,12 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
   whole platform: §0 is the authoritative queue, followed by the owner-gated items, next-session verifies,
   scheduled maintenance (CD-2 calendar refresh), the deferred-by-design list and the consolidated WON'T-DO
   record. **Read this FIRST when picking the next thing to do.** Supersedes the archived
-  `2026-06-30-remaining-build-inventory.md`. *(Frontier as of 2026-07-25: the EVO/INT design programs are
-  built through E6 / I3-FE, the 2026-07-18 audit's P0 set is closed, and the live frontier is the weekly
-  session-forensics loop below plus the owner-gated rows — the ledger's dated deploy-state blocks at the
-  top carry the current picture.)*
+  `2026-06-30-remaining-build-inventory.md`. ⚠️ **This entry deliberately carries NO dated
+  frontier summary.** One sat here reading "as of 2026-07-25" and was 26 days stale by 2026-08-20 —
+  the same failure mode as the cron list in `CLAUDE.md`, which went stale twice. **The frontier lives
+  in exactly one place: the `📍 CURRENT STATE` block at the top of that file's §0**, which is dated
+  and carries an instruction to be updated at every session close. Read it there; do not mirror it
+  here, because a mirrored status is a copy that drifts.
 - `2026-06-30-live-signal-analysis-runbook.md` — the standing procedure for analysing ~1 month of
   live-paper scalper trades into the E9 band + per-scalper keep/cut/tune (counterfactual replay on real
   captured premium). Runs when the owner has gathered the data.

@@ -176,11 +176,19 @@ item.**
    (`MinerviniSwingController:60-64`, `SwingBatchRecorder:98-99`). 08:35 is the only AUTOMATIC one.
    Then **#1283**'s delta.
 5. **[[H35]] deploys** — the options gap does not begin closing until the 18:49 run on 08-21.
-6. ⚠️ **NEW, found by the H35 review and NOT explained: `MARKET_CONTEXT_DAY` did not run at all on
-   2026-07-17 or 2026-08-12.** 26 runs across a 28-trading-day range, all SUCCESS, no row and no
-   ledger entry on those two nights, and neither is an NSE holiday. Small, but it is a scheduled job
-   silently skipping — the same class as the batch-liveness work. Trace it before assuming it was
-   the machine being off; [[stack-outage-register]] is the first place to check.
+6. ✅ **TRACED THE SAME EVENING AND CLOSED — the two missed nights are ALREADY-FIXED, by #1358.**
+   The H35 review found `MARKET_CONTEXT_DAY` absent on 2026-07-17 and 2026-08-12. The discriminating
+   query — *is the whole evening chain missing, or just this job?* — settles it: **the whole chain is
+   missing both nights** (0 of `MARKET_CONTEXT_DAY` / `DATA_QUALITY` / `EQUITY_BREADTH`, while
+   07-16, 07-20, 08-11 and 08-13 all carry the full set). Both dates PRE-DATE #1358, which on
+   2026-08-17 moved every job inside the 08:00–19:00 IST operating window; before it the evening
+   chain sat at 19:30–21:15, **outside the hours the machine is up**, so it ran only on evenings the
+   machine happened to stay on. Every trading day since the fix (08-17, 08-18, 08-19) has the full
+   chain. ⚠️ **Honest sample: 3 trading days. Consistent with the fix, not proof of it.**
+   ⚠️ **The useful part is the shape, not the outcome:** the review was right that a round number
+   was concealing something, and the something turned out to be already closed. **Both halves matter
+   — "the tidy number hid a defect" and "the defect was already fixed" are different conclusions,
+   and only tracing distinguishes them.** This is what `OperatingWindowTest` now exists to prevent.
 
 **Watch, not queued:** boot transient ~163 s is a 3rd consecutive above-band day. Owner ruled
 keep-watching; revisit on a 4th. ⚠️ Today's number is confounded by the mid-session redeploy, so it

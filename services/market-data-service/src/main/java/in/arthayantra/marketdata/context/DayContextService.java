@@ -157,8 +157,11 @@ public class DayContextService {
     // ⚠️ NORMALISED, not trusted. The default was a bare `NIFTY` for the whole life of this
     // feature, which is not a canonical instrument key: OptionsDigestService answered "no option
     // expiries for NIFTY", dayContext() fail-softed it into a note, and market_context_days
-    // persisted 26 consecutive trading days (2026-07-13..2026-08-19) with expiry/pcr/max_pain/
-    // atm_straddle/atm_iv ALL NULL while the job logged "persisted ... (1 row)" every night.
+    // persisted 26 ROWS spanning 2026-07-13..2026-08-19 with expiry/pcr/max_pain/atm_straddle/
+    // atm_iv ALL NULL while the job logged "persisted ... (1 row)" on each of those nights.
+    // ⚠️ NOT "26 consecutive trading days" -- the range holds 28, and 2026-07-17 and 2026-08-12
+    // have no row AND no MARKET_CONTEXT_DAY run at all (neither is an NSE holiday). That is a
+    // SECOND, separate and still-unexplained hole; the tidier phrasing concealed it (review).
     // Fixing only the default would leave the next person free to write the alias again.
     this.optionsName = UnderlyingRef.canonical(optionsName);
     this.indexExchange = indexExchange;

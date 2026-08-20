@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.context;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.context.DayContextService.DayContext;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
+import in.arthayantra.marketdata.instruments.UnderlyingRef;
 import in.arthayantra.marketdata.options.OptionsDigestService.OptionsDigest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,11 +46,17 @@ public class MarketContextEodJob {
       DayContextService dayContext,
       MarketContextDayRepository repository,
       IngestRunLedger ledger,
-      @Value("${artha.context.options-name:NIFTY}") String optionsName) {
+      @Value("${artha.context.options-name:NIFTY 50}") String optionsName) {
     this.dayContext = dayContext;
     this.repository = repository;
     this.ledger = ledger;
-    this.optionsName = optionsName;
+    // ⚠️ NORMALISED here TOO, and this is the copy that matters most for diagnosis: this value is
+    // written raw into market_context_days.options_name, the column that made the 26-row gap legible
+    // after the fact. Leaving it un-normalised while DayContextService normalises would let
+    // ARTHA_CONTEXT_OPTIONS_NAME=NIFTY produce a WORKING digest stamped with a label that does not
+    // match the scalars beside it. Caught in review of the very PR whose stated doctrine is
+    // "normalise at the point of USE rather than keep correcting copies" -- this WAS a second copy.
+    this.optionsName = UnderlyingRef.canonical(optionsName);
   }
 
   /**

@@ -32,8 +32,8 @@ public record UnderlyingRef(String exchange, String tradingsymbol) {
    * that feature (#1420), and {@code artha.context.options-name} defaulted to a bare {@code NIFTY}
    * for the whole life of day-context — 26 trading days of {@code market_context_days} rows with
    * every options scalar NULL, because {@code OptionsDigestService} answers "no option expiries for
-   * NIFTY" and the caller fail-softs to a note. **A config value is not a canonical key, and the
-   * only durable fix is to normalise at the point of USE rather than to keep correcting copies.**
+   * NIFTY" and the caller fail-softs to a note. <b>A config value is not a canonical key, and the
+   * only durable fix is to normalise at the point of USE rather than to keep correcting copies.</b>
    */
   public static String canonical(String indexName) {
     return indexName == null ? null : INDEX_NAMES.getOrDefault(indexName, indexName);

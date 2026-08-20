@@ -100,8 +100,9 @@ artha:
   # ⚠️ MUST be a CANONICAL cash-index tradingsymbol. This defaulted to a bare `NIFTY` -- not a
   # canonical key -- for the whole life of the feature, so OptionsDigestService answered "no option
   # expiries for NIFTY", DayContextService fail-softed it into a note, and market_context_days
-  # persisted 26 consecutive trading days with every options scalar NULL while the EOD job logged
-  # success each night. DayContextService now normalises through UnderlyingRef.canonical(), so an
+  # persisted 26 rows spanning 2026-07-13..2026-08-19 with every options scalar NULL while the EOD
+  # job logged success on each of those nights. (NOT 26 CONSECUTIVE days -- the range holds 28;
+  # 2026-07-17 and 2026-08-12 have no row and no job run at all, a separate unexplained hole.) DayContextService now normalises through UnderlyingRef.canonical(), so an
   # alias written here is repaired rather than silently swallowed -- but write the canonical name.
   context:
     options-name: ${ARTHA_CONTEXT_OPTIONS_NAME:NIFTY 50}

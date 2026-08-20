@@ -5,6 +5,7 @@ import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.canary.IngestHealthBoard;
 import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleQueryService;
+import in.arthayantra.marketdata.instruments.UnderlyingRef;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
 import in.arthayantra.marketdata.options.OptionsDigestService;
@@ -136,7 +137,7 @@ public class DayContextService {
       IngestHealthBoard healthBoard,
       MarketCalendar calendar,
       Clock clock,
-      @Value("${artha.context.options-name:NIFTY}") String optionsName,
+      @Value("${artha.context.options-name:NIFTY 50}") String optionsName,
       @Value("${artha.context.index-exchange:NSE}") String indexExchange,
       @Value("${artha.context.index-symbol:NIFTY 50}") String indexSymbol,
       @Value("${artha.context.vix-instrument:INDIA VIX}") String vixSymbol,
@@ -153,7 +154,18 @@ public class DayContextService {
     this.calendar = calendar;
     this.clock = clock;
     this.vixKey = new InstrumentKey("NSE", vixSymbol);
-    this.optionsName = optionsName;
+    // ⚠️ NORMALISED, not trusted. The default was a bare `NIFTY` for the whole life of this
+    // feature, which is not a canonical instrument key: OptionsDigestService answered "no option
+    // expiries for NIFTY", dayContext() fail-softed it into a note, and market_context_days
+    // persisted 26 ROWS spanning 2026-07-13..2026-08-19 with expiry/pcr/max_pain/atm_straddle/
+    // atm_iv ALL NULL while the job logged "persisted ... (1 row)" on each of those nights.
+    // ⚠️ NOT "26 consecutive trading days" -- the range holds 28, and 2026-07-17 and 2026-08-12
+    // have no row AND no MARKET_CONTEXT_DAY run at all (neither is an NSE holiday). That is a
+    // SECOND, separate hole the tidier phrasing concealed (review) -- traced the same evening and
+    // ALREADY FIXED: the whole evening chain is missing both nights, both dates pre-date #1358, and
+    // before it the chain ran 19:30-21:15, outside the hours the machine is up.
+    // Fixing only the default would leave the next person free to write the alias again.
+    this.optionsName = UnderlyingRef.canonical(optionsName);
     this.indexExchange = indexExchange;
     this.indexSymbol = indexSymbol;
     this.overnightTopN = overnightTopN;

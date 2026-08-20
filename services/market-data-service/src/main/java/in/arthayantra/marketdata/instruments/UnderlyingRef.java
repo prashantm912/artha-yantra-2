@@ -22,6 +22,23 @@ public record UnderlyingRef(String exchange, String tradingsymbol) {
           "NIFTY 50", "NIFTY 50",
           "NIFTY BANK", "NIFTY BANK");
 
+  /**
+   * The canonical cash-index tradingsymbol for a loosely-written index name — {@code NIFTY} becomes
+   * {@code NIFTY 50}. Anything not a known index alias passes through unchanged, which is correct
+   * for {@code SENSEX} (already canonical) and for equity symbols.
+   *
+   * <p>⚠️ <b>Exposed because writing the alias into config is a REPEATING defect, not a one-off.</b>
+   * {@code artha.insights.context.underlyings} carried a bare {@code NIFTY} for the whole life of
+   * that feature (#1420), and {@code artha.context.options-name} defaulted to a bare {@code NIFTY}
+   * for the whole life of day-context — 26 trading days of {@code market_context_days} rows with
+   * every options scalar NULL, because {@code OptionsDigestService} answers "no option expiries for
+   * NIFTY" and the caller fail-softs to a note. **A config value is not a canonical key, and the
+   * only durable fix is to normalise at the point of USE rather than to keep correcting copies.**
+   */
+  public static String canonical(String indexName) {
+    return indexName == null ? null : INDEX_NAMES.getOrDefault(indexName, indexName);
+  }
+
   /** The underlying reference for a dump row; {@code (null, null)} for cash/index rows. */
   public static UnderlyingRef derive(InstrumentRecord row) {
     String type = row.instrumentType();

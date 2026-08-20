@@ -458,6 +458,7 @@ services:
       # OptionsSnapshotPruneJob's 03:30-IST drop_chunks prune. Default 365; no-op until ~2027-06.
       # Name MUST byte-match application.yml's artha.market.snapshot-retention-days placeholder (#653).
       ARTHA_SNAPSHOT_RETENTION_DAYS: ${ARTHA_SNAPSHOT_RETENTION_DAYS:-365}
+      ARTHA_CONTEXT_OPTIONS_NAME: ${ARTHA_CONTEXT_OPTIONS_NAME:-NIFTY 50}
       # Live option-premium 1m capture: nearest-expiry ATM +/- width, both CE and PE.
       ARTHA_OPTIONS_ATM_PINNER_UNDERLYINGS: ${ARTHA_OPTIONS_ATM_PINNER_UNDERLYINGS:-NIFTY 50,SENSEX}
       ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH: ${ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH:-5}

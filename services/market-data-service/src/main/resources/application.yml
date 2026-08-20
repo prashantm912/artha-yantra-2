@@ -95,6 +95,16 @@ artha:
     # env name, so the ${...} placeholder MUST byte-match the compose passthrough
     # ARTHA_SNAPSHOT_RETENTION_DAYS (#653) for a .env override to reach the container.
     snapshot-retention-days: ${ARTHA_SNAPSHOT_RETENTION_DAYS:365}
+  # I1 day-context: the index whose options digest is bundled into GET /context/day-context and
+  # persisted as the market_context_days scalar baselines.
+  # ⚠️ MUST be a CANONICAL cash-index tradingsymbol. This defaulted to a bare `NIFTY` -- not a
+  # canonical key -- for the whole life of the feature, so OptionsDigestService answered "no option
+  # expiries for NIFTY", DayContextService fail-softed it into a note, and market_context_days
+  # persisted 26 consecutive trading days with every options scalar NULL while the EOD job logged
+  # success each night. DayContextService now normalises through UnderlyingRef.canonical(), so an
+  # alias written here is repaired rather than silently swallowed -- but write the canonical name.
+  context:
+    options-name: ${ARTHA_CONTEXT_OPTIONS_NAME:NIFTY 50}
   # OpenAlgo broker-swap spine (plan §3/§4). Per-capability source selector — DEFAULT kite, so
   # Phase 0 changes NO routing (the live OpenAlgo gateways bind only when a capability is flipped to
   # openalgo). The production cutover + OI-coverage canary is Phase 1 (§4).

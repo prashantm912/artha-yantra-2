@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.context;
 
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.marketdata.instruments.UnderlyingRef;
 import in.arthayantra.marketdata.canary.IngestHealthBoard;
 import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleQueryService;
@@ -136,7 +137,7 @@ public class DayContextService {
       IngestHealthBoard healthBoard,
       MarketCalendar calendar,
       Clock clock,
-      @Value("${artha.context.options-name:NIFTY}") String optionsName,
+      @Value("${artha.context.options-name:NIFTY 50}") String optionsName,
       @Value("${artha.context.index-exchange:NSE}") String indexExchange,
       @Value("${artha.context.index-symbol:NIFTY 50}") String indexSymbol,
       @Value("${artha.context.vix-instrument:INDIA VIX}") String vixSymbol,
@@ -153,7 +154,13 @@ public class DayContextService {
     this.calendar = calendar;
     this.clock = clock;
     this.vixKey = new InstrumentKey("NSE", vixSymbol);
-    this.optionsName = optionsName;
+    // ⚠️ NORMALISED, not trusted. The default was a bare `NIFTY` for the whole life of this
+    // feature, which is not a canonical instrument key: OptionsDigestService answered "no option
+    // expiries for NIFTY", dayContext() fail-softed it into a note, and market_context_days
+    // persisted 26 consecutive trading days (2026-07-13..2026-08-19) with expiry/pcr/max_pain/
+    // atm_straddle/atm_iv ALL NULL while the job logged "persisted ... (1 row)" every night.
+    // Fixing only the default would leave the next person free to write the alias again.
+    this.optionsName = UnderlyingRef.canonical(optionsName);
     this.indexExchange = indexExchange;
     this.indexSymbol = indexSymbol;
     this.overnightTopN = overnightTopN;

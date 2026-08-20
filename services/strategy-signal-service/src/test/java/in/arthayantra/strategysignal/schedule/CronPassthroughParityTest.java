@@ -51,7 +51,7 @@ class CronPassthroughParityTest {
    * the whole file execute zero assertions and pass — the guard-that-checks-nothing shape. Lowering
    * this number is a deliberate act that must be justified in the PR that does it.
    */
-  private static final int EXPECTED_JOB_COUNT = 6;
+  private static final int EXPECTED_JOB_COUNT = 8;
 
   private static final List<Job> JOBS =
       List.of(
@@ -84,7 +84,19 @@ class CronPassthroughParityTest {
           new Job(
               "artha.insights.sell-decision-cron",
               "ARTHA_INSIGHTS_SELL_DECISION_CRON",
-              SRC + "insights/InsightSweeper.java"));
+              SRC + "insights/InsightSweeper.java"),
+          // The two swing settles. Both have carried a compose passthrough since #623 and neither
+          // was ever pinned here, so the compose copy and the annotation default were free to drift
+          // — which is precisely what this file exists to stop. Added 2026-08-19 with ledger H27,
+          // the PR that moves both crons and therefore has to touch both copies.
+          new Job(
+              "artha.minervini.swing.cron",
+              "ARTHA_MINERVINI_SWING_CRON",
+              SRC + "minervini/MinerviniSwingScheduler.java"),
+          new Job(
+              "artha.manas-arora.swing.cron",
+              "ARTHA_MANAS_ARORA_SWING_CRON",
+              SRC + "manas/ManasAroraSwingScheduler.java"));
 
   @Test
   @DisplayName("the catalogue still covers every job it claims to")

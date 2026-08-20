@@ -10,7 +10,9 @@ import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBa
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +39,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
  */
 @SpringBootTest(properties = {"spring.profiles.active=mock", "artha.signals.engine-enabled=false"})
 class InsightSweepCountIntegrationTest extends StrategySignalIntegrationTestBase {
+  /** Fixed so the CONTEXT_SHIFT phone budget has a deterministic IST day. */
+  private static final Clock CLOCK =
+      Clock.fixed(Instant.parse("2026-08-20T06:00:00Z"), ZoneOffset.UTC);
 
   private static final String SYMBOL = "H25CNT";
 
@@ -101,7 +106,9 @@ class InsightSweepCountIntegrationTest extends StrategySignalIntegrationTestBase
             objectMapper,
             mock(ApplicationEventPublisher.class),
             repository,
-            properties(new Delivery(false, false, false, Severity.NOTICE)));
+            properties(new Delivery(false, false, false, Severity.NOTICE, 6)),
+            CLOCK,
+            new SimpleMeterRegistry());
 
     return new InsightEngine(
             List.of(new SellDecisionGenerator(properties(null))),

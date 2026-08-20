@@ -228,12 +228,20 @@ class SwingBatchRecorderTest {
   }
 
   /**
-   * A MANUAL run on a holiday still runs, and pins the holiday itself — the pre-fix behaviour. That
-   * keeps the marker on the day it actually ran, so it can never overwrite a real session's row;
-   * the missing bar surfaces as {@code exitSkipped}, which is visible and retryable.
+   * {@code runScheduled} on a holiday pins the holiday itself rather than reaching back, so the
+   * marker lands on the day it actually ran and can never overwrite a real session's row; the
+   * missing bar surfaces as {@code exitSkipped}, which is visible and retryable.
+   *
+   * <p>⚠️ <b>This is the runScheduled FALLBACK, not the manual POST path</b> — an earlier name for
+   * this test claimed the latter and was wrong (cross-vendor review round 2, 2026-08-20).
+   * {@code POST /run} goes through {@code MinerviniSwingController:64} →
+   * {@code runAndRecord(doctrine)}, which passes {@code sessionDate = null} and so never reaches
+   * {@link SwingBatchRecorder#scheduledSettleSession()} at all. That path is unchanged by this PR
+   * and keeps its pre-existing "settle off the newest bar" behaviour behind {@code marketHoursGuard}.
+   * Nothing here says anything about it, and the test name must not imply otherwise.
    */
   @Test
-  void aManualRunOnAHolidayPinsTheHolidayRatherThanReachingBack() {
+  void runScheduledOnAHolidayPinsTheHolidayRatherThanReachingBack() {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);
     SwingDoctrine doctrine = manasDoctrine();
     when(engine.runDaily(eq(doctrine), any(), anyBoolean()))

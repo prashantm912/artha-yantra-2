@@ -137,7 +137,8 @@ public class InsightPublisher {
    * mid-session. Measured callers: the {@code @Scheduled} sweeps in {@code InsightSweeper} and the
    * {@code @Async("notifierExecutor")} path from {@code InsightEngine.onSignalEmitted}.
    *
-   * <p>⚠️ The counter is PROCESS-LOCAL, so a mid-session redeploy silently re-grants a full budget:
+   * <p>⚠️ The BUDGET counter is PROCESS-LOCAL, so a mid-session redeploy silently re-grants a full
+   * budget:
    * the real guarantee is "at most N per process per IST day", not per day. The failure direction is
    * over-delivery, which is exactly today's status quo, so this is a documented limit rather than a
    * defect — but it also means the "budget spent" log line below can fire twice in one day and is

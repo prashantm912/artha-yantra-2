@@ -19,13 +19,13 @@ import org.springframework.web.client.RestClient;
  * <p>⚠️ <b>Why this exists (ledger H27-adjacent, #1420 follow-up).</b> #1420 fixed the CONFIGURED
  * underlying from the non-canonical {@code NIFTY} to the canonical {@code NIFTY 50} and added
  * {@code ContextUnderlyingNamesTest} to freeze that. The sweep still 404-ed on every run — measured
- * live 2026-08-20 by the 10:05 probe: ten sweeps, ten 404s on {@code options-digest}, while NIFTY 50
+ * live 2026-08-20 by the 10:05 probe: ten sweeps and a 404 on every one, while NIFTY 50
  * max-pain drift sat at exactly 50.00 against a threshold of 50 with a {@code >=} compare, so a
  * MAXPAIN shift was mathematically required to fire and did not.
  *
  * <p>The cause is a DOUBLE ENCODE, and it is invisible to any test that looks at the configured
  * name: {@code UriComponentsBuilder.toUriString()} encodes ({@code NIFTY 50} becomes
- * {@code NIFTY%2050}), and {@code RestClient.uri(String)} then pre-encodes the template again under
+ * {@code NIFTY%2050}), and {@code RestClient.uri(String, Object...)} then pre-encodes the template again under
  * its default {@code TEMPLATE_AND_VALUES} mode, turning the {@code %} into {@code %25}. SENSEX was
  * never affected because it contains no character that needs encoding — which is exactly why the
  * defect read as "NIFTY-specific config problem" rather than as a client bug.
@@ -63,7 +63,7 @@ class ContextClientUriEncodingTest {
     assertThat(sent.get(0).getRawQuery())
         .as(
             "a double encode yields name=NIFTY%252050, which market-data answers 404 — measured"
-                + " live 2026-08-20, ten sweeps, ten 404s")
+                + " live 2026-08-20: ten sweeps, a 404 on every one")
         .isEqualTo("name=NIFTY%2050");
     // The DECODED round-trip is the reader-facing half of the same claim: whatever the wire bytes,
     // the server must recover the canonical name it was given.
@@ -94,9 +94,13 @@ class ContextClientUriEncodingTest {
 
     client.ingestHealth();
     client.dataHealth();
+    client.marketStructure();
 
     assertThat(sent).extracting(URI::getPath)
-        .containsExactly("/api/v1/market/health/ingest", "/api/v1/market/health/data");
+        .containsExactly(
+            "/api/v1/market/health/ingest",
+            "/api/v1/market/health/data",
+            "/api/v1/market/context/day-context");
     assertThat(sent).allSatisfy(u -> assertThat(u.getRawQuery()).isNull());
   }
 }

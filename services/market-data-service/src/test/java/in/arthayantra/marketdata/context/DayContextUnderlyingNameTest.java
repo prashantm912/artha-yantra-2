@@ -47,11 +47,13 @@ import org.junit.jupiter.api.Test;
  * it.</b> The range holds <b>28</b> trading days; <b>2026-07-17 and 2026-08-12 have no row AND no
  * {@code MARKET_CONTEXT_DAY} run at all</b> (26 runs, all SUCCESS), and neither date is in
  * {@code nse-trading-holidays.csv}. So on those two nights the job did not merely log a hollow
- * success — <b>it did not run</b>. That is a SECOND, separate and still-unexplained hole, and the
- * tidier phrasing concealed it.
+ * success — <b>it did not run</b>. That is a SECOND, separate hole the tidier phrasing concealed —
+ * traced the same evening and <b>already fixed</b>: the whole evening chain is missing both nights,
+ * both dates pre-date #1358, and before it the chain ran at 19:30–21:15, outside the hours the
+ * machine is up.
  *
  * <p>⚠️ <b>The guard that was missing is the reason it survived 26 days.</b>
- * {@code MarketContextEodJob:91} warns when a digest anchors on the wrong date — but that branch
+ * {@code MarketContextEodJob:99} warns when a digest anchors on the wrong date — but that branch
  * requires {@code o != null}, so a <em>null</em> digest takes the silent path and writes null
  * scalars with no warning at all. The success log line and the empty write are indistinguishable
  * from outside.
@@ -126,19 +128,35 @@ class DayContextUnderlyingNameTest {
   void theKnobIsWiredThrough() throws IOException {
     // The #653 class, and #1427 hit it again on 2026-08-20: a property with no compose passthrough
     // cannot be overridden on the live stack at all, so the default is the only value that exists.
-    // ⚠️ Asserts the env NAME, inside market-data-service's own block — NOT the default VALUE.
-    // Pinning the value would false-RED an operator who legitimately points day-context at another
-    // canonical index, and asserting "appears anywhere in the file" would pass on a line sitting in
-    // a different service's environment map, where it would never reach this container.
-    String compose =
-        Files.readString(repoRoot().resolve("deploy/docker-compose.yml"), StandardCharsets.UTF_8);
-    int block = compose.indexOf("  market-data-service:");
-    assertThat(block).as("market-data-service block not found in compose").isGreaterThan(-1);
-    int next = compose.indexOf("  strategy-signal-service:", block);
-    String marketDataBlock = next > block ? compose.substring(block, next) : compose.substring(block);
-    assertThat(marketDataBlock)
+    // ⚠️ LINE-ORIENTED on purpose. The earlier cut sliced the file between two indexOf() needles and
+    // had three holes, one of which failed SILENTLY: it ended the slice at a hardcoded neighbour
+    // ("  strategy-signal-service:"), so renaming or moving that service would make indexOf return
+    // -1 and the code fall back to searching the WHOLE FILE -- quietly restoring the very weakness
+    // the rewrite existed to remove. Nothing would have reddened. (Also: "  market-data-service:"
+    // appears 4x in compose but only ONCE at line start -- the other three are 6-space `depends_on`
+    // entries that CONTAIN the 2-space literal, so the old needle matched the right one only by
+    // ordering luck.) Only a TOP-LEVEL key flips the flag here, and the scan needs no sentinel.
+    boolean inBlock = false;
+    boolean found = false;
+    boolean envFile = false;
+    for (String l :
+        Files.readAllLines(repoRoot().resolve("deploy/docker-compose.yml"), StandardCharsets.UTF_8)) {
+      if (l.startsWith("  ") && !l.startsWith("   ") && l.stripTrailing().endsWith(":")) {
+        inBlock = l.strip().equals("market-data-service:");
+      }
+      if (inBlock && l.contains("ARTHA_CONTEXT_OPTIONS_NAME:")) {
+        found = true;
+      }
+      if (inBlock && l.strip().startsWith("env_file:")) {
+        envFile = true;
+      }
+    }
+    assertThat(found)
         .as("market-data has no env_file, so an env name absent from ITS map never reaches it (#653)")
-        .contains("ARTHA_CONTEXT_OPTIONS_NAME:");
+        .isTrue();
+    // The message above states a premise; this asserts it rather than trusting it. If market-data
+    // ever gains an env_file, the #653 reasoning changes and this guard should be revisited.
+    assertThat(envFile).as("market-data-service gained an env_file — revisit the #653 premise").isFalse();
   }
 
   /**
@@ -162,30 +180,54 @@ class DayContextUnderlyingNameTest {
         .thenReturn(
             new IngestHealthBoard.BoardReport(
                 Instant.parse("2026-08-20T06:00:00Z"), null, null, 0, List.of()));
-    DayContextService service =
-        new DayContextService(
-            digest,
-            mock(QuoteGateway.class),
-            new org.springframework.beans.factory.support.StaticListableBeanFactory()
-                .getBeanProvider(UpstoxGlobalInstrumentsClient.class),
-            mock(CandleQueryService.class),
-            board,
-            MarketCalendar.nse(),
-            Clock.fixed(Instant.parse("2026-08-20T06:00:00Z"), ZoneOffset.UTC),
-            "NIFTY",
-            "NSE",
-            "NIFTY 50",
-            "INDIA VIX",
-            5,
-            5,
-            new BigDecimal("13"),
-            new BigDecimal("17"),
-            new BigDecimal("22"));
-
-    service.dayContext();
+    serviceWith(digest, board, "NIFTY").dayContext();
 
     verify(digest).digest(eq("NIFTY 50"), any(), any());
+    // ⚠️ The never() is NOT redundant: without it, an implementation that called BOTH names would
+    // still satisfy the positive verify.
     verify(digest, never()).digest(eq("NIFTY"), any(), any());
+  }
+
+  @Test
+  @DisplayName("a DIFFERENT alias proves the ctor arg is read, not a hardcoded canonical name")
+  void aSecondAliasAlsoReachesTheDigestCanonical() {
+    // ⚠️ Without this, the test above passes even for an implementation that ignored optionsName
+    // entirely and hardcoded "NIFTY 50" — which is the wrong fix wearing the right result.
+    OptionsDigestService digest = mock(OptionsDigestService.class);
+    IngestHealthBoard board = mock(IngestHealthBoard.class);
+    when(board.board(anyInt()))
+        .thenReturn(
+            new IngestHealthBoard.BoardReport(
+                Instant.parse("2026-08-20T06:00:00Z"), null, null, 0, List.of()));
+
+    serviceWith(digest, board, "BANKNIFTY").dayContext();
+
+    verify(digest).digest(eq("NIFTY BANK"), any(), any());
+  }
+
+  /** A real {@link DayContextService} with only the collaborators these two tests need. */
+  private static DayContextService serviceWith(
+      OptionsDigestService digest, IngestHealthBoard board, String configuredName) {
+    return new DayContextService(
+        digest,
+        mock(QuoteGateway.class),
+        new org.springframework.beans.factory.support.StaticListableBeanFactory()
+            .getBeanProvider(UpstoxGlobalInstrumentsClient.class),
+        mock(CandleQueryService.class),
+        board,
+        MarketCalendar.nse(),
+        // 11:30 IST Thursday — inside the bundled 2024-2026 calendar and not a holiday, so this is
+        // deterministic and carries no coupling to the calendar horizon canary.
+        Clock.fixed(Instant.parse("2026-08-20T06:00:00Z"), ZoneOffset.UTC),
+        configuredName,
+        "NSE",
+        "NIFTY 50",
+        "INDIA VIX",
+        5,
+        5,
+        new BigDecimal("13"),
+        new BigDecimal("17"),
+        new BigDecimal("22"));
   }
 
   /** First value between {@code prefix} and the next {@code suffix}; fails loudly if absent. */

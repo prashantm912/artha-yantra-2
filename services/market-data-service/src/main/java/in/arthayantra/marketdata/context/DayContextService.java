@@ -2,10 +2,10 @@ package in.arthayantra.marketdata.context;
 
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
-import in.arthayantra.marketdata.instruments.UnderlyingRef;
 import in.arthayantra.marketdata.canary.IngestHealthBoard;
 import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleQueryService;
+import in.arthayantra.marketdata.instruments.UnderlyingRef;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
 import in.arthayantra.marketdata.options.OptionsDigestService;
@@ -161,7 +161,9 @@ public class DayContextService {
     // atm_iv ALL NULL while the job logged "persisted ... (1 row)" on each of those nights.
     // ⚠️ NOT "26 consecutive trading days" -- the range holds 28, and 2026-07-17 and 2026-08-12
     // have no row AND no MARKET_CONTEXT_DAY run at all (neither is an NSE holiday). That is a
-    // SECOND, separate and still-unexplained hole; the tidier phrasing concealed it (review).
+    // SECOND, separate hole the tidier phrasing concealed (review) -- traced the same evening and
+    // ALREADY FIXED: the whole evening chain is missing both nights, both dates pre-date #1358, and
+    // before it the chain ran 19:30-21:15, outside the hours the machine is up.
     // Fixing only the default would leave the next person free to write the alias again.
     this.optionsName = UnderlyingRef.canonical(optionsName);
     this.indexExchange = indexExchange;

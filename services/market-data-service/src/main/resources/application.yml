@@ -102,8 +102,11 @@ artha:
   # expiries for NIFTY", DayContextService fail-softed it into a note, and market_context_days
   # persisted 26 rows spanning 2026-07-13..2026-08-19 with every options scalar NULL while the EOD
   # job logged success on each of those nights. (NOT 26 CONSECUTIVE days -- the range holds 28;
-  # 2026-07-17 and 2026-08-12 have no row and no job run at all, a separate unexplained hole.) DayContextService now normalises through UnderlyingRef.canonical(), so an
-  # alias written here is repaired rather than silently swallowed -- but write the canonical name.
+  # 2026-07-17 and 2026-08-12 have no row and no job run at all -- a SECOND hole the tidier phrasing
+  # concealed, traced 2026-08-20 to the pre-#1358 evening-chain schedule, which sat outside the
+  # 08:00-19:00 operating window and was already fixed on 08-17.)
+  # DayContextService now normalises through UnderlyingRef.canonical(), so an alias
+  # written here is repaired rather than silently swallowed -- but write the canonical name.
   context:
     options-name: ${ARTHA_CONTEXT_OPTIONS_NAME:NIFTY 50}
   # OpenAlgo broker-swap spine (plan §3/§4). Per-capability source selector — DEFAULT kite, so

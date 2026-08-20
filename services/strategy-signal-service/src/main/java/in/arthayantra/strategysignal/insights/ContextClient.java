@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,7 +17,6 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.util.UriComponentsBuilder;
 
 /**
  * The insight plane's read seam to market-data's trust/context rails (INT design §9.2): a
@@ -62,11 +62,20 @@ public class ContextClient {
    * unreachable / returns nothing — the CONTEXT_SHIFT generator then simply skips this underlying.
    */
   public Optional<MarketContext.OptionsShift> optionsShift(String exchange, String name) {
-    String path =
-        UriComponentsBuilder.fromPath("/api/v1/market/context/options-digest")
-            .queryParam("name", name)
-            .toUriString();
-    return get(path)
+    // ⚠️ The name rides as a URI TEMPLATE VARIABLE, never as a pre-built query string.
+    // UriComponentsBuilder.toUriString() encodes it once, and RestClient.uri(String, Object...) then
+    // pre-encodes the template AGAIN under its default TEMPLATE_AND_VALUES mode — so `NIFTY 50`
+    // went out as `name=NIFTY%252050` and market-data answered 404 on every sweep.
+    //
+    // Measured live 2026-08-20: the 10:05 probe found ten sweeps with a 404 on every one, and the
+    // market-data counter had reached 19 by 12:35 IST — one per sweep, still accruing. One MAXPAIN
+    // shift was provably suppressed. SENSEX was never affected because it has no character to
+    // encode, which is why this read as a NIFTY config problem for the whole life of the feature.
+    //
+    // Note there is no uri(String) overload at all: the three bare-path calls in this class were
+    // already binding to uri(String, Object...) with an empty array, which is why widening get() to
+    // varargs cannot change them. ContextClientUriEncodingTest pins the wire bytes.
+    return get("/api/v1/market/context/options-digest?name={name}", name)
         .map(
             d ->
                 new MarketContext.OptionsShift(
@@ -162,9 +171,9 @@ public class ContextClient {
     return out;
   }
 
-  private Optional<JsonNode> get(String path) {
+  private Optional<JsonNode> get(String path, Object... uriVariables) {
     try {
-      String body = restClient.get().uri(path).retrieve().body(String.class);
+      String body = restClient.get().uri(path, uriVariables).retrieve().body(String.class);
       if (body == null || body.isBlank()) {
         return Optional.empty();
       }
@@ -176,22 +185,41 @@ public class ContextClient {
       // fires on schedule trains the reader to ignore WARNs -- which is the exact property this
       // class's siblings were just changed to protect.
       //
-      // ⚠️ This carve-out DID hide a real defect for the whole life of the feature: the configured
-      // underlying was a bare `NIFTY`, which is not a canonical instrument key, so half the sweep
-      // 404-ed here silently and never produced a row. Fixed in this commit;
-      // ContextUnderlyingNamesTest now fails the build on a non-canonical name IN EITHER COMMITTED
-      // COPY (the yml list and InsightProperties.DEFAULT_UNDERLYINGS), so the carve-out can go back
-      // to covering only what it was written for -- an underlying that genuinely has no option
-      // expiries. ⚠️ NOT covered: a runtime property override. `artha.insights` is
+      // ⚠️ This carve-out has now hidden TWO real defects for the whole life of the feature, and
+      // the second one is the reason this paragraph was rewritten rather than deleted.
+      //
+      // (1) The configured underlying was a bare `NIFTY`, not a canonical instrument key, so half
+      // the sweep 404-ed here silently and never produced a row. Fixed in #1420, and
+      // ContextUnderlyingNamesTest fails the build on a non-canonical name IN EITHER COMMITTED COPY
+      // (the yml list and InsightProperties.DEFAULT_UNDERLYINGS).
+      //
+      // (2) ⚠️ THAT FIX DID NOT STOP THE 404s. `NIFTY 50` was double-encoded on the way out
+      // (`name=NIFTY%252050`) and market-data kept answering 404 — measured live 2026-08-20 by the
+      // 10:05 probe: ten sweeps, a 404 on every one, and one MAXPAIN shift that was mathematically
+      // required to fire and did not. **A name can be perfectly canonical and still unsendable**, so
+      // ContextUnderlyingNamesTest could never have caught it: it reads the name as SOURCE TEXT.
+      // ContextClientUriEncodingTest asserts the wire bytes instead, which is the only thing the
+      // server sees. Whoever next widens this carve-out: the lesson is not "check the config", it
+      // is that a silent 404 branch will absorb any cause at all, so the guard has to sit on the
+      // REQUEST, not on the inputs that build it.
+      //
+      // With both closed the carve-out covers only what it was written for -- an underlying that
+      // genuinely has no option expiries. ⚠️ NOT covered: a runtime property override. `artha.insights` is
       // @ConfigurationProperties, so relaxed binding would accept ARTHA_INSIGHTS_CONTEXT_UNDERLYINGS
       // from any property source and a source-file test cannot see a bound value. None exists today
-      // (compose carries only the delivery flags and two crons), but adding a fifth ARTHA_INSIGHTS_*
+      // (compose carries only the delivery flags and two crons), but adding another ARTHA_INSIGHTS_*
       // passthrough is exactly the low-ceremony change that would bypass the guard while this
       // comment still says do not look here.
-      log.debug("insight trust read {} — no such digest (returning empty)", path);
+      // `path` is a TEMPLATE now, so it alone would log a literal `{name}`. The variables ride
+      // alongside it -- this line is the only record of WHICH underlying 404-ed.
+      log.debug(
+          "insight trust read {} {} — no such digest (returning empty)",
+          path, Arrays.toString(uriVariables));
       return Optional.empty();
     } catch (Exception e) {
-      log.warn("insight trust read {} FAILED (returning empty): {}", path, e.toString());
+      log.warn(
+          "insight trust read {} {} FAILED (returning empty): {}",
+          path, Arrays.toString(uriVariables), e.toString());
       return Optional.empty();
     }
   }

@@ -10,7 +10,9 @@ import in.arthayantra.strategysignal.insights.InsightGenerator.GenerationContext
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -45,6 +47,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
  */
 @SpringBootTest(properties = {"spring.profiles.active=mock", "artha.signals.engine-enabled=false"})
 class StaleTickDedupeIntegrationTest extends StrategySignalIntegrationTestBase {
+  /** Fixed so the CONTEXT_SHIFT phone budget has a deterministic IST day. */
+  private static final Clock CLOCK =
+      Clock.fixed(Instant.parse("2026-08-20T06:00:00Z"), ZoneOffset.UTC);
+
 
   @Autowired private InsightRepository repository;
   @Autowired private JdbcTemplate jdbc;
@@ -115,7 +121,8 @@ class StaleTickDedupeIntegrationTest extends StrategySignalIntegrationTestBase {
             objectMapper,
             mock(ApplicationEventPublisher.class),
             repository,
-            properties(new InsightProperties.Delivery(false, false, false, Severity.NOTICE)));
+            properties(new InsightProperties.Delivery(false, false, false, Severity.NOTICE, 6)),
+            CLOCK);
     new InsightEngine(
             List.of(new StaleTickGenerator()),
             repository,

@@ -3,6 +3,9 @@ package in.arthayantra.strategysignal.insights;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.strategysignal.signals.InsightDeliveryAlert;
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -28,6 +31,9 @@ public class InsightPublisher {
   /** The pub/sub channel the gateway relays to {@code /topic/insights} (WS allowlist §9.3). */
   public static final String CHANNEL = "insights";
 
+  /** The budget day is an IST trading day, not a UTC one — see {@link #claimPhoneBudget}. */
+  private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+
   private static final Logger log = LoggerFactory.getLogger(InsightPublisher.class);
 
   private final StringRedisTemplate redis;
@@ -38,6 +44,13 @@ public class InsightPublisher {
   private final boolean ntfyEnabled;
   private final boolean telegramEnabled;
   private final Severity severityFloor;
+  private final int contextShiftDailyPhoneCap;
+  private final Clock clock;
+
+  /** Guarded by {@code this} — see {@link #claimPhoneBudget}. */
+  private LocalDate budgetDay;
+
+  private int contextShiftPhonedToday;
 
   /** Wires Redis + the staged-rollout delivery flags (all phone flags default false). */
   public InsightPublisher(
@@ -45,7 +58,8 @@ public class InsightPublisher {
       ObjectMapper objectMapper,
       ApplicationEventPublisher events,
       InsightRepository repository,
-      InsightProperties props) {
+      InsightProperties props,
+      Clock clock) {
     this.redis = redis;
     this.objectMapper = objectMapper;
     this.events = events;
@@ -54,6 +68,8 @@ public class InsightPublisher {
     this.ntfyEnabled = props.delivery().ntfyEnabled();
     this.telegramEnabled = props.delivery().telegramEnabled();
     this.severityFloor = props.delivery().severityFloor();
+    this.contextShiftDailyPhoneCap = props.delivery().contextShiftDailyPhoneCap();
+    this.clock = clock;
   }
 
   /**
@@ -76,6 +92,12 @@ public class InsightPublisher {
     if (repository.isMuted(insight.type(), insight.scope())) {
       return false;
     }
+    // ⚠️ AFTER the mute check on purpose: a muted insight must not spend budget it never used, or a
+    // single muted scope could starve the phone for every other scope. Also strictly AFTER the
+    // severity/flag gate above, so a shadow-mode stack (all phone flags false) never consumes any.
+    if (phoneEligible && !claimPhoneBudget(insight)) {
+      phoneEligible = false;
+    }
     boolean wsPublished = false;
     if (wsEligible) { // WS floor: >= NOTICE
       wsPublished = publishWs(insight);
@@ -85,6 +107,47 @@ public class InsightPublisher {
       publishPhoneEvent(insight, "TELEGRAM", telegramEnabled);
     }
     return wsPublished;
+  }
+
+  /**
+   * Claims one CONTEXT_SHIFT phone slot for the current IST day, or refuses.
+   *
+   * <p>Bounds PHONE delivery only — the insight row is still written and the WS frame still goes out,
+   * so a refusal removes an interruption, never a record. Everything other than CONTEXT_SHIFT, and a
+   * cap of {@code 0}, are unbudgeted.
+   *
+   * <p>⚠️ The one log line fires at the moment the budget is SPENT, not on each subsequent refusal.
+   * A cap that announces every suppression replaces the notification flood it exists to prevent with
+   * a log flood, which is the same defect wearing a quieter hat.
+   *
+   * <p>{@code synchronized} because the sweep is scheduled but {@code publish} is not contractually
+   * single-threaded, and a torn read of the day rollover would either double the budget or zero it
+   * mid-session.
+   */
+  private synchronized boolean claimPhoneBudget(Insight insight) {
+    if (contextShiftDailyPhoneCap == 0
+        || !InsightType.CONTEXT_SHIFT.name().equals(insight.type())) {
+      return true;
+    }
+    // ⚠️ IST, not the clock's own zone. The Clock bean is systemUTC (ClockConfig:16), so a bare
+    // LocalDate.now(clock) would roll the budget over at 05:30 IST -- mid-morning, before the sweep
+    // window even opens on the day it is meant to bound.
+    LocalDate today = LocalDate.now(clock.withZone(IST));
+    if (!today.equals(budgetDay)) {
+      budgetDay = today;
+      contextShiftPhonedToday = 0;
+    }
+    if (contextShiftPhonedToday >= contextShiftDailyPhoneCap) {
+      return false;
+    }
+    contextShiftPhonedToday++;
+    if (contextShiftPhonedToday == contextShiftDailyPhoneCap) {
+      log.info(
+          "insight CONTEXT_SHIFT phone budget spent for {} ({} delivered) — further CONTEXT_SHIFT"
+              + " insights today are still recorded and WS-published, but will not reach a phone",
+          today, contextShiftDailyPhoneCap);
+    }
+    return true;
   }
 
   private boolean publishWs(Insight insight) {

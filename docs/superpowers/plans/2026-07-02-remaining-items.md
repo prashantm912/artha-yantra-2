@@ -12,68 +12,107 @@ the two 2026-07-02 audits (both fix queues fully closed) and the open-PR/issue l
 
 ## 0. Work queue (consolidated 2026-07-10; 2-pass-audited same day)
 
-### 📍 CURRENT STATE — as of 2026-08-19 ~13:30 IST (update this block at every session close)
+### 📍 CURRENT STATE — as of 2026-08-20 ~13:10 IST (update this block at every session close)
 
 **Read this first, then the enumeration recipe below.** This block answers *"what is in flight right
 now"*, which the recipe deliberately does not.
 
-**Live stack:** healthy. H24 + H25 deployed 2026-08-18 and confirmed on the first incremental evening
-run. **Nothing from 2026-08-19 is deployed** — see below.
+**Live stack:** healthy, 11/11. ⚠️ **Nothing from 2026-08-19 or 2026-08-20 is deployed yet** — the
+15:30 IST post-close window is the first chance. The morning data-health routine measured the gap
+directly rather than inferring it: `market-data-service`'s image was built 2026-08-19 11:08 UTC,
+H29 (`9af92d16`) merged at 18:19 IST, and a jar fingerprint on the running container found
+`isBeFallbackCandidate` **0 hits** with a positive control passing. AUTOIND and KANORICHEM — the two
+symbols H29's own commit message names — were still throwing gap-fetch WARNs this morning, 42 of
+them across 28 NSE symbols.
 
-⚠️ **MERGED BUT NOT DEPLOYED, now THREE commits:** #1415 (`b75e7f34`, CashEquityUniverse adoption),
-**#1420 (`6c61dd77`, NIFTY 50 context key)** and **#1419 (`6fd952b6`, EQUITY_BREADTH canary)**. All
-three are inert or behaviour-safe until the next rebuild, but **#1420's yml is a PACKAGED RESOURCE —
-it is a no-op until strategy-signal is rebuilt AND redeployed**, and no strategy re-publish is needed.
-Probe it POSITIVELY after deploy (a digest call, or a NIFTY 50-scoped CONTEXT_SHIFT row): an empty
-insights table for a day is not evidence of failure.
+⚠️ **THE CODEX RATION RESET ON 2026-08-20 AND THE FIRST SLOT PAID FOR ITSELF.** Spent on
+[#1418](https://github.com/prashantm912/artha-yantra-2/pull/1418) (H27, money tier) per the owner's
+call to take the live-cost item first rather than strict queue order. It returned **two Majors, and
+CI could not have found either**:
 
-**H27 is the headline of 2026-08-19, and it changed shape twice under measurement.** The row opened
-as "the swing SELL verdict never fires" and the real finding is that **the swing book's stops were
-evaluated against the PREVIOUS session's close** — #1333 moved the settle to 16:00, an hour at which
-12 of 15 held symbols have no daily bar at all. [PR #1418](https://github.com/prashantm912/artha-yantra-2/pull/1418)
-moves it to 18:52/18:53 and pins the session. ⚠️ **It is MONEY tier and is HELD for a rationed Codex
-slot — it does NOT merge on green.** Live keeps settling at 16:00 until it lands.
+1. ⚠️ **The FIX introduced a defect.** Resolving a weekday NSE holiday back to the previous trading
+   day looked harmless — the exit evaluation genuinely is a no-op — but the run-marker upsert
+   REPLACES that session's counters, and the scheduler records intent under TODAY. So a holiday
+   would have destroyed the previous session's evidence AND left an intent row with no marker, which
+   is exactly the shape `SwingBatchCanary` pages "DID NOT RUN" for, repeatedly, about a session that
+   never traded. Fixed by making a holiday **not a settle session at all**, guarded BEFORE the intent
+   write. ⚠️ **One half of the finding was WRONG and was pushed back on** — it also claimed duplicate
+   ENTRIES; `entries_enabled` is ORed on conflict (`SwingBatchRunRepository:71-72`), a monotonic
+   latch, verified at source before acting. **A reviewer being 80% right is the normal case, and the
+   20% has to be checked, not absorbed.**
+2. ⚠️ **The load-bearing hour had NO regression proof.** Restoring 16:00/16:02 in BOTH code and
+   compose passed every existing test — parity, window membership, minute collisions. Reproduced
+   literally: with the old crons back, `CronPassthroughParityTest` **6/6 PASS**, and only the new
+   ordering test fails. **The H27 defect could have shipped back green.** Now pinned by
+   `OperatingWindowTest.theSwingSettlesRunAfterTheBarTheyEvaluateAgainst`.
 
-**Both 2026-08-19 chips are DONE and merged:** `task_1e319725` → #1419 (`6fd952b6`) and
-`task_ffefe53e` → #1420 (`6c61dd77`).
+**Merged 2026-08-20:** [#1426](https://github.com/prashantm912/artha-yantra-2/pull/1426)
+(`28e51a3d`) — and it is the one that actually closes the NIFTY 50 context sweep. ⚠️ **#1420 did NOT
+close it, and "deployed + config bound at runtime" was not evidence that it had.** The 10:05
+scheduled probe found the config correct, the `config_hash` moved at the deploy, and the sweep
+**still 404ing on every run**. Cause: `ContextClient` built the query with
+`UriComponentsBuilder.toUriString()` (which encodes) and handed the string to
+`RestClient.uri(String, Object...)` (which pre-encodes the template again), so `NIFTY 50` went out
+as `name=NIFTY%252050`. SENSEX was never affected because it has no character to encode — which is
+why this read as a NIFTY *config* problem for the feature's whole life. ⚠️ **`ContextUnderlyingNamesTest`,
+added by #1420 for exactly this, could never have caught it: it reads the name as SOURCE TEXT, and a
+name can be perfectly canonical and still unsendable.** The guard has to sit on the REQUEST.
 
-⚠️ **THE DAY'S MOST TRANSFERABLE LESSON — three of the day's findings were each wrong on first
-statement, and each was caught by a MEASUREMENT rather than a re-read:**
-1. **H27** — I was about to build the owner-approved fix (pin the session bar at 16:00) when the
-   measurement showed it would skip ~13 of 15 stops daily, forever. The approved fix was wrong; the
-   hour was the defect. **Ask what the fix DOES at current data volumes before building it.**
-2. **#1419** — the review falsified my headline evidence. "2026-08-12 was a silently-missed session"
-   was FALSE: 08-13 carries two runs, one an off-cron 15:45 boot pass, so the day was materialized
-   late and stamped elsewhere. The policy I had chosen (`REQUIRE_SUCCESS`) would have false-RED-ed
-   healthy data at 1-in-21. **A run row is not evidence about the day it is stamped with.**
-3. **H29** — the ledger row's own premise was wrong on population, mechanism AND fault location.
-   `in_master = 1` is not `instrument_token IS NOT NULL`.
+**Verified correct 2026-08-20:** #1419's `MATERIALIZED_DAY` policy — first live verdict right,
+correctly worded, silent, and all ten trading days in its window are each backed by a real
+`equity_breadth_daily` row (checked individually, not just the headline day).
 
-⚠️ **And a fourth, about my own work:** on H28 I asserted "divergence tracks daily move size" from
-three points; the population refutes it (buckets 1-3 flat at ~0.23%, the large bucket is n=2). Both
-review rounds also caught me leaving comments that CONTRADICTED the code I had just written — in
-#1419 that was the third instance of the exact defect the PR existed to fix. **A comment is a claim;
-it goes stale in the same commit that makes it stale.**
+**Opened 2026-08-20:** [[H31]] (`day-context` read timeouts discard >half of responses market-data
+had already computed — 8 of 15 sweeps, mean 1.907 s against a 2000 ms budget) and [[H32]] (the
+`CONTEXT_SHIFT` phone-volume cliff, capped before it fires).
 
-**Held for the Codex slot on 2026-08-20 — STRICT ORDER, owner ruled 2026-08-17 that ALL queue rather
-than relaxing to same-vendor. H27 makes SIX:**
+⚠️ **THE DAY'S MOST TRANSFERABLE LESSON — a scheduled behaviour change with no commit behind it is
+invisible to every gate we own.** [[H32]] arrives on ~2026-09-19 because an IV-rank window crosses
+60 sessions: no deploy, no config change, nobody choosing it, and CI/review/the ledger all key on
+someone making a change. It was found only as a side effect of investigating something else. **Ask
+of any evidence-gated behaviour: what does it do on its own, and when?**
+
+⚠️ **Second lesson, cheaper but recurring: THREE separate "failures" today were broken probes, not
+broken subjects.** (1) A monitor keyed on `pgrep -f codex` reported the review had DIED — Codex runs
+as node. (2) Four new cap tests failed with ZERO events; `ApplicationEventPublisher.publishEvent` is
+overloaded and a bare `any()` inferred `ApplicationEvent`, so the verify targeted a method production
+never calls. (3) A red-proof sed missed compose's `${VAR:-default}` form and reddened the parity test
+mechanically. **Every one failed in the ALARMING direction, which is why they were caught — the same
+mistake in the reassuring direction is the one that ships.**
+
+**Standing operating constraints confirmed 2026-08-17, unchanged:** deploys wait until **after 15:30
+IST**; clean-tier PRs **merge on green** and report after; money-path items do not merge without a
+Codex slot.
+
+**Still held for a Codex slot — H27 has now HAD its slot and is in round 2:**
+
 
 | # | item | state |
 |---|---|---|
 | 1 | **#1283** swing coverage gate | inert (OBSERVE_ONLY); review the delta since `266d37ae` only |
 | 2 | **#1376** swing boot catch-up | inert (`ARTHA_SWING_BOOT_CATCHUP_ENABLED` absent); the M1/M2 fix at `5e83980d` is unreviewed |
 | 3 | **#1354** evening-chain canary | build COMPLETE + green on `e7aa0e89`. ⚠️ TWO OWNER DECISIONS BLOCK MERGE — 3-of-5 tail coverage, and the repo's first unauthenticated cross-service WRITE endpoint. Tier is NO LONGER clean. ⚠️ **It wants 18:59, which #1420 has now taken for `minervini-buyable-alerts`** — one of the two needs a different minute |
-| 4 | **#1418** swing settle hour + session pin | **NEW 2026-08-19. Money tier, exit path.** Built, green, same-vendor review NOT run (held deliberately for the slot) |
+| 4 | **#1418** swing settle hour + session pin | ✅ **SLOT SPENT 2026-08-20 — round 1 returned TWO MAJORS, both fixed at `4ef393a5`, round 2 in flight.** A holiday settle would have overwritten the previous session's run counters and false-paged the canary; and the hour itself had no regression proof (16:00/16:02 restored in code AND compose passed every existing test). Still money tier, still does NOT merge until round 2 clears |
 | 5 | **H22** risk-refusal-as-transient | unbuilt |
 | 6 | **H23** catch-up overwrites settle row | unbuilt, fix shape undecided |
 
-⚠️ **The $20-tier throughput is STILL UNMEASURED and the queue has grown to six. Record the first
-slot's cost on 2026-08-20.** If it clears only one or two, bring the throughput problem back rather
-than quietly relaxing the rule.
+⚠️ **FIRST MEASUREMENT OF THE $20 TIER, 2026-08-20 — and it measures LATENCY, not the budget.**
+One review of a 25 KB / 8-file diff at `xhigh`: **~16 minutes wall, 1 start + 1 resume, no capacity
+error and no fallback model**. The wrapper echoed `gpt-5.6-sol` throughout. ⚠️ **This does NOT tell
+us how many slots a month holds** — a quota ceiling is only observable when it is HIT, and nothing
+was refused today. So the budget stays an ASSUMPTION; what is now known is that a slot costs ~16
+minutes of wall-clock per round, which is the number that matters for sequencing a day. Two
+non-obvious costs the harness imposed: a benign `"type":"error"` event about skill-description
+budget (NOT a failure — a monitor keyed on it will report a false death), and `rg` is absent on this
+box so Codex burns a turn discovering that. ⚠️ **Round 2 has not returned yet, so the "one slot =
+one converged review" assumption is itself still unmeasured.**
 
 **Open, unstarted:** H28 (close planes disagree — reframed, the canary threshold question is
-live) and **H30** (the same 304 rows served as `200`-with-nulls — opened 2026-08-19, deliberately
-NOT built). **H29 is BUILT** — [#1424](https://github.com/prashantm912/artha-yantra-2/pull/1424),
+live; ⚠️ **a THIRD consecutive session fired YELLOW on 2026-08-19, on TIINDIA — a different symbol
+each time, which is the evidence that reframed it from "one bad symbol" to "the threshold is wrong
+for this distribution"**), **H30** (the same 304 rows served as `200`-with-nulls — opened
+2026-08-19, deliberately NOT built) and **[[H31]]** (`day-context` discards >half its completed
+responses — opened 2026-08-20, measure-then-decide by owner ruling). **H29 is BUILT** — [#1424](https://github.com/prashantm912/artha-yantra-2/pull/1424),
 clean tier by review ruling, merged but **held from deploy until it can ride tomorrow alongside
 H27** (owner call: it newly enables `upsertAuthoritativeAll` bar REWRITES on three symbols held by
 OPEN swing positions, and that should land under supervision, not during an evening chain).
@@ -920,6 +959,8 @@ than carried.
 | H28 | `bhavcopy-vs-kite-close-planes-disagree` | ⚠️ **The close canary fired YELLOW on AVALON two sessions running (1.69%, 08-17 + 08-18) and nobody saw it, because it is a WARN and every gate we run counts ERRORs.** That much stands. ⚠️ **What does NOT stand is the framing "a price-source disagreement on one symbol":** `computed` 2026-08-19, the two planes disagree on essentially EVERY symbol, and AVALON is the tail of a distribution rather than an isolated event. Across 209 NSE symbols on 2026-08-18, mean divergence is **0.23%**, max outside the tail **0.89%**, AVALON **1.72%**. Same exchange, near-identical volume (`nse_eod_bhavcopy` 2197.30 / 1,136,151 vs the KITE candle 2235.00 / 1,133,891) — so this is not two listings and not a corporate action. It is two DIFFERENT QUANTITIES: NSE's official closing price is a last-30-minute VWAP; Kite's daily bar close is the last traded price. ⚠️ **A hypothesis I floated and then REFUTED on the population, recorded so nobody re-derives it:** "divergence tracks daily move size" looked compelling on three points (08-14 −0.30% on a +0.5% day, 08-17 0.81% on +6.2%, 08-18 1.69% on +6.7%) and does NOT survive bucketing — buckets 1–3 are flat at 0.23/0.26/0.23%, and the one large bucket is **n=2, one of which is AVALON itself**. Open questions unchanged: does anything downstream consume the two planes interchangeably, and is a 1% threshold right for a distribution whose bulk sits at 0.23%. Related: [[H24]] (the EQ+BE work that surfaced these logs) and the `candles`-vs-`nse_eod_bhavcopy` retro-mutability rule in CLAUDE.md. | measured 2026-08-19 across 209 NSE symbols for trade date 2026-08-18; `log-snapshots/2026-08-18/market-data-evening.log` | clean (investigation) | **OPEN — reframed 2026-08-19, unstarted.** |
 | H29 | `shell-instrument-rows-cannot-gap-fetch` | ⚠️ **THE SYMPTOM IS REAL AND THE PREMISE THIS ROW WAS OPENED ON IS WRONG — on the population, on the mechanism, and on where the fault lies.** It said "BE-series symbols cannot gap-fetch, and the resolution that fails is Kite-side". `computed` 2026-08-19: **(1) the population is TWO symbols, not a series.** Only `KANORICHEM` (×4) and `AUTOIND` (×2) ever emit `unknown instrument NSE:<sym>`, on both the 08-18 snapshot and the live container log. `DIACABS`/`MENONBE` — named in the original row as failing — are BE-series and **resolve fine** (tokens 4747009 / 1782017); they appeared in the STALE-candle warnings, a different class, and the row conflated the two. **(2) BE is correlation, not cause:** all four are currently BE; two work. **(3) It is NOT Kite-side, it is our table.** The failing NSE rows are **SHELL ROWS** — `instrument_token`, `exchange_token`, `name` and `segment` all NULL, `is_active = f`, and `first_seen_at = last_seen_at = updated_at`, i.e. created once and never revisited. `TokenResolverAdapter:23` filters on `instrumentToken() != null`, so `resolve()` returns empty and `LiveHistoricalCandleGateway:79` throws. The original row's evidence — "verified `in_master = 1`" — is exactly the trap: a row EXISTING is not a row carrying a token. **304 of 11,030 NSE rows (2.8%) are shells**, each created individually across ~2.5 hours on 2026-06-18 by a path that no longer exists in the codebase (`upsertFromStaging` sets `is_active = TRUE`; `tombstoneVanished` only touches already-active rows and would bump `updated_at`). The master sync ran 2026-08-19 09:05 IST and did not revive them, so **Kite's NSE dump genuinely does not contain these symbols** — while both exist on BSE with tokens (136396036 / 129670404). ⚠️ **Impact is narrower than the row feared, and overlaps [[H27]]:** the daily bar for these names is written directly by the 18:45 bhavcopy ingest, so the swing series IS populated — just not before 18:45, which is H27's mechanism rather than a second one. Open decisions: resolve them via BSE, stop attempting a Kite fetch for a shell row, or purge/repair the 304 — and what created them. | measured 2026-08-19: `marketdata.instruments` per symbol plus the 304-row shell count; `docker logs ay-market-data-service`; `log-snapshots/2026-08-18/market-data-evening.log` | clean (investigation first) | **OPEN — premise corrected 2026-08-19, fix undecided.** |
 | H30 | `hollow-instrument-rows-served-as-200` | ⚠️ **304 NSE `marketdata.instruments` rows are HOLLOW — `instrument_token`, `exchange_token`, `name` and `segment` all NULL, `is_active = f` — and the metadata endpoint serves them as `200 OK` rather than `404`.** `computed` 2026-08-19, verified against the running container: `GET /api/v1/instruments/NSE/KANORICHEM` returns `{"tradingsymbol":"KANORICHEM","instrumentToken":null,"name":null,"segment":null,"active":false}`. `InstrumentRepository.findByKey:158` is a bare `SELECT * ... WHERE exchange=? AND tradingsymbol=?` with **no token filter**; that filter exists only in `TokenResolverAdapter`. ⚠️ **A 200-with-nulls is a WORSE shape than a 404**: absence is honest, whereas this asserts "we know this instrument and it has no token" — which [[H29]] made false for 27 of them, since their token was on the `-BE` twin all along. ⚠️ **The fix is NOT the read seam.** Making `byKey` 404 on a tokenless row is one line, but it changes an externally observable response SHAPE (needs its own contract guard) and it papers over the real defect: **something minted 304 hollow rows, one at a time, across ~2.5 hours on 2026-06-18, via a path that no longer exists in the codebase** (`upsertFromStaging` sets `is_active = TRUE`; `tombstoneVanished` only touches already-active rows and would bump `updated_at`, which here equals `first_seen_at`). Until that is understood, any repair is a guess. ⚠️ **Do NOT purge them** — measured while scoping H29: there is **no FK** on `instruments`, all 304 have NSE candles, 28 were still trading in August, and 5 signals plus **4 paper positions (3 of them OPEN)** reference them. A `DELETE` would silently orphan live book state. First questions: what wrote them; whether the 277 twinless ones are genuinely delisted or a second class; and whether any consumer besides the resolver treats a hollow row as a real instrument. | measured 2026-08-19 against the deployed container + `marketdata.instruments` / `strategy.paper_positions` / `strategy.signals`; surfaced by the review round on [#1424](https://github.com/prashantm912/artha-yantra-2/pull/1424) | clean (investigation first) | **OPEN — opened 2026-08-19 by owner decision, unstarted. Deliberately NOT built: today's four reframes all came from building before measuring.** |
+| H31 | `day-context-read-timeout-discards-completed-work` | ⚠️ **The insight context sweep throws away MORE THAN HALF of the `day-context` responses market-data successfully computed for it — and both `MARKET_STRUCTURE` and `GAP_OPEN` go with them.** `computed` 2026-08-20 12:35 IST, two independent sides that reconcile: market-data's own counters read **15 × HTTP 200** for `/api/v1/market/context/day-context` totalling **28.599 s (mean 1.907 s)**, while `ay-strategy-signal-service` logged **8 `ResourceAccessException` read timeouts across 15 sweeps = 53%**. ⚠️ **The two together are the whole finding: the server COMPLETED every request and the client had already walked away on eight of them.** So this is not a hang and not an error — it is a routinely-slow endpoint sitting at **95% of a 2000 ms budget** (`ContextClient:36`, `factory.setReadTimeout(Duration.ofMillis(2000))`), which puts roughly half the distribution over the line by construction. ⚠️ **Pre-existing — NOT introduced by #1420 or [#1426](https://github.com/prashantm912/artha-yantra-2/pull/1426)**; surfaced incidentally by the 10:05 scheduled probe, which estimated ~40% from a smaller sample. ⚠️ **Do NOT reach for the timeout knob first.** A bigger budget is a legitimate remedy for a slow endpoint and a mask for a slow QUERY, and nothing here has yet asked WHY a context read costs 1.9 s — that is the open question, not the number. Next step is a measurement: where the 1.9 s goes inside the `day-context` handler. | measured 2026-08-20 12:35 IST: `http_server_requests_seconds_{count,sum}` on `ay-market-data-service:8081/actuator/prometheus`, cross-read against `docker logs ay-strategy-signal-service --since 4h` | clean (coverage loss, no money path) | **OPEN — opened 2026-08-20, unstarted. Deliberately NOT fixed: the owner ruled measure-then-decide, because picking the remedy before knowing where the 1.9 s goes is how a hang gets hidden behind a wider window.** |
+| H32 | `context-shift-phone-volume-cliff` | ⚠️ **`CONTEXT_SHIFT` insights are below the phone floor today ONLY because a data window is short, and that window closes by itself — on roughly 2026-09-19 the volume arrives with no deploy, no config change and nobody choosing it.** `computed` 2026-08-20 from the live digest: every options digest reads `dataTrust: DEGRADED` with `trustReasons: ['ATM IV rank over 38 sessions (< 60-session floor)']`, and `ContextShiftGenerator:133` maps DEGRADED to `Severity.INFO` — below the NOTICE phone floor. **At 60 IV sessions the digest flips to OK, the severity becomes NOTICE, and every option metric becomes phone-eligible at once.** Volume arithmetic: candidates dedupe per `(scope, metric)` on a 45-minute cooldown (`InsightProperties:145`) against a 15-minute sweep, so ONE key can re-fire ~8× a session; there are **nine keys** (four option metrics × two underlyings, plus `market:GAP_OPEN`), bounding the uncapped worst case near **77 phone notifications per session**. ⚠️ **The estimate is untested in the only way that matters: not one underlying-scoped `CONTEXT_SHIFT` has EVER been delivered** (`market:GAP_OPEN` 5 all-time), so nobody has observed the real rate — which is an argument for a bound, not against one. ⚠️ **Compounding, and worth stating plainly: this row became visible only because [[H31]] and the #1420 double-encode were being investigated. A scheduled behaviour change with no commit behind it is invisible to every gate we own — CI, review, and the ledger all key on someone making a change.** | measured 2026-08-20 12:35 IST: `GET /api/v1/market/context/options-digest?name=NIFTY%2050` in-container; cooldown + threshold defaults read from `InsightProperties.java:140-145`; severity mapping `ContextShiftGenerator.java:133` | clean (bounds an owner-facing notification volume DOWNWARD; default-on, `0` disables) | **BUILT 2026-08-20 — owner decided the same day to cap before the cliff rather than during the flood.** `artha.insights.delivery.context-shift-daily-phone-cap`, default 6, bounds PHONE delivery only — the row is still written and WS is untouched. ⚠️ Known, deliberate weakness recorded in the javadoc: it is a first-N budget, so a genuine 14:30 shift can be dropped after a noisy morning spends it. Raise the number rather than assume the shape. |
 
 ⚠️ **Deliberately NOT promoted, twice checked (shard C, and again at closeout):** `task_019321d3` and
 `task_2938fa28` are **CONTENT-UNRECOVERABLE** — `git log -S` finds exactly ONE introducing commit each

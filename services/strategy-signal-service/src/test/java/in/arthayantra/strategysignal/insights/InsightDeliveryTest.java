@@ -34,8 +34,10 @@ class InsightDeliveryTest {
   private static final Clock CLOCK =
       Clock.fixed(Instant.parse("2026-08-20T06:00:00Z"), ZoneOffset.UTC);
 
-
   private static final ObjectMapper MAPPER = new ObjectMapper();
+
+  /** Per-test (JUnit builds a fresh instance per method), so counter assertions cannot leak. */
+  private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
   private static final OffsetDateTime NOW = OffsetDateTime.parse("2026-07-26T09:00:00+05:30");
 
   @Test
@@ -45,7 +47,8 @@ class InsightDeliveryTest {
     InsightProperties properties = new InsightProperties(null, null, null, null, null, null, null, null, null, null);
     InsightPublisher publisher =
         new InsightPublisher(
-            mock(StringRedisTemplate.class), MAPPER, events, repository, properties, CLOCK);
+            mock(StringRedisTemplate.class), MAPPER, events, repository, properties, CLOCK,
+            new SimpleMeterRegistry());
 
     assertThat(publisher.publish(insight(Severity.NOTICE, "market"))).isFalse();
     assertThat(properties.delivery().ws()).isFalse();
@@ -226,6 +229,10 @@ class InsightDeliveryTest {
     }
 
     verify(events, times(2)).publishEvent(any(InsightDeliveryAlert.class));
+    assertThat(meters.find("ay_insight_context_shift_phone_suppressed_total").counter().count())
+        .as("the DROP path must be counted — a cap that suppresses silently hides its own"
+            + " misconfiguration, and this count is what sizes the cap")
+        .isEqualTo(3.0);
   }
 
   @Test
@@ -289,12 +296,13 @@ class InsightDeliveryTest {
     verify(events, times(5)).publishEvent(any(InsightDeliveryAlert.class));
   }
 
-  private static InsightPublisher publisher(
+  private InsightPublisher publisher(
       InsightProperties.Delivery delivery,
       ApplicationEventPublisher events,
       InsightRepository repository) {
     return new InsightPublisher(mock(StringRedisTemplate.class), MAPPER, events, repository,
-        new InsightProperties(null, null, null, null, null, null, null, null, null, delivery), CLOCK);
+        new InsightProperties(null, null, null, null, null, null, null, null, null, delivery), CLOCK,
+        meters);
   }
 
   private static Insight insight(Severity severity, String scope) {

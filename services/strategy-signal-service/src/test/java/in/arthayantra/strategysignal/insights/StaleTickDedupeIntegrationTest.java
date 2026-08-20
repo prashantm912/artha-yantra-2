@@ -51,7 +51,6 @@ class StaleTickDedupeIntegrationTest extends StrategySignalIntegrationTestBase {
   private static final Clock CLOCK =
       Clock.fixed(Instant.parse("2026-08-20T06:00:00Z"), ZoneOffset.UTC);
 
-
   @Autowired private InsightRepository repository;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private ObjectMapper objectMapper;
@@ -122,7 +121,8 @@ class StaleTickDedupeIntegrationTest extends StrategySignalIntegrationTestBase {
             mock(ApplicationEventPublisher.class),
             repository,
             properties(new InsightProperties.Delivery(false, false, false, Severity.NOTICE, 6)),
-            CLOCK);
+            CLOCK,
+            new SimpleMeterRegistry());
     new InsightEngine(
             List.of(new StaleTickGenerator()),
             repository,

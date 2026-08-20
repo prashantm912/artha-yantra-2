@@ -236,9 +236,10 @@ public record InsightProperties(
    * <p>⚠️ <b>Why {@code contextShiftDailyPhoneCap} exists, and why it is armed BEFORE it is needed.</b>
    * CONTEXT_SHIFT candidates are deduped per {@code (scope, metric)} on a 45-minute cooldown
    * ({@code shiftCooldownMinutes}) and the sweep runs every 15 minutes across the session, so ONE key
-   * can legitimately re-fire ~8 times a day. There are nine keys today (four option metrics x two
-   * underlyings, plus {@code market:GAP_OPEN}), which bounds the uncapped worst case near 77 phone
-   * notifications in a session.
+   * can legitimately fire ~9 times a day (the initial crossing plus ~8 re-fires: a key first
+   * crossing at 09:15 fires 09:15/10:00/.../15:15). There are nine keys today (four option metrics x
+   * two underlyings, plus {@code market:GAP_OPEN}), which bounds the uncapped worst case near
+   * <b>81</b> phone notifications in a session, and nearer 90 if the 09:00 sweep can fire.
    *
    * <p>None of that is visible right now, and that is the trap: every options digest currently reads
    * {@code dataTrust: DEGRADED} ("ATM IV rank over 38 sessions (< 60-session floor)", measured live

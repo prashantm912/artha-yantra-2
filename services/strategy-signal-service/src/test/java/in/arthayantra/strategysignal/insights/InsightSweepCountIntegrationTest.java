@@ -43,7 +43,6 @@ class InsightSweepCountIntegrationTest extends StrategySignalIntegrationTestBase
   private static final Clock CLOCK =
       Clock.fixed(Instant.parse("2026-08-20T06:00:00Z"), ZoneOffset.UTC);
 
-
   private static final String SYMBOL = "H25CNT";
 
   @Autowired private InsightRepository repository;
@@ -108,7 +107,8 @@ class InsightSweepCountIntegrationTest extends StrategySignalIntegrationTestBase
             mock(ApplicationEventPublisher.class),
             repository,
             properties(new Delivery(false, false, false, Severity.NOTICE, 6)),
-            CLOCK);
+            CLOCK,
+            new SimpleMeterRegistry());
 
     return new InsightEngine(
             List.of(new SellDecisionGenerator(properties(null))),

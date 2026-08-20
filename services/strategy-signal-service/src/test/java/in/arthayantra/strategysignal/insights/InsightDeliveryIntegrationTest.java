@@ -38,7 +38,6 @@ class InsightDeliveryIntegrationTest extends StrategySignalIntegrationTestBase {
   private static final Clock CLOCK =
       Clock.fixed(Instant.parse("2026-08-20T06:00:00Z"), ZoneOffset.UTC);
 
-
   @Autowired private InsightRepository repository;
   @Autowired private InsightController controller;
   @Autowired private NotificationRepository notificationRepository;
@@ -73,7 +72,8 @@ class InsightDeliveryIntegrationTest extends StrategySignalIntegrationTestBase {
             events,
             repository,
             properties(new InsightProperties.Delivery(false, true, false, Severity.NOTICE, 6)),
-            CLOCK);
+            CLOCK,
+            new SimpleMeterRegistry());
     publisher.publish(muted);
     publisher.publish(unmuted);
 
@@ -338,7 +338,8 @@ class InsightDeliveryIntegrationTest extends StrategySignalIntegrationTestBase {
             events,
             repository,
             properties(new InsightProperties.Delivery(false, true, false, Severity.NOTICE, 6)),
-            CLOCK);
+            CLOCK,
+            new SimpleMeterRegistry());
     return new InsightEngine(
         List.of(generator),
         repository,

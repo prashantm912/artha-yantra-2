@@ -3,6 +3,8 @@ package in.arthayantra.strategysignal.insights;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.strategysignal.signals.InsightDeliveryAlert;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -46,6 +48,7 @@ public class InsightPublisher {
   private final Severity severityFloor;
   private final int contextShiftDailyPhoneCap;
   private final Clock clock;
+  private final Counter contextShiftPhoneSuppressed;
 
   /** Guarded by {@code this} — see {@link #claimPhoneBudget}. */
   private LocalDate budgetDay;
@@ -59,7 +62,8 @@ public class InsightPublisher {
       ApplicationEventPublisher events,
       InsightRepository repository,
       InsightProperties props,
-      Clock clock) {
+      Clock clock,
+      MeterRegistry meters) {
     this.redis = redis;
     this.objectMapper = objectMapper;
     this.events = events;
@@ -70,6 +74,14 @@ public class InsightPublisher {
     this.severityFloor = props.delivery().severityFloor();
     this.contextShiftDailyPhoneCap = props.delivery().contextShiftDailyPhoneCap();
     this.clock = clock;
+    // ⚠️ The DROP path is counted, not just the moment the budget is spent. A cap that suppresses
+    // silently hides its own misconfiguration -- and this count is precisely the number
+    // InsightProperties.Delivery's javadoc tells the owner to size the cap from. Same reason
+    // TokenResolverAdapter counts its -BE fallback.
+    this.contextShiftPhoneSuppressed =
+        Counter.builder("ay_insight_context_shift_phone_suppressed_total")
+            .description("CONTEXT_SHIFT insights withheld from phone channels by the daily budget")
+            .register(meters);
   }
 
   /**
@@ -122,7 +134,14 @@ public class InsightPublisher {
    *
    * <p>{@code synchronized} because the sweep is scheduled but {@code publish} is not contractually
    * single-threaded, and a torn read of the day rollover would either double the budget or zero it
-   * mid-session.
+   * mid-session. Measured callers: the {@code @Scheduled} sweeps in {@code InsightSweeper} and the
+   * {@code @Async("notifierExecutor")} path from {@code InsightEngine.onSignalEmitted}.
+   *
+   * <p>⚠️ The counter is PROCESS-LOCAL, so a mid-session redeploy silently re-grants a full budget:
+   * the real guarantee is "at most N per process per IST day", not per day. The failure direction is
+   * over-delivery, which is exactly today's status quo, so this is a documented limit rather than a
+   * defect — but it also means the "budget spent" log line below can fire twice in one day and is
+   * NOT a reliable once-per-day marker.
    */
   private synchronized boolean claimPhoneBudget(Insight insight) {
     if (contextShiftDailyPhoneCap == 0
@@ -138,6 +157,7 @@ public class InsightPublisher {
       contextShiftPhonedToday = 0;
     }
     if (contextShiftPhonedToday >= contextShiftDailyPhoneCap) {
+      contextShiftPhoneSuppressed.increment();
       return false;
     }
     contextShiftPhonedToday++;

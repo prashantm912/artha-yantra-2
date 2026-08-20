@@ -67,7 +67,7 @@ public class StrategyEvidenceReader {
       insights.latestStrategyEvidenceSnapshots(before).forEach((id, ev) -> yesterday.put(id, toPrior(ev)));
       return new StrategyEvidenceInputs(today, board, yesterday, graduated);
     } catch (RuntimeException e) {
-      log.debug("insight strategy-evidence scan unavailable: {}", e.getMessage());
+      log.warn("insight strategy-evidence scan FAILED (returning empty): {}", e.getMessage());
       return new StrategyEvidenceInputs(today, List.of(), Map.of(), Set.of());
     }
   }
@@ -96,7 +96,11 @@ public class StrategyEvidenceReader {
               });
       return new SellDecisionInputs(today, sells);
     } catch (RuntimeException e) {
-      log.debug("insight sell-decision scan unavailable: {}", e.getMessage());
+      // WARN, not DEBUG: root is INFO, so a DEBUG line here is never emitted -- and this catch
+      // returns an EMPTY result, which is exactly what a legitimate zero-row scan returns. A real
+      // scan failure was therefore indistinguishable from "nothing to report", at a level nobody
+      // sees. Same "absent vs empty" shape as ledger H24. Found while tracing H25.
+      log.warn("insight sell-decision scan FAILED (returning empty): {}", e.toString());
       return new SellDecisionInputs(today, List.of());
     }
   }

@@ -99,14 +99,37 @@ public class MinerviniSwingScheduler {
     }
   }
 
-  /** 16:00 IST settle: evaluate every held stop against this session's own daily bar. */
-  @Scheduled(cron = "${artha.minervini.swing.cron:0 0 16 * * MON-FRI}", zone = "Asia/Kolkata")
+  /**
+   * 18:52 IST settle: evaluate every held stop against this session's own daily bar.
+   *
+   * <p>⚠️ <b>18:52, not 16:00, and the hour is load-bearing</b> (ledger H27). Most cash equities
+   * have NO intraday 1d bar at all — their session bar is written by the 18:45 bhavcopy EOD ingest.
+   * Measured 2026-08-18: of the 15 held minervini symbols, 12 first appeared at 18:45:10 from
+   * BHAVCOPY and only 3 ever carried a KITE 1d bar. So a 16:00 settle priced the stops off the
+   * PREVIOUS session's close for 14 of 14 holdings, {@code MarketDataCandlesClient} logged
+   * {@code candle response STALE ... data used unchanged}, and the batch still reported
+   * "0 exits, 0 exit-skipped" — a clean run over a stale bar.
+   */
+  @Scheduled(cron = "${artha.minervini.swing.cron:0 52 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void run() {
-    LocalDate session = LocalDate.now(clock.withZone(IST));
+    // ⚠️ BEFORE the intent write, not after. The cron is MON-FRI so it fires on NSE holidays, and a
+    // holiday has no close to settle. Recording an intent for a day the batch will never mark would
+    // make SwingBatchCanary page "DID NOT RUN" for a session that never existed, repeatedly, and a
+    // past session can never acquire a run marker. The previous session was settled on its own
+    // evening; if it was genuinely missed, the 08:35 catch-up is the remediation path.
+    java.util.Optional<LocalDate> settle = recorder.scheduledSettleSession();
+    if (settle.isEmpty()) {
+      log.info(
+          "{} swing settle skipped — {} is not an NSE trading day (no close to settle)",
+          doctrine.batchName(),
+          LocalDate.now(clock.withZone(IST)));
+      return;
+    }
+    LocalDate session = settle.get();
     try {
       // recordSettled, NOT recordScheduled: this is the AUTHORITATIVE reading and it must overwrite
       // whatever the intraday ticks provisionally observed. The flag can move between 09:05 and
-      // 16:00, and letting the morning guess stand meant a disarmed family could still take entries
+      // the settle, and letting the morning guess stand meant a disarmed family could still take entries
       // through the catch-up (cross-vendor review, 2026-08-10).
       intents.recordSettled(doctrine.batchName(), session, doctrine.enabled());
     } catch (RuntimeException e) {
@@ -118,8 +141,13 @@ public class MinerviniSwingScheduler {
           session,
           e.getMessage());
     }
-    // sessionDate stays null — this IS the session's own evening, so the batch prices off today's
-    // bar exactly as the 20:00 run did. Only the hour moved.
+    // ⚠️ The comment that used to sit here read "sessionDate stays null — this IS the session's own
+    // evening, so the batch prices off today's bar exactly as the 20:00 run did. Only the hour
+    // moved." That premise was FALSE from the day it was written (#1333): at 16:00 today's daily bar
+    // does not exist yet for a bhavcopy-only symbol, so a null sessionDate silently settled off the
+    // previous session. runScheduled now PINS the settle session — see SwingBatchRecorder — so an
+    // absent session bar is a counted, alerted skip the 08:35 catch-up retries, never a stale
+    // evaluation.
     //
     // runScheduled, NOT a bare runAndRecord: it is the path that turns a thrown batch into a FAILED
     // ops alert instead of a lone log line, and a settle that dies silently means every held stop

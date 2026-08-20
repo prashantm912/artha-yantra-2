@@ -418,6 +418,12 @@ services:
       ARTHA_DATA_QUALITY_EOD_CRON: "${ARTHA_DATA_QUALITY_EOD_CRON:-0 50 18 * * MON-FRI}"
       # equity breadth fold
       ARTHA_BREADTH_MATERIALIZE_CRON: "${ARTHA_BREADTH_MATERIALIZE_CRON:-0 51 18 * * MON-FRI}"
+      # VALUE IS THE CODE DEFAULT, BYTE FOR BYTE - this line changes nothing about live behaviour,
+      # it only makes the knob reachable from .env (#653). Added with V058 (H24 PR-6), which
+      # TRUNCATEs equity_breadth_daily and lets the boot pass refill it bounded by this number:
+      # if it turns out wrong on deploy night, correcting it must not require a Maven build while
+      # the table sits empty.
+      ARTHA_BREADTH_BACKFILL_DAYS: "${ARTHA_BREADTH_BACKFILL_DAYS:-240}"
       # bhavcopy-vs-Kite close reconciliation
       ARTHA_BHAVCOPY_CLOSE_CRON: "${ARTHA_BHAVCOPY_CLOSE_CRON:-0 58 18 * * MON-FRI}"
       # Coverage floor for that canary: below this many comparable symbols it never reports GREEN.
@@ -429,7 +435,9 @@ services:
       # here, and deliberately left for a separate change rather than widened into this one.
       ARTHA_BHAVCOPY_CLOSE_MIN_COMPARED: "${ARTHA_BHAVCOPY_CLOSE_MIN_COMPARED:-100}"
       # buyable alerts (bean is @ConditionalOnProperty-disabled today, so inert)
-      ARTHA_MINERVINI_BUYABLE_ALERTS_CRON: "${ARTHA_MINERVINI_BUYABLE_ALERTS_CRON:-0 53 18 * * MON-FRI}"
+      # Moved 18:53 -> 18:59 to free 18:53 for the manas-arora swing settle (ledger H27). It only
+      # needs to follow its own screen (18:47); nothing downstream reads it.
+      ARTHA_MINERVINI_BUYABLE_ALERTS_CRON: "${ARTHA_MINERVINI_BUYABLE_ALERTS_CRON:-0 59 18 * * MON-FRI}"
       ARTHA_MD_SOURCE_OPTIONANALYTICS: ${ARTHA_MD_SOURCE_OPTIONANALYTICS:-native}
       # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.
       ARTHA_UPSTOX_ANALYTICS_ENABLED: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:-false}
@@ -606,6 +614,7 @@ services:
       ARTHA_INSIGHTS_DELIVERY_NTFY_ENABLED: ${ARTHA_INSIGHTS_DELIVERY_NTFY_ENABLED:-false}
       ARTHA_INSIGHTS_DELIVERY_TELEGRAM_ENABLED: ${ARTHA_INSIGHTS_DELIVERY_TELEGRAM_ENABLED:-false}
       ARTHA_INSIGHTS_DELIVERY_SEVERITY_FLOOR: ${ARTHA_INSIGHTS_DELIVERY_SEVERITY_FLOOR:-NOTICE}
+      ARTHA_INSIGHTS_DELIVERY_CONTEXT_SHIFT_DAILY_PHONE_CAP: ${ARTHA_INSIGHTS_DELIVERY_CONTEXT_SHIFT_DAILY_PHONE_CAP:-6}
       # §18.4: app origin for the scalp alert's /orders deep link. Blank = no link (default); set to the
       # reachable app host (e.g. Tailscale) to arm it. Arm-able via .env without an image rebuild.
       ARTHA_NOTIFIER_APP_BASE_URL: ${ARTHA_NOTIFIER_APP_BASE_URL:-}
@@ -673,8 +682,11 @@ services:
       ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT: ${ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT:-1.0}
       # batch/evaluator crons (Asia/Kolkata) — quoted (the value has spaces)
       ARTHA_GRADUATION_PROMOTION_CRON: "${ARTHA_GRADUATION_PROMOTION_CRON:-0 55 18 * * MON-FRI}"
-      ARTHA_MINERVINI_SWING_CRON: "${ARTHA_MINERVINI_SWING_CRON:-0 0 16 * * MON-FRI}"
-      ARTHA_MANAS_ARORA_SWING_CRON: "${ARTHA_MANAS_ARORA_SWING_CRON:-0 2 16 * * MON-FRI}"
+      # ⚠️ 18:52/18:53, NOT 16:00/16:02 (ledger H27). The settle must run AFTER the 18:45 bhavcopy
+      # EOD ingest: most cash equities have no intraday 1d bar, so at 16:00 the batch priced every
+      # held stop off the PREVIOUS session's close and reported a clean run doing it.
+      ARTHA_MINERVINI_SWING_CRON: "${ARTHA_MINERVINI_SWING_CRON:-0 52 18 * * MON-FRI}"
+      ARTHA_MANAS_ARORA_SWING_CRON: "${ARTHA_MANAS_ARORA_SWING_CRON:-0 53 18 * * MON-FRI}"
       # ---- Paper reconciler cron passthroughs (added 2026-08-11) ----
       # Same as the market-data block: values are the code defaults byte for byte, and the only
       # change is that an .env override now reaches Spring instead of being swallowed (#653).

@@ -17,7 +17,7 @@ them. That file is the whole reason this skill exists rather than a one-line not
 
 | | `qwen3.5:9b` | `qwen3.8:27b-q4_K_M` |
 |---|---|---|
-| size / speed | 6.6 GB · **43 tok/s** · 86% GPU @16k | 17 GB · **2.6 tok/s** · 28% GPU (dense, offloaded) |
+| size / speed | 6.6 GB · **43 tok/s idle · 9.7 tok/s under load** · 86% GPU @16k | 17 GB · **2.6 tok/s** · 28% GPU (dense, offloaded) |
 | lane | **interactive** — answers in seconds | **unattended** — minutes; queue it, do something else |
 | never | writes code. Ever. | verdicts anything |
 
@@ -31,7 +31,7 @@ idle and pay a reload on the next call.
 |---|---|---|---|
 | **CI failure log** → summary | **5/5** | **5/5** | ✅ either. Biggest token win; surefire output is near-extractive |
 | **psql operational dump** | **5/5** | 5/5 (3/5 terse) | ✅ either — **but only with the domain rule stated in the prompt**, see PROMPTING.md |
-| **service log (docker logs)** | **3/5** | **5/5** | ⚠️ q3.8 only. The 9b dropped the batch summary twice and misread a real number once |
+| **service log (docker logs)** | 3/5 terse → **5/5 structure-marked** | **5/5** | ✅ either — **but the 9b needs the CATEGORIES named in the prompt** (service lifecycle / load health / actions taken / risk refusals / warnings-aggregated / batch tally). Terse, it drops the batch summary. See PROMPTING.md |
 | **doc summarization** | ~6/8 | **7/8, zero fabrication** | ✅ q3.8 |
 | **SQL drafting** | partial (ignored format) | **exact rows, dodged the IST trap** | ✅ q3.8, then RUN IT and diff the rows |
 | **commit-message draft** | ✅ most specific of 3 | ✅ | ✅ either — you read the diff anyway |
@@ -54,6 +54,16 @@ idle and pay a reload on the next call.
    **zero answer tokens**. `think:"low"` is accepted by the API and IGNORED by the model.
 6. **One run is not a measurement.** Every capability claim in the table above is ×5. A single pass
    or fail tells you nothing — that error has bitten this repo in both directions in one day.
+7. ⚠️ **PRE-FILTER BEFORE DIGESTING, AND BUDGET MINUTES NOT SECONDS.** Measured 2026-08-17 on a
+   loaded box: a raw 56 k-char `docker logs` pull **never finished (killed at 25+ min)**; the same
+   content stripped to its message field and bounded to 120 lines (19 k chars) took **191 s**. The
+   throughput numbers above are IDLE-box numbers — under the live stack the 9b ran at **9.7 tok/s**,
+   under a quarter of them. **The pre-filter is what makes the lane viable at all**, and it is plain
+   `grep`, not a model.
+8. ⚠️ **`ollama` SERIALISES PER MODEL — a queued call looks exactly like a slow one.** A second
+   `run.py` started while the first was still running sat behind it and hit a 9-minute timeout
+   having computed nothing; that nearly became a recorded "this lane is unusable" verdict. Check
+   `ollama ps` and for a live `python.exe` before timing anything, and never run two probes at once.
 
 ## Calling them
 
@@ -82,6 +92,16 @@ Read `.claude/skills/codex/ROUTING.md` for the authoritative table. In short: lo
 
 - **Digest → then work.** A 8.4k-token log becomes ~320 tokens; you then read the raw lines the
   summary points at. This is the ~96% context reduction and the entire point.
+  ⚠️ **THE TRIGGER IS IN [live-verify](../live-verify/SKILL.md), NOT HERE — go read that gate.**
+  Documenting a lane does not cause it to be used: on 2026-08-17 a full live-diagnosis session ran
+  ~8 `docker logs` pulls, merged three PRs, and made **zero** calls to these models, which were
+  installed and idle the whole time. Nothing at the point of use said to reach for them. **A skill
+  nobody invokes is worth exactly nothing, so the rule now sits in the runbook where the command is
+  typed.** The gate's decisive test — worth repeating because it prevents the OPPOSITE error:
+  **if you already know the string you are looking for, `grep` it and do NOT call a model.** A
+  targeted grep is exact, complete and unfabricated; swapping in a digest makes that result worse.
+  These models earn their keep only on WIDE, undifferentiated output you are reading to find out
+  what happened.
 - **Candidates → then review.** `candgen.py` on the diff, dedupe, hand the survivors to the review
   round as leads. It found a real defect at rank 1 once; it also duplicated itself heavily and found
   nothing the builder had not already flagged. Treat it as a confirmation net.

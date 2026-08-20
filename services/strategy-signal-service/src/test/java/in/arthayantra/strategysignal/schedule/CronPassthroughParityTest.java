@@ -51,7 +51,11 @@ class CronPassthroughParityTest {
    * the whole file execute zero assertions and pass — the guard-that-checks-nothing shape. Lowering
    * this number is a deliberate act that must be justified in the PR that does it.
    */
-  private static final int EXPECTED_JOB_COUNT = 7;
+  // 6 before 2026-08-14; +1 for the H18 boot catch-up cron, +2 for the two H27 swing settles.
+  // Both sides of that merge ADDED jobs to the same list, so the union is the correct resolution --
+  // taking either side's count alone would make the size assertion pass while silently dropping the
+  // other side's jobs from the parity sweep, which is the one failure this file cannot afford.
+  private static final int EXPECTED_JOB_COUNT = 9;
 
   private static final List<Job> JOBS =
       List.of(
@@ -93,7 +97,19 @@ class CronPassthroughParityTest {
           new Job(
               "artha.swing.catchup-cron",
               "ARTHA_SWING_CATCHUP_CRON",
-              SRC + "swing/SwingBatchCatchUp.java"));
+              SRC + "swing/SwingBatchCatchUp.java"),
+          // The two swing settles. Both have carried a compose passthrough since #623 and neither
+          // was ever pinned here, so the compose copy and the annotation default were free to drift
+          // — which is precisely what this file exists to stop. Added 2026-08-19 with ledger H27,
+          // the PR that moves both crons and therefore has to touch both copies.
+          new Job(
+              "artha.minervini.swing.cron",
+              "ARTHA_MINERVINI_SWING_CRON",
+              SRC + "minervini/MinerviniSwingScheduler.java"),
+          new Job(
+              "artha.manas-arora.swing.cron",
+              "ARTHA_MANAS_ARORA_SWING_CRON",
+              SRC + "manas/ManasAroraSwingScheduler.java"));
 
   @Test
   @DisplayName("the catalogue still covers every job it claims to")

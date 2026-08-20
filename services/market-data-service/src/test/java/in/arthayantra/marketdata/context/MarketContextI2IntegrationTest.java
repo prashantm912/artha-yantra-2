@@ -45,7 +45,7 @@ class MarketContextI2IntegrationTest extends MarketDataIntegrationTestBase {
   private static final LocalDate OWN_BHAVCOPY_FROM = LocalDate.of(2026, 11, 2);
   private static final LocalDate OWN_BHAVCOPY_TO = LocalDate.of(2026, 12, 15);
   private static final List<String> OWN_BHAVCOPY_SYMBOLS =
-      List.of("CTXRISER", "CTXFALLER", "TCS", "INFY", "HDFCBANK");
+      List.of("CTXRISER", "CTXFALLER", "TCS", "INFY", "HDFCBANK", "CTXBE", "CTXSM");
 
   @Autowired MockMvc mockMvc;
   @Autowired JdbcTemplate jdbc;
@@ -147,6 +147,45 @@ class MarketContextI2IntegrationTest extends MarketDataIntegrationTestBase {
         .andExpect(jsonPath("$.deliveryOutliers[0].z").isNotEmpty())
         .andExpect(jsonPath("$.returnsWindow").value("1w"))
         .andExpect(jsonPath("$.dataTrust").value("OK")); // clean window, not stale
+  }
+
+  /**
+   * H24 PR-4: every fold here reads the EQ+BE cash universe, and nothing wider. Same window and
+   * shape as the test above, plus a BE symbol that MUST be counted and an SM symbol that must not.
+   *
+   * <p>SM is the load-bearing half: it is not exotic (352 symbols on the latest live session, more
+   * than BE's 229), and nothing anywhere pins {@code SERIES_PREDICATE}'s literal value — which is
+   * exactly the "future well-meaning consolidation" {@code CashEquityUniverse:29-31} warns about.
+   * Without it this test would detect only a straight reversion to {@code series = 'EQ'}.
+   */
+  @Test
+  void equityDigestCountsTheCashUniverseAndNothingWider() throws Exception {
+    LocalDate end = OWN_BHAVCOPY_TO;
+    for (int i = 21; i >= 0; i--) {
+      LocalDate d = end.minusDays(i);
+      double riser = 100 + (21 - i);
+      double faller = 200 - (21 - i);
+      seedBhav(d, "CTXRISER", riser - 1, riser, (i == 0) ? 85.0 : (i % 2 == 0 ? 32.0 : 28.0));
+      seedBhav(d, "CTXFALLER", faller + 1, faller, 40.0);
+      // A BE decliner: real cash equity, must vote. Mirrors the faller so it is unambiguously down.
+      seedBhav(d, "CTXBE", "BE", faller + 1, faller, 40.0);
+      // An SME riser: must NOT vote, in advanceDecline OR in the above-MA universe.
+      seedBhav(d, "CTXSM", "SM", riser - 1, riser, 40.0);
+    }
+
+    mockMvc
+        .perform(get("/api/v1/market/context/equity-digest").param("date", end.toString()))
+        .andExpect(status().isOk())
+        // EQ-only reads 1/1 and universe20 2; admitting SM reads 2/2 and universe20 4.
+        .andExpect(jsonPath("$.advanceDecline.advances").value(1))
+        .andExpect(jsonPath("$.advanceDecline.declines").value(2))
+        .andExpect(jsonPath("$.advanceDecline.total").value(3))
+        .andExpect(jsonPath("$.aboveMa.universe20").value(3))
+        .andExpect(jsonPath("$.aboveMa.above20").value(1))
+        // advDecSeries is the third fold that MATERIALLY widens, and it is externally observable.
+        // Three-way discriminating in this fixture: EQ-only 0.5000, EQ+BE 0.3333, +SM 0.5000.
+        // String, not number — ArthaJacksonAutoConfiguration serializes BigDecimal via ToString.
+        .andExpect(jsonPath("$.breadthThrust.advRatioMa").value("0.3333"));
   }
 
   @Test
@@ -300,13 +339,19 @@ class MarketContextI2IntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   private void seedBhav(LocalDate date, String symbol, double prevClose, double close, double delivPer) {
+    seedBhav(date, symbol, "EQ", prevClose, close, delivPer);
+  }
+
+  private void seedBhav(
+      LocalDate date, String symbol, String series, double prevClose, double close, double delivPer) {
     jdbc.update(
         "INSERT INTO nse_eod_bhavcopy"
             + " (trade_date, symbol, series, prev_close, open_price, high_price, low_price, last_price,"
             + "  close_price, avg_price, ttl_trd_qnty, turnover_lacs, no_of_trades, deliv_qty, deliv_per, fetched_at)"
-            + " VALUES (?,?,'EQ',?,?,?,?,?,?,?,1000,1,10,500,?,now()) ON CONFLICT DO NOTHING",
+            + " VALUES (?,?,?,?,?,?,?,?,?,?,1000,1,10,500,?,now()) ON CONFLICT DO NOTHING",
         java.sql.Date.valueOf(date),
         symbol,
+        series,
         prevClose,
         close,
         close,

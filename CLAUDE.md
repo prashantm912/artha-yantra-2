@@ -252,15 +252,29 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   `GET /api/v1/signal-rejections/dot-health` (per-dot gate-input liveness),
   `GET /api/v1/market/health/ingest` + the `/data-ops/ingest-health` page (per-source EOD ingest
   coverage over `marketdata.ingest_runs`, #686/#699), and the scheduled canaries (ingest-coverage
-  08:45, notifier-health 08:30, paper reconcilers 21:15, PartialBucketCanary every 60s — all IST)
-  — check these BEFORE hand-digging a "feed looks dead" / "batch missed" report.
-  **Measured evening order, 2026-08-04** (do NOT quote the YAML cron defaults — they differ from
-  what is deployed, and reading `${artha.minervini.cron:0 50 19 * * MON-FRI}` as "19:50" put a wrong
-  time into four separate reports the same night): **19:30** CA refresh rides the nightly BHAVCOPY
-  job · **19:31** `MINERVINI_SCREEN` + `MANAS_SCREEN` · **19:35** `MINERVINI_PLANE_DIVERGENCE`
-  (source `MINERVINI_SCHEDULER`) · **19:45** market-context · **19:50** data-quality · **19:55**
-  equity-breadth · **21:15** paper reconcilers. Read `marketdata.ingest_runs` +
-  `marketdata.canary_runs`/`strategy.canary_runs` for the real times, never the defaults.
+  08:45, notifier-health 08:30, paper reconcilers 08:50/08:52, PartialBucketCanary every 60s — all
+  IST) — check these BEFORE hand-digging a "feed looks dead" / "batch missed" report.
+  **Measured schedule, re-read 2026-08-17 from `docker inspect` — #1358 (`34a7d39c`) MOVED EVERY JOB
+  INSIDE 08:00–19:00 IST and the reconcilers to MORNING.** The block that used to sit here listed
+  19:30–21:15 and was ~13 days stale; it had itself been added as a "measured" correction, which is
+  exactly why a dated cron list in a doc cannot be trusted — **re-read `docker inspect` every time
+  the value is load-bearing** (this stale block reached a #1354 review comment and would have driven
+  a whole `expectedNotBefore` table off wrong numbers). Never quote the YAML `${ENV:default}` values;
+  they differ from what is deployed.
+  Morning: **08:30** swing-canary + notifier-health · **08:35** swing-catchup (⚠️ the ONLY path that
+  takes swing ENTRIES — see below) · **08:45** ingest-coverage · **08:50** paper-reconciliation ·
+  **08:52** past-expiry-recon. Afternoon: **16:00** minervini-swing · **16:02** manas-swing ·
+  **16:05** bhavcopy-close-prefetch. Evening: **18:20** upstox-canary · **18:45** bhavcopy-eod ·
+  **18:46** nse-eod · **18:47** minervini-screen · **18:48** manas-screen · **18:49** market-context ·
+  **18:50** data-quality · **18:51** equity-breadth · **18:53** buyable-alerts · **18:54**
+  heartbeat-swing · **18:55** graduation · **18:56**/**18:57** insights · **18:58** bhavcopy-close.
+  ⚠️ **The 16:00 swing batch is an EXITS-ONLY pass and legitimately reports 0 candidates** — the
+  screens that feed it run at 18:47/18:48, so the entries pass is the NEXT MORNING's 08:35 catch-up
+  (`SwingBatchCatchUp:276` guards on `hasRunWithEntries`, not `hasRun`, precisely so the 16:00 marker
+  cannot suppress it). A `swing_catchup_runs` row missing before 08:35 is **not** evidence of a
+  missed batch — reading it that way produced a false "Friday's screens were never consumed" alarm
+  on 2026-08-17. Read `marketdata.ingest_runs` + `marketdata.canary_runs`/`strategy.canary_runs` for
+  the real times, never the defaults.
 - **3m reads are a read-time 1m→3m rollup** (`CandleRepository.rangeRolledFromOneMinute`, #365): the
   live SignalEngine 3m-primary depends on this rollup. The unused `candles_3m` cagg + its refresh
   policy were DROPPED (V027, #427) — 3m has no materialized view; only the 1m base feeds it.
@@ -329,7 +343,11 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   MUTUALLY-EXCLUSIVE beans (`LiveKiteConfig:241`) — flipping the quote/ticker source to Upstox/OpenAlgo REMOVES
   the Kite bean entirely (`UpstoxQuoteGateway:75` drops unmapped keys with no Kite delegate), so a live miss
   does NOT fall through to Kite. Kite-as-fallback holds only while the source flag stays Kite (the current
-  default, W-U4 declined). Composite primary+fallback is unbuilt. Drift caught by
+  default). ⚠️ **`application.yml:104` and `UpstoxQuoteGateway:39` BOTH claim "Kite stays the fallback for
+  unmapped keys" — that comment is FALSE; there is no delegate and unmapped keys are silently absent.**
+  Composite primary+fallback is unbuilt — but **W-U4 is NO LONGER declined: the owner reversed it
+  2026-08-17 and asked for Upstox primary + Kite as a rate-limit fallback (ledger H26).** Building that
+  composite is the item; the blocker is instrument identity, not candles. Drift caught by
   3 contract canaries (Kite/Upstox/OpenAlgo, CONSUMED-field sentinels). Full map: `docs/symbol-normalization.md`.
 - **Run the Playwright e2e vs a running mock stack:** `cd e2e &&
   E2E_OWNER_PASSWORD=<your .env owner pw> npx playwright test` — global-setup reuses a
@@ -617,7 +635,17 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
 - ⚠️ **BOTH equity source tables are RETRO-MUTABLE — a persisted decision row CANNOT be reproduced
   from current data** (found 2026-08-03, and it silently invalidates A-vs-B measurements). `candles`
   is retroactively rewritten (one symbol's ENTIRE July series was rewritten on 2026-07-31), and
-  `nse_eod_bhavcopy` was **still gaining rows for April–June trade dates months later**. So comparing
+  `nse_eod_bhavcopy` was **still gaining rows for April–June trade dates months later**.
+  ⚠️ **THE TWO HALVES ARE DIFFERENT MECHANISMS AND THIS BULLET USED TO CONFLATE THEM (corrected
+  2026-08-17, N30).** `candles` genuinely MUTATES — an existing bar's value changes from A to B.
+  `nse_eod_bhavcopy` does NOT: measured on the 2026-08-10 event that prompted this, all **13**
+  historical trade dates it wrote had **ZERO rows beforehand** and gained 40,862 — **absence
+  becoming presence, never a rewrite.** **The warning is unchanged and still binding** (a screen that
+  ran when 2026-04-30 was missing saw a different world from one run today, so a persisted decision
+  still cannot be reproduced), but the DETECTION differs and that is why the distinction earns its
+  place: a bhavcopy gap is visible as a per-date row COUNT, while a `candles` rewrite is invisible
+  unless you compare VALUES. Do not reach for a value-diff on bhavcopy or conclude `candles` is safe
+  because row counts match. So comparing
   "what the screen decided then" against "what the data says now" compares two different worlds and
   reports the difference as a divergence. **Any cross-table or historical A-vs-B comparison must gate
   on `fetched_at`** — and note `fetched_at` is an UPSERT timestamp, not first-seen, so it bounds

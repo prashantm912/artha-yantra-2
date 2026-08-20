@@ -265,7 +265,8 @@ artha:
     # I2 — context breadth + rejection intelligence (INT §6.2/§4.2/§2.2/§10.2). YAML-only knobs (still
     # shadow mode); every value is hashed into config_hash, so a threshold change is visible in each row.
     context:
-      underlyings: [NIFTY, SENSEX]      # options-digest underlyings scanned per 15-min context sweep
+      underlyings: [NIFTY 50, SENSEX]   # options-digest underlyings scanned per 15-min context sweep
+                                        # CANONICAL keys only — a bare `NIFTY` 404s and fail-softs silently (task_ffefe53e)
       pcr-delta: 0.15                   # |ΔPCR since open| crossing → CONTEXT_SHIFT
       max-pain-drift: 50                # |max-pain drift| (index points) since open → CONTEXT_SHIFT
       straddle-pct: 20                  # |ATM straddle Δ%| vs open → CONTEXT_SHIFT
@@ -300,6 +301,10 @@ artha:
       ntfy-enabled: ${ARTHA_INSIGHTS_DELIVERY_NTFY_ENABLED:false}
       telegram-enabled: ${ARTHA_INSIGHTS_DELIVERY_TELEGRAM_ENABLED:false}
       severity-floor: ${ARTHA_INSIGHTS_DELIVERY_SEVERITY_FLOOR:NOTICE}
+      # H32: max CONTEXT_SHIFT insights that may reach a PHONE in one IST day; 0 = unbounded.
+      # Rows are still written and WS is untouched. Env-tunable because the right number is not
+      # knowable until the IV-rank cliff lands and the real rate is observable.
+      context-shift-daily-phone-cap: ${ARTHA_INSIGHTS_DELIVERY_CONTEXT_SHIFT_DAILY_PHONE_CAP:6}
     # I2 sweep crons (IST). Market-hours context sweep + the calendar-driven EOD/T-1/weekly jobs.
     context-cron: ${ARTHA_INSIGHTS_CONTEXT_CRON:0 */15 9-15 * * MON-FRI}
     eod-cron: ${ARTHA_INSIGHTS_EOD_CRON:0 5 16 * * MON-FRI}

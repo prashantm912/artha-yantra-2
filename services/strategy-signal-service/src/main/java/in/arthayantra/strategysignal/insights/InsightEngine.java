@@ -102,9 +102,9 @@ public class InsightEngine {
   }
 
   /** The data-trust sweep (called by {@link InsightSweeper}). Fail-soft. */
-  public void runTrustSweep() {
+  public SweepResult runTrustSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
-    run(GenerationContext.forTrust(trustService.snapshot(), now), now);
+    return run(GenerationContext.forTrust(trustService.snapshot(), now), now);
   }
 
   /**
@@ -112,10 +112,10 @@ public class InsightEngine {
    * (open bracketed positions over stalled feed instruments, the §12 interim health/data trigger).
    * Fail-soft.
    */
-  public void runRiskSweep() {
+  public SweepResult runRiskSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
     StaleTickSnapshot staleTick = portfolioReader.staleTickScan(contextClient.staleFeedKeys());
-    run(GenerationContext.forRisk(bookHeatReader.read(), staleTick, now), now);
+    return run(GenerationContext.forRisk(bookHeatReader.read(), staleTick, now), now);
   }
 
   /**
@@ -124,32 +124,32 @@ public class InsightEngine {
    * (the session's rejections closest to firing). Every digest read is fail-soft — an absent digest
    * simply yields no crossing for that underlying (§6.5 honest degrade). Fail-soft overall.
    */
-  public void runContextSweep() {
+  public SweepResult runContextSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
     List<MarketContext.OptionsShift> shifts = new java.util.ArrayList<>();
     for (String underlying : props.context().underlyings()) {
       contextClient.optionsShift(exchangeFor(underlying), underlying).ifPresent(shifts::add);
     }
     MarketContext market = new MarketContext(shifts, contextClient.marketStructure().orElse(null));
-    run(GenerationContext.forContext(market, rejectionReader.nearMissScan(), now), now);
+    return run(GenerationContext.forContext(market, rejectionReader.nearMissScan(), now), now);
   }
 
   /** The EOD sweep (called by {@link InsightSweeper}): REJECTION_RAIL_TREND + HYGIENE. Fail-soft. */
-  public void runEodSweep() {
+  public SweepResult runEodSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
-    run(GenerationContext.forEod(rejectionReader.railTrendScan(), portfolioReader.hygieneScan(), now), now);
+    return run(GenerationContext.forEod(rejectionReader.railTrendScan(), portfolioReader.hygieneScan(), now), now);
   }
 
   /** The T-1 expiry sweep (called by {@link InsightSweeper}): EXPIRY_EVENT. Fail-soft. */
-  public void runExpirySweep() {
+  public SweepResult runExpirySweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
-    run(GenerationContext.forExpiry(portfolioReader.expiryScan(), now), now);
+    return run(GenerationContext.forExpiry(portfolioReader.expiryScan(), now), now);
   }
 
   /** The weekly quality-report job (called by {@link InsightSweeper}): QUALITY_REPORT. Fail-soft. */
-  public void runQualityReport() {
+  public SweepResult runQualityReport() {
     OffsetDateTime now = OffsetDateTime.now(clock);
-    run(GenerationContext.forQuality(repository.qualityStats(props), now), now);
+    return run(GenerationContext.forQuality(repository.qualityStats(props), now), now);
   }
 
   /**
@@ -157,18 +157,18 @@ public class InsightEngine {
    * evaluator): STRATEGY_EVIDENCE. Reads today's graduation board vs yesterday's persisted snapshot
    * (§5.2), writes today's snapshot + any crossing insight. Fail-soft.
    */
-  public void runStrategyEvidenceSweep() {
+  public SweepResult runStrategyEvidenceSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
-    run(GenerationContext.forStrategyEvidence(strategyEvidenceReader.strategyEvidenceScan(), now), now);
+    return run(GenerationContext.forStrategyEvidence(strategyEvidenceReader.strategyEvidenceScan(), now), now);
   }
 
   /**
    * The sell-decision sweep (called by {@link InsightSweeper}, after the swing batches persist V037):
    * SELL_DECISION over the unacknowledged SELL rows (§5.3). Fail-soft.
    */
-  public void runSellDecisionSweep() {
+  public SweepResult runSellDecisionSweep() {
     OffsetDateTime now = OffsetDateTime.now(clock);
-    run(GenerationContext.forSellDecision(strategyEvidenceReader.sellDecisionScan(), now), now);
+    return run(GenerationContext.forSellDecision(strategyEvidenceReader.sellDecisionScan(), now), now);
   }
 
   /** The index exchange for an underlying's insight scope (SENSEX → BSE, else NSE). */
@@ -178,8 +178,16 @@ public class InsightEngine {
         : "NSE";
   }
 
-  /** Run every generator over the context and persist each candidate (idempotent upsert). */
-  private void run(GenerationContext ctx, OffsetDateTime now) {
+  /**
+   * Run every generator over the context and persist each candidate (idempotent upsert).
+   *
+   * <p>Returns what actually happened, split NEW vs REFRESHED, so the caller can say so out loud. <b>A zero return is a real answer, not an absence</b> — that distinction is the whole
+   * point (ledger H25): before this, a sweep that ran and legitimately found nothing was
+   * byte-identical, from outside, to a sweep that never fired at all.
+   */
+  private SweepResult run(GenerationContext ctx, OffsetDateTime now) {
+    int fresh = 0;
+    int refreshed = 0;
     for (InsightGenerator gen : generators) {
       List<InsightCandidate> candidates;
       try {
@@ -189,12 +197,39 @@ public class InsightEngine {
         continue;
       }
       for (InsightCandidate c : candidates) {
-        persist(c, now);
+        switch (persist(c, now)) {
+          case NEW -> fresh++;
+          case REFRESHED -> refreshed++;
+          case FAILED -> {
+            /* already logged at WARN inside persist */
+          }
+        }
       }
+    }
+    return new SweepResult(fresh, refreshed);
+  }
+
+  /**
+   * What one sweep did. ⚠️ {@code refreshed} is NOT a second insight — the upsert re-stamps an
+   * existing OPEN row on its dedupe key, so a single persistent condition refreshes on EVERY sweep.
+   * Reporting the two separately is the point: a log line saying "1 insight" every 5 minutes reads
+   * as 288 insights a day, and a number that will be trusted must not need a footnote.
+   */
+  public record SweepResult(int fresh, int refreshed) {
+    @Override
+    public String toString() {
+      return fresh + " new / " + refreshed + " refreshed";
     }
   }
 
-  private void persist(InsightCandidate c, OffsetDateTime now) {
+  /** Whether a candidate became a NEW row, refreshed an existing one, or never landed. */
+  enum Persisted {
+    NEW,
+    REFRESHED,
+    FAILED
+  }
+
+  private Persisted persist(InsightCandidate c, OffsetDateTime now) {
     try {
       OffsetDateTime cooldownUntil = c.cooldownMinutes() == null ? null : now.plusMinutes(c.cooldownMinutes());
       // The delivery decision needs the prior occurrence BEFORE the upsert overwrites/replaces it.
@@ -251,8 +286,10 @@ public class InsightEngine {
       if (upsert.inserted() || escalated || cooldownExpired) {
         publisher.publish(upsert.insight());
       }
+      return upsert.inserted() ? Persisted.NEW : Persisted.REFRESHED;
     } catch (RuntimeException e) {
       log.warn("insight persist failed ({}): {}", c.dedupeKey(), e.toString());
+      return Persisted.FAILED;
     }
   }
 

@@ -69,8 +69,17 @@ matters.**
 - A service log is ~200 undifferentiated lines where the model must choose which six matter → it
   chose differently each run → **3/5 on the 9b** (dropped the batch summary twice).
 
-If a new task is the second kind, either mark the structure yourself in the prompt, or ask a direct
-question instead of "summarize this".
+If a new task is the second kind, **mark the structure yourself in the prompt** — and this is
+measured, not advice: naming the six CATEGORIES an operator wants (service lifecycle / load health /
+actions taken / risk refusals / warnings-aggregated / batch tally) took the 9b's service-log score
+from **3/5 to 5/5**, with all six categories present in every run. Naming the categories is fair;
+naming the values would be leading.
+
+⚠️ **But structure-marking fixes COVERAGE, not COMPREHENSION.** In the same 5 runs the 9b still
+misread `would-enter 5` as "5 blocked" — and on inspection **the probe file's own log line is
+truncated mid-word** (`(would-enter 5, admit`), so no reader could have got it right. That was the
+FOURTH probe defect found in one day. Before blaming a model for a wrong number, check the number is
+actually present and intact in what you handed it.
 
 This supersedes the earlier "structure vs needle" framing, which did not survive measurement.
 

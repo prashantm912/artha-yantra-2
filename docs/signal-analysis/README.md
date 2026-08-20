@@ -290,6 +290,18 @@ Run in order; each answers one question. Canned SQL in §6.
     the 460,005 opening bucket, 11.9% of the 141,245 next one), so any pct that quiets the thick
     half leaves the thin half WARNing with no partner left to corroborate it — manufacturing the
     unpaired shape instead of removing it. Pinned by test; leave it at 0.
+    ⚠️ **AMENDED 2026-08-19 — a THIRD benign-adjacent class: RECONNECT INFLATION.** The boot-fresh
+    opening-bucket class has a mid-session sibling: after a ticker outage + reconnect, the tick-agg
+    baseline reset attributes the outage-gap's cumulative traded volume to the reconnect minute, so
+    the canary fires ONE unpaired WARN whose magnitude ≈ the volume traded during the gap. First
+    observed 2026-08-19: reconnect 13:27:51 IST after a ~25-min Kite outage → WARN on the 13:27
+    bucket, in-memory 1m sum 70,590 vs broker 3m bar 7,085 (shortfall −63,505, ~10×). Two
+    discriminators: (a) a `kite ticker connected` / feed-watchdog restart line within the WARN's
+    bucket, and (b) the DB 1m bars for the bucket sum EXACTLY to the canary's 3m value (the broker
+    side is correct — the inflation lives only in the in-memory 1m mirror, so the rails, which read
+    the broker-corrected 3m rollup, are untouched). An unpaired mid-session WARN with NO adjacent
+    reconnect remains the alarming shape (the same session's 14:54 −910 and 15:09 −8,970 are
+    unexplained and on watch as NEW-6).
 18. **Identify the SIGNAL CONTRACT from the data before running any ground-truth query** (added
     2026-07-27) — the live scalper signal series is the **dated front future**, and
     `FuturesUniverseResolver` rolls it at the ~08:40 IST re-resolve near monthly expiry. On 2026-07-27
@@ -809,7 +821,36 @@ Run in order; each answers one question. Canned SQL in §6.
     extended to routine deploys — or hold the deploy until after ~19:00 when the post-market run
     has grepped them. A findings file written after a log-loss must carry the caveat prominently:
     absence of log evidence is not evidence of a quiet session.
-38. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+38. **The engine-reload path runs ON the signal-eval thread and blocks on market-data HTTP — a
+    market-data deploy or outage starves evaluation, and the subscriber watchdog's `eval-stall`
+    ERROR is the detector** (added 2026-08-17, first live measurement) — `SignalEngine.reload`
+    (reached from `drainReloadOnly` on the `signal-eval` thread — deliberate, so config swaps land
+    at bar boundaries) calls `FuturesUniverseResolver.resolve` → a synchronous RestClient call to
+    market-data. On 2026-08-17, three consecutive reloads each took ~70–80 s (normally sub-second
+    "unchanged") in exactly the window market-data was being recreated for a post-close deploy
+    (`engine_reloads` 15:26:58 / 15:28:16 / 15:29:23 IST vs the new container's `StartedAt`
+    15:36:22); the watchdog fired `eval-stall — bars arriving but not evaluated for 180s (receipt
+    19s old)` at 15:28:20 **with a thread-stack capture showing the WAITING HTTP frame**, and a
+    clean sub-second reload followed at 15:37:15 once market-data was healthy. Zero trading impact
+    (post-close; every scalper window shut by 15:21) — but the same sequence mid-session is an
+    evaluation outage for the deploy's duration, which is the measured mechanism behind the
+    standing "no mid-session deploys" proposal. Standing check on any session that overlaps a
+    deploy or a market-data restart:
+    ```sql
+    -- eval-stall forensics: a row here is strong FAIL evidence (absence proves nothing, §4.3)
+    SELECT occurred_at AT TIME ZONE 'Asia/Kolkata', kind, left(detail,140)
+    FROM strategy.subscriber_health_events WHERE occurred_at >= :d0 ORDER BY 1;
+    -- reload cadence: consecutive rows spaced ~60–90 s apart (instead of one-off) fingerprint a
+    -- slow resolve; compare against `docker inspect <mds> --format '{{.State.StartedAt}}'` (UTC)
+    SELECT reload_at AT TIME ZONE 'Asia/Kolkata', installed, loaded, unresolved, load_errors
+    FROM strategy.engine_reloads WHERE reload_at >= :d0 ORDER BY 1;
+    ```
+    The watchdog's ERROR log line carries the `signal-eval thread stack` — read it before
+    theorising; on 08-17 it named `FuturesUniverseResolver.resolve:102` directly. Note the boot
+    variant of the same dependency: a strategy-signal boot while market-data is unready installs
+    `0 loaded / 38 unresolved` and self-heals on a later reload (08-14: ~90 s; 08-17: ~10 min) —
+    judge on `unresolved == 0` reached before the open, and watch that transient's growth.
+39. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

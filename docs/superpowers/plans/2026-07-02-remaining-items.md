@@ -27,8 +27,8 @@ them across 28 NSE symbols.
 
 ⚠️ **THE CODEX RATION RESET ON 2026-08-20 AND THE FIRST SLOT PAID FOR ITSELF.** Spent on
 [#1418](https://github.com/prashantm912/artha-yantra-2/pull/1418) (H27, money tier) per the owner's
-call to take the live-cost item first rather than strict queue order. It returned **two Majors, and
-CI could not have found either**:
+call to take the live-cost item first rather than strict queue order. **Round 1 returned two Majors
+that CI could not have found; round 2 APPROVED after both were fixed:**
 
 1. ⚠️ **The FIX introduced a defect.** Resolving a weekday NSE holiday back to the previous trading
    day looked harmless — the exit evaluation genuinely is a no-op — but the run-marker upsert
@@ -44,7 +44,14 @@ CI could not have found either**:
    compose passed every existing test — parity, window membership, minute collisions. Reproduced
    literally: with the old crons back, `CronPassthroughParityTest` **6/6 PASS**, and only the new
    ordering test fails. **The H27 defect could have shipped back green.** Now pinned by
-   `OperatingWindowTest.theSwingSettlesRunAfterTheBarTheyEvaluateAgainst`.
+   `OperatingWindowTest.theSwingSettlesRunAfterTheBarTheyEvaluateAgainst`; round 2 confirmed the
+   constraints uniquely force 18:52/18:53 given the collision catalogue.
+
+⚠️ **Round 2 also caught a third, smaller thing worth naming because it is the day's recurring
+shape: a test NAMED for the manual `POST /run` path actually exercised `runScheduled`.** The manual
+path goes through `MinerviniSwingController:64` → `runAndRecord(doctrine)` with `sessionDate = null`
+and never reaches the new code. **A test name is a coverage claim, and it goes stale exactly like a
+comment does.**
 
 **Merged 2026-08-20:** [#1426](https://github.com/prashantm912/artha-yantra-2/pull/1426)
 (`28e51a3d`) — and it is the one that actually closes the NIFTY 50 context sweep. ⚠️ **#1420 did NOT
@@ -104,8 +111,9 @@ was refused today. So the budget stays an ASSUMPTION; what is now known is that 
 minutes of wall-clock per round, which is the number that matters for sequencing a day. Two
 non-obvious costs the harness imposed: a benign `"type":"error"` event about skill-description
 budget (NOT a failure — a monitor keyed on it will report a false death), and `rg` is absent on this
-box so Codex burns a turn discovering that. ⚠️ **Round 2 has not returned yet, so the "one slot =
-one converged review" assumption is itself still unmeasured.**
+box so Codex burns a turn discovering that. ⚠️ **Round 2 returned APPROVED, so one slot DID
+converge in two rounds — n=1, on a diff whose findings were both structural rather than subtle. Do
+not generalise that into a planning assumption yet.**
 
 **Open, unstarted:** H28 (close planes disagree — reframed, the canary threshold question is
 live; ⚠️ **a THIRD consecutive session fired YELLOW on 2026-08-19, on TIINDIA — a different symbol

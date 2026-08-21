@@ -272,12 +272,6 @@ class PaperAccountServiceEquityMarkTest {
   }
 
   /**
-   * THE SIGN CASE — the whole reason all-or-nothing exists. A book whose MARKED position is a WINNER
-   * and whose UNMARKED position is a LOSER reported equity ABOVE the truth under per-position
-   * fallback (the loser's loss was erased), loosening every {@code mode: pct} rail. Withholding the
-   * whole book must land BELOW the all-marked figure, never above it.
-   */
-  /**
    * The mirror of the test below, and the case the all-or-nothing version got WRONG (cross-vendor
    * review Critical, 2026-08-21).
    *
@@ -316,6 +310,17 @@ class PaperAccountServiceEquityMarkTest {
         .isTrue();
   }
 
+  /**
+   * THE CHERRY-PICK CASE — why a POSITIVE partial is still withheld to 0. A book whose MARKED
+   * position is a WINNER and whose UNMARKED one is a LOSER reported equity ABOVE the truth under
+   * per-position fallback (the loser's loss was erased), loosening every {@code mode: pct} rail.
+   *
+   * <p>⚠️ It does NOT land below the all-marked figure, and an earlier version of this note claimed
+   * it did: degraded equity here is 150,000.00 against a fully-marked truth of 149,900.00 — still
+   * 100 ABOVE. What withholding buys is a bound on HOW FAR above (the assertion is
+   * {@code isLessThan(150,500)}, the per-position figure), not a sign guarantee. The sign guarantee
+   * only exists in the other direction, and that is {@link #aMeasuredLossIsNeverDiscardedByWithholding}.
+   */
   @Test
   void anUnmarkedLoserMustNotPushEquityAboveTheFullyMarkedFigure() {
     PositionRow winner = row(1, BOOK, "WINNER", 10, "100.00"); // marks at 150 -> +500

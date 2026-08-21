@@ -53,10 +53,11 @@ public class PaperAccountService {
           int unmarkedPositions,
       @Schema(
               description =
-                  "True when unrealized is WITHHELD: at least one open position cannot be marked, so"
-                      + " `unrealized` reports 0 for this book rather than a partial sum that would"
-                      + " depend on which marks happen to be missing. Read with unmarkedPositions"
-                      + " (N) and openPositions (M).")
+                  "True when unrealized is WITHHELD UPWARD: at least one open position cannot be"
+                      + " marked, so `unrealized` reports min(0, partial) for this book — a measured"
+                      + " loss survives, while a positive partial sum is withheld to 0 because the"
+                      + " unmarked rows could be losers. Read with unmarkedPositions (N) and"
+                      + " openPositions (M).")
           boolean unrealizedWithheld) {}
 
   private final PaperAccountRepository account;
@@ -111,28 +112,34 @@ public class PaperAccountService {
   }
 
   /**
-   * Σ mark-to-market unrealized over a book's open positions ({@code book} null → all books),
-   * withheld ENTIRELY for any book that cannot mark every one of them.
+   * Σ mark-to-market unrealized over a book's open positions ({@code book} null → all books).
+   * A book that cannot mark every one of them withholds UPWARD: it reports {@code min(0, partial)}.
    *
-   * <p><b>All-or-nothing, per BOOK</b> (owner decision, 2026-08-13). Per-position fallback let a
-   * partially-marked book mix marked and cost-valued positions, and the error then depended on WHICH
-   * marks were missing: a book whose marked positions are winners and whose unmarked ones are losers
-   * reports equity ABOVE the truth, loosening every {@code mode: pct} rail — the one direction an
-   * entry gate must never fail in. Withholding the whole book removes that cherry-picking: the
-   * degraded output is a single explainable quantity (cost-basis equity) instead of an arbitrary
-   * subset sum, and it is EXACTLY what these books computed before this class existed, so nothing is
-   * refused and no behaviour is surprising.
+   * <p><b>Withhold upward, per BOOK</b> (owner decision 2026-08-13, corrected by cross-vendor review
+   * 2026-08-21). A positive partial sum is withheld to 0 — that is the cherry-pick this refuses,
+   * because a book whose marked rows are winners and whose unmarked ones are losers would otherwise
+   * report equity ABOVE the truth and loosen every {@code mode: pct} rail. A NEGATIVE partial sum is
+   * reported in full: never discard a loss you have actually measured.
    *
-   * <p><b>What this does NOT give you, stated plainly because it was claimed and is false:</b> it is
-   * not a one-sided sign guarantee. Withholding reports 0, so a book whose TRUE aggregate unrealized
-   * is NEGATIVE still reports equity above the truth — measured: true −90 reports 0, overstating by
-   * 90. It is strictly better than per-position on the cherry-picking case (+10 overstated becomes
-   * −90 understated) and strictly worse when the MARKED subset is itself net-negative (−10
-   * understated becomes +40 overstated). The honest invariant is narrower: the error is always the
-   * book's WHOLE unrealized, never a subset chosen by which marks happen to be missing. Sign is
-   * one-directional only while a book's aggregate unrealized is ≥ 0 — true for both swing books today
-   * (+9,093.77 / +18,120.20) but a property of the book, not of the mechanism. Only refusing to
-   * compute bounds the sign outright, and that was declined for availability.
+   * <p><b>Why not the flat ZERO this used to return, stated plainly because it shipped and was
+   * wrong:</b> discarding every mark meant reporting 0 for a book that is LOSING, and 0 is above the
+   * truth exactly then — fail-OPEN on a money rail. The old analysis held only for the two all-cash
+   * swing books, where every row is unmarked before and after so 0 == 0; it was never true of a
+   * PARTIALLY marked book. The reachable consumer is {@code scalper} (V021: 20 option slots, {@code
+   * daily_loss_limit} and {@code daily_profit_target} both enabled, both read through {@code
+   * dayPnl}), where one unmarkable option among twenty erased the whole book's open loss from its
+   * own daily stop.
+   *
+   * <p><b>The honest invariant, and it is DOWNWARD, not "conservative":</b> the reported figure is a
+   * lower bound versus both alternatives — {@code min(0,p) ≤ 0} and {@code min(0,p) ≤ p}. That is
+   * what the safety rails want, and daily-loss / {@code max_deployment_pct} / the {@code mode: pct}
+   * caps all tighten. ⚠️ {@code daily_profit_target} reads the SAME {@code dayPnl} and a lower number
+   * makes it LOOSER — name it rather than claim universal conservatism. The trade is still right:
+   * daily-loss is the safety rail and gains up to |partial|, while the profit target loses at most
+   * |partial| in a state where the flat ZERO was already failing to trip. And when the unmarked rows
+   * are large winners the clamp sits FARTHER from truth than the flat ZERO did — in the safe
+   * direction, but farther. Only refusing to compute bounds the sign outright, and that was declined
+   * for availability.
    *
    * <p>Per BOOK and never globally: manas and minervini have separate equity, so one book's missing
    * mark must not zero the other's. The {@code null} aggregate therefore sums each book's own
@@ -168,8 +175,10 @@ public class PaperAccountService {
    * <p><b>What the clamp preserves.</b> A net-POSITIVE partial sum is still withheld to 0 — that is
    * the cherry-pick this method rightly refuses, since the unmarked rows could be losers. A
    * net-NEGATIVE partial sum is reported in full: never discard a loss you have actually measured.
-   * The result therefore dominates both a flat ZERO and a raw partial sum in the conservative
-   * direction, and {@link #unrealizedWithheld} still flags the degraded state either way.
+   * The result is therefore a LOWER BOUND versus both a flat ZERO and a raw partial sum — downward,
+   * which is not the same as conservative for every rail: {@code daily_profit_target} reads the
+   * same {@code dayPnl} and gets looser. See {@link #unrealizedTotal} for why that trade is still
+   * right. {@link #unrealizedWithheld} still flags the degraded state either way.
    */
   private BigDecimal unrealizedForBook(List<PositionRow> open) {
     BigDecimal total = BigDecimal.ZERO;
@@ -199,9 +208,11 @@ public class PaperAccountService {
   }
 
   /**
-   * True when unrealized is being WITHHELD — i.e. at least one open position cannot be marked, so
-   * {@link #unrealizedTotal} is reporting 0 for that book rather than a partial sum. For the {@code
-   * null} aggregate, true when ANY book is withholding.
+   * True when unrealized is being WITHHELD UPWARD — i.e. at least one open position cannot be
+   * marked, so {@link #unrealizedTotal} is reporting {@code min(0, partial)} for that book rather
+   * than the full partial sum. For the {@code null} aggregate, true when ANY book is withholding.
+   * ⚠️ It stays TRUE even when a measured loss IS reported — reporting the loss does not mean the
+   * book is fully marked, and a caller reading this as "the number is complete" would be wrong.
    *
    * <p>This exists so the degraded state cannot hide. A silently-zero unrealized is precisely how the
    * original defect survived unnoticed for months; the fix must not inherit that invisibility. Rides

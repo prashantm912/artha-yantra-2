@@ -1,5 +1,7 @@
 package in.arthayantra.strategysignal.swing;
 
+import java.time.Clock;
+import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -86,15 +88,27 @@ public class SwingBatchBootCatchUp {
 
   private final SwingBatchCatchUp catchUp;
   private final ThreadPoolTaskScheduler catchUpScheduler;
+  private final SwingCatchUpStateRepository state;
   private final boolean enabled;
+
+  /**
+   * Stamped at CONSTRUCTION, which is the point of it: this bean is built during startup and the
+   * sweep only runs on {@code ApplicationReadyEvent}, so nothing this process claims can predate
+   * this instant — which makes "claimed before it" a sound test for an orphan.
+   */
+  private final Instant startedAt;
 
   /** Wires the sweep, the dedicated catch-up pool the one-shot runs on, and this door's own flag. */
   public SwingBatchBootCatchUp(
       SwingBatchCatchUp catchUp,
       @Qualifier("swingCatchUpTaskScheduler") ThreadPoolTaskScheduler catchUpScheduler,
+      SwingCatchUpStateRepository state,
+      Clock clock,
       @Value("${artha.swing.boot-catchup-enabled:false}") boolean enabled) {
     this.catchUp = catchUp;
     this.catchUpScheduler = catchUpScheduler;
+    this.state = state;
+    this.startedAt = clock.instant();
     this.enabled = enabled;
   }
 
@@ -115,12 +129,43 @@ public class SwingBatchBootCatchUp {
               + " unaffected and still owns the sweep");
       return;
     }
+    releaseOrphanedClaims();
     try {
       catchUp.catchUpIfMissed();
     } catch (RuntimeException failure) {
       // Fail-soft: the 08:35 cron and the next morning's sweep are both still live, and a boot that
       // dies here would take the whole service's startup path with it.
       log.error("swing boot catch-up failed: {}", failure.getMessage(), failure);
+    }
+  }
+
+  /**
+   * Frees claims a previous process died holding, so this boot's sweep can retake them.
+   *
+   * <p>Without this the Critical stands: a hard death mid-sweep leaves a {@code RUNNING} row that
+   * {@code claim()} refuses for {@code STALE_LEASE_MINUTES} (30), and with the 08:35 cron and the
+   * 09:05 boot cutoff <b>that lease cannot expire while there is still time to act</b> — restarting
+   * the service does nothing and the session's entries are forfeited.
+   *
+   * <p>⚠️ In its OWN try/catch, and deliberately so: a failure here must not cost the sweep. The
+   * sweep is the thing that takes entries; this only widens what the sweep is allowed to retake.
+   */
+  private void releaseOrphanedClaims() {
+    try {
+      int released = state.releaseClaimsFrom(startedAt);
+      if (released > 0) {
+        log.warn(
+            "swing boot catch-up: released {} orphaned RUNNING claim(s) held by a process that died"
+                + " before {} — they are PENDING again and this sweep may retake them",
+            released,
+            startedAt);
+      }
+    } catch (RuntimeException failure) {
+      log.error(
+          "swing boot catch-up: could not release orphaned claims ({}) — continuing to the sweep,"
+              + " which simply skips any session still marked RUNNING",
+          failure.getMessage(),
+          failure);
     }
   }
 }

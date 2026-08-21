@@ -80,6 +80,13 @@ class SwingBatchBootCatchUpTest {
   private static final Clock BOOTED_SATURDAY = fixed("2026-08-15T04:30:00Z");
   /** Friday 2026-08-14, 09:05 IST — EXACTLY the cutoff (09:15 open less the 10-minute reserve). */
   private static final Clock BOOTED_0905 = fixed("2026-08-14T03:35:00Z");
+
+  /**
+   * 09:06 IST — INSIDE the gap between the boot door's 09:05 pre-open reserve and the cron's own
+   * 09:15 market-open deadline. The only window in which the two stop-checks disagree, and
+   * therefore the only window that can tell them apart.
+   */
+  private static final Clock CRON_0906 = fixed("2026-08-14T03:36:00Z");
   /** Friday 2026-08-14, 08:59 IST — comfortably clear of the reserve on the accepting side. */
   private static final Clock BOOTED_0859 = fixed("2026-08-14T03:29:00Z");
   /**
@@ -128,6 +135,8 @@ class SwingBatchBootCatchUpTest {
 
     private final Set<LocalDate> pending = new TreeSet<>();
     private final Set<LocalDate> terminal = new TreeSet<>();
+    /** Sessions a dead process still holds a RUNNING claim on — unclaimable until released. */
+    private final Set<LocalDate> orphaned = new TreeSet<>();
     private final List<LocalDate> seeded = new ArrayList<>();
     private final SwingCatchUpStateRepository repo = mock(SwingCatchUpStateRepository.class);
     private final SwingBatchRunRepository runs;
@@ -148,6 +157,16 @@ class SwingBatchBootCatchUpTest {
                     ? Optional.of(new SwingCatchUpStateRepository.Claim(1))
                     : Optional.empty();
               });
+      // An orphaned RUNNING claim: seeded, not pending, and NOT claimable — the state a hard death
+      // leaves behind. Only releaseClaimsFrom may move it back, which is what the Critical is about.
+      when(repo.releaseClaimsFrom(any()))
+          .thenAnswer(
+              call -> {
+                int released = orphaned.size();
+                pending.addAll(orphaned);
+                orphaned.clear();
+                return released;
+              });
       doAnswer(terminalWrite()).when(repo).markDone(any(), any());
       doAnswer(terminalWrite()).when(repo).markAbandoned(any(), any());
       doAnswer(terminalWrite()).when(repo).markAbandoned(any(), any(), any());
@@ -162,7 +181,9 @@ class SwingBatchBootCatchUpTest {
           // Mirrors seedMissing's `WHERE NOT EXISTS (... COALESCE(entries_enabled, true))`: a
           // session whose ENTRIES already ran is not seeded. `hasRun` alone is the 16:00 exits-only
           // marker and would skip every session — the V060 distinction.
-          if (!terminal.contains(session) && !runs.hasRunWithEntries(BATCH, session)) {
+          if (!terminal.contains(session)
+              && !orphaned.contains(session)
+              && !runs.hasRunWithEntries(BATCH, session)) {
             pending.add(session);
           }
         }
@@ -240,7 +261,8 @@ class SwingBatchBootCatchUpTest {
    */
   private SwingBatchBootCatchUp bootCatchUp(
       Clock clock, String cron, boolean bootEnabled, SwingDoctrine... doctrines) {
-    return new SwingBatchBootCatchUp(swingCatchUp(clock, cron, doctrines), inlineScheduler(), bootEnabled);
+    return new SwingBatchBootCatchUp(
+        swingCatchUp(clock, cron, doctrines), inlineScheduler(), ledger.repo, clock, bootEnabled);
   }
 
   /** The sweep itself, always with {@code catchup-enabled=true} — the live production value. */
@@ -378,6 +400,47 @@ class SwingBatchBootCatchUpTest {
         .isEmpty();
     verify(ledger.repo, never()).claim(any(), any(), anyInt());
     verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+  }
+
+  @Test
+  @DisplayName("the CRON keeps its 09:15 deadline — the boot door's 09:05 reserve is not shared")
+  void theCronKeepsItsOwnMarketOpenDeadline() {
+    // ⚠️ Cross-vendor review Major, 2026-08-20. The boot door wants a stricter wall-clock reserve,
+    // but catchUpIfMissed() reaches the family loop by calling catchUp() — the SAME method the
+    // 08:35 cron calls — so a single shared predicate silently moved the LIVE cutoff from 09:15 to
+    // 09:05. A slow cron would then stop ten minutes early and forfeit entries, on a change whose
+    // PR claimed to be inert to the cron path.
+    //
+    // 09:06 is the whole test: past the boot reserve, before the market-open deadline. Under the
+    // shared predicate the loop returns before touching a single session; under the fix it sweeps.
+    SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
+
+    swingCatchUp(CRON_0906, CRON, doctrine).catchUp();
+
+    verify(recorder)
+        .runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+  }
+
+  @Test
+  @DisplayName("a claim orphaned by a hard death is released on boot, so this sweep can retake it")
+  void anOrphanedRunningClaimIsReleasedBeforeTheBootSweep() {
+    // ⚠️ Cross-vendor review Critical, 2026-08-20. A RuntimeException inside a claimed run is
+    // already handled — the caller holds the claim and writes PENDING in its catch. A HARD death
+    // (JVM kill, container stop, power loss) is not: the row stays RUNNING and claim() refuses it
+    // for STALE_LEASE_MINUTES (30). With an 08:35 cron and a boot door that shuts at 09:05, that
+    // lease CANNOT expire while there is still time to act — so restarting the service does
+    // nothing and the session's entries are forfeited.
+    //
+    // The fixture models exactly that: MISSED is seeded but held RUNNING by a dead process, so it
+    // is not in the retryable set and cannot be claimed. Only the release can free it.
+    SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
+    ledger.orphaned.add(MISSED);
+
+    bootCatchUp(BOOTED_0838, CRON, doctrine).onStartup();
+
+    verify(ledger.repo).releaseClaimsFrom(any());
+    verify(ledger.repo).claim(BATCH, MISSED, 30);
+    verify(recorder).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
   }
 
   @Test
@@ -660,7 +723,11 @@ class SwingBatchBootCatchUpTest {
     assertThat(
             SwingBatchBootCatchUp.class
                 .getDeclaredConstructor(
-                    SwingBatchCatchUp.class, ThreadPoolTaskScheduler.class, boolean.class)
+                    SwingBatchCatchUp.class,
+                    ThreadPoolTaskScheduler.class,
+                    SwingCatchUpStateRepository.class,
+                    Clock.class,
+                    boolean.class)
                 .getParameters()[1]
                 .getAnnotation(Qualifier.class)
                 .value())
@@ -669,7 +736,8 @@ class SwingBatchBootCatchUpTest {
     SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
     RecordingScheduler scheduler = new RecordingScheduler();
 
-    new SwingBatchBootCatchUp(swingCatchUp(BOOTED_0838, CRON, doctrine), scheduler, true)
+    new SwingBatchBootCatchUp(
+            swingCatchUp(BOOTED_0838, CRON, doctrine), scheduler, ledger.repo, BOOTED_0838, true)
         .onStartup();
 
     assertThat(scheduler.submitted)

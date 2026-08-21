@@ -250,6 +250,23 @@ public class SwingBatchCatchUp {
       zone = "Asia/Kolkata",
       scheduler = "swingCatchUpTaskScheduler")
   public void catchUp() {
+    // ⚠️ THE LIVE PATH KEEPS THE 09:15 DEADLINE IT ALWAYS HAD. The boot door wants a tighter
+    // wall-clock reserve, but the 08:35 cron reaches the very same family loop, so a single shared
+    // predicate would have quietly moved the LIVE cutoff 10 minutes earlier — which is not what a
+    // change advertised as inert to the cron path may do (cross-vendor review Major, 2026-08-20).
+    // The stop-check is therefore chosen by the CALLER, and this one is the cron.
+    catchUp(this::marketOpenDeadlinePassed);
+  }
+
+  /**
+   * The sweep body, with the per-session stop-check supplied by the caller.
+   *
+   * @param stopBeforeSessionRun consulted between sessions; {@code true} leaves the remainder
+   *     PENDING and retryable. The cron passes {@link #marketOpenDeadlinePassed()} (09:15, the
+   *     historical behaviour); the boot door passes the stricter {@link #preOpenReserveSpent()}
+   *     (09:05), because a boot sweep has no earlier fire to fall back on.
+   */
+  private void catchUp(java.util.function.BooleanSupplier stopBeforeSessionRun) {
     ZonedDateTime now = ZonedDateTime.now(clock.withZone(IST));
     // GATE — never after the market-open deadline. The cron already places this at 08:35, but a cron override or a
     // future caller must not be able to fire an END-OF-DAY batch into a live session (a mid-session
@@ -300,7 +317,7 @@ public class SwingBatchCatchUp {
         continue;
       }
       try {
-        catchUpFamily(doctrine);
+        catchUpFamily(doctrine, stopBeforeSessionRun);
       } catch (RuntimeException e) {
         log.error("swing catch-up for {} failed: {}", doctrine.batchName(), e.getMessage(), e);
       } finally {
@@ -387,7 +404,8 @@ public class SwingBatchCatchUp {
         "swing catch-up: booted {} IST, AFTER today's '{}' fire — replaying the missed sweep on boot",
         now.toLocalTime(),
         cron);
-    catchUp();
+    // The BOOT sweep, and only it, runs under the stricter pre-open reserve.
+    catchUp(this::preOpenReserveSpent);
     return true;
   }
 
@@ -423,7 +441,7 @@ public class SwingBatchCatchUp {
     return out;
   }
 
-  private void catchUpFamily(SwingDoctrine doctrine) {
+  private void catchUpFamily(SwingDoctrine doctrine, java.util.function.BooleanSupplier stopBeforeSessionRun) {
     String batch = doctrine.batchName();
     List<LocalDate> retryable = state.retryableSessions(batch, STALE_LEASE_MINUTES);
     if (retryable == null) {
@@ -445,11 +463,13 @@ public class SwingBatchCatchUp {
       // mid-ENTRY-pass, which skips the exit pass outright and leaves a partial entry set that no
       // later sweep can complete. Stopping here, between sessions, leaves the remainder PENDING and
       // retryable — the safe half of the same decision.
-      if (preOpenReserveSpent()) {
+      if (stopBeforeSessionRun.getAsBoolean()) {
         log.warn(
-            "swing catch-up: pre-open reserve spent during the {} sweep (no session run may start at"
-                + " or after {}) — leaving remaining sessions retryable",
+            "swing catch-up: stop-check tripped during the {} sweep — leaving remaining sessions"
+                + " retryable (cron stops at the {} market-open deadline, a boot sweep at the"
+                + " stricter {} pre-open reserve)",
             batch,
+            MarketCalendar.SESSION_OPEN,
             LATEST_SESSION_RUN_START);
         return;
       }

@@ -12,7 +12,51 @@ the two 2026-07-02 audits (both fix queues fully closed) and the open-PR/issue l
 
 ## 0. Work queue (consolidated 2026-07-10; 2-pass-audited same day)
 
-### 📍 CURRENT STATE — as of 2026-08-21 ~12:00 IST (update this block at every session close)
+### 📍 CURRENT STATE — as of 2026-08-21 ~20:10 IST (update this block at every session close)
+
+⚠️ **DAY-CLOSE 2026-08-21. Eight PRs merged; four fixes DEPLOYED and live-verified; three PRs
+open with their real blockers now known.**
+
+✅ **DEPLOYED 18:03 IST and verified by MEASUREMENT, not by build exit code** — #1427, #1432,
+#1437, #1439. `/vix` **1371 ms cold → 6 ms cached**; `day-context` **1.920 s → 544–647 ms**, ~3×
+under its 2000 ms client budget; the options block non-null for the first time in 27 trading days.
+Engine reload 265: 38 loaded / 0 unresolved / 0 load_errors. 0 ERROR both services.
+⚠️ **#1439 is NOT verified — its counters read 0.0 with zero log lines because the evening screens
+ran from the 18:04 boot catch-up and the gap-fetch path never fired. A zero counter with no log
+lines means NOT RUN, not "works".** First real exercise is Monday; check scheduled 09:45.
+
+✅ **CLOSED TODAY:** [[H28]] (threshold is correct — the rotating YELLOW is p95–p99 working),
+[[H30]]'s Q1+Q2+Q3 (origin is `tools/historical-import/ingest.py`, and the money-path lead is dead
+code with zero production callers), [[H31]], [[H35]], [[H36]] built, the boot-transient watch
+(it is Kite login latency on a cold morning, ~131 s of ~182 s).
+
+⚠️ **OPEN PRs AND THEIR REAL BLOCKERS — two were not what the record said.**
+- **#1283** — Codex re-reviewed 2026-08-21: **REQUEST_CHANGES**, and STEP 0 found the body's
+  claimed `APPROVED` **never happened** (both artifacts end REQUEST_CHANGES; GitHub has no
+  submitted review). Body corrected in place. **New Major:** the exit probe is sized on declared
+  depth (50 rows) while the Chandelier evaluator scans from `entryIndex`, so ARMED reports clean
+  coverage on a long-held position it cannot see. Owner: build next session.
+- **#1354** — its Critical was **already fixed nine days ago** on a sibling branch nobody folded
+  back (`e7aa0e89`). Folded in, 73 commits of main merged (7 conflicts + 1 clean-merge-that-did-
+  not-compile). **Now blocked on a NEW thing: `noTwoJobsCollideOnAMinute` — its 18:59 shutdown
+  check collides with H27's buyable-alerts at 18:59, and the tail has no free minute.** #1354 and
+  [[H37]] are the same problem; owner chose the anchor measurement over retiring buyable-alerts,
+  so #1354 waits on it.
+- **#1368** — reviewed for the first time; **Critical found and fixed** (`1d76c9d3`, `cf89a30a`).
+  `unrealizedForBook` returned a flat ZERO on the first unmarkable row, which is fail-OPEN on the
+  scalper book's own daily-loss rail. Now `min(0, partial)`. Still **HOLD tier, owner decision**.
+
+⚠️ **SCHEDULED:** `measure-bhavcopy-anchor-earliness` (weekdays 18:23, read-only NSE file probe —
+the bar is EVERY session, not most) and `verify-h36-be-inactive-fallback-20260825` (Mon 09:45).
+
+⚠️ **THE DAY'S LESSON, and it repeated four times: A GREEN RED-PROOF IS A FINDING ABOUT THE
+PROOF.** Twice my first proof stayed green because the fixture never reached the path being
+proved (H37's status predicate; #1368's clamp). Twice a reviewer corrected an over-claim of mine
+stated as fact to the owner — "the other 10 tests are the evidence" was true on **2** of 10, and
+"dominates in the conservative direction" dominates DOWNWARD, which is looser for
+`daily_profit_target`. **The record drifts from the code faster than the code drifts from
+correct**, and today that pattern cost #1354 nine days and nearly merged #1283 on an approval
+that never existed.
 
 ⚠️ **2026-08-21, MORNING — WHAT THE SCHEDULED ROUTINES FOUND, AND THE ONE THING THEY GOT WRONG.**
 Both recurring routines PASSED (09:29 liveness gate; 09:42 data-health GREEN — 93 ticked tokens,

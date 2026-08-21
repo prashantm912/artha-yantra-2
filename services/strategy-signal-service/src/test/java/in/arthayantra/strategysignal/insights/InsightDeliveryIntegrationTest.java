@@ -18,7 +18,9 @@ import in.arthayantra.strategysignal.signals.InsightDeliveryAlert;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -32,6 +34,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 /** Integration coverage for persisted rows, owner mutes, and the notification audit ledger. */
 @SpringBootTest(properties = {"spring.profiles.active=mock", "artha.signals.engine-enabled=false"})
 class InsightDeliveryIntegrationTest extends StrategySignalIntegrationTestBase {
+  /** Fixed so the CONTEXT_SHIFT phone budget has a deterministic IST day. */
+  private static final Clock CLOCK =
+      Clock.fixed(Instant.parse("2026-08-20T06:00:00Z"), ZoneOffset.UTC);
 
   @Autowired private InsightRepository repository;
   @Autowired private InsightController controller;
@@ -66,7 +71,9 @@ class InsightDeliveryIntegrationTest extends StrategySignalIntegrationTestBase {
             objectMapper,
             events,
             repository,
-            properties(new InsightProperties.Delivery(false, true, false, Severity.NOTICE)));
+            properties(new InsightProperties.Delivery(false, true, false, Severity.NOTICE, 6)),
+            CLOCK,
+            new SimpleMeterRegistry());
     publisher.publish(muted);
     publisher.publish(unmuted);
 
@@ -330,7 +337,9 @@ class InsightDeliveryIntegrationTest extends StrategySignalIntegrationTestBase {
             objectMapper,
             events,
             repository,
-            properties(new InsightProperties.Delivery(false, true, false, Severity.NOTICE)));
+            properties(new InsightProperties.Delivery(false, true, false, Severity.NOTICE, 6)),
+            CLOCK,
+            new SimpleMeterRegistry());
     return new InsightEngine(
         List.of(generator),
         repository,

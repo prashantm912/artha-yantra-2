@@ -10,7 +10,7 @@ missed, data corruption in flight. It trades the full `ship-a-change` ceremony f
 trades away the parity firewall or the Architect's merge/deploy authority.
 
 **Gate first — is this really a hotfix?** A real crisis (production is broken or bleeding). NOT lazy
-debugging or a "quick" feature — those go through `ship-a-change` / `codex-build`. If unsure, it's not
+debugging or a "quick" feature — those go through `ship-a-change` / `delegated-ship`. If unsure, it's not
 a hotfix.
 
 ## Steps

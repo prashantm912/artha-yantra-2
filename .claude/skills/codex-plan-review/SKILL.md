@@ -3,6 +3,13 @@ name: codex-plan-review
 description: Iterative cross-vendor Codex review of an implementation plan BEFORE build, against our invariants, with a persistent thread
 ---
 
+> # ⚠️ RATIONED — cheapest leverage, use a spare slot here
+> Owner moved to the **$20/month tier** on 2026-08-15. Reviewing a PLAN costs one call and can save a
+> whole build, so this is the best use of a spare slot after the money/parity code reviews are
+> covered. Reserved for plans meeting the size gate (HOLD / migration / money-parity / >~3 files).
+> No slot free → an Opus subagent on a fresh thread reviews the plan instead, same-vendor, record the
+> loss. Full rules: `.claude/skills/codex/ROUTING.md`.
+
 # Codex Plan Review
 
 Second-opinion review of a plan/brief via Codex CLI, before implementation, so design flaws are caught

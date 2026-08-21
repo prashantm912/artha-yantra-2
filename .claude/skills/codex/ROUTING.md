@@ -3,91 +3,182 @@
 Who runs on what, and what to do when a model is unavailable. The skills reference THIS table;
 never hardcode a fallback decision inline in a brief or an ad-hoc command.
 
-## The table (owner revision 2026-07-25 — Opus 5 orchestrates, Fable 5 plans)
+## ⚠️ CODEX IS RATIONED, NOT RETIRED (owner decision, 2026-08-15)
 
-| Role | Primary | Auto fallback (bash) | Cross-vendor / capacity fallback (manual) |
-| --- | --- | --- | --- |
-| **Main loop (Architect)** | **Opus 5** — orchestrator + FINAL GATE; never builds substantive code | — | all skills are main-loop-model-agnostic; another model in the seat still owes every gate below |
-| **Planner** | **Fable 5** — Agent tool, `model: "fable"`; produces the detailed technical implementation plan | — | **Opus 5** writes the plan itself on a capacity error (don't stall the item) |
-| **Builder (draft)** | Codex `gpt-5.6-luna` via `codex-build` — fast/cheap bulk build | `gpt-5.6-sol` (harness retries the chain) | **Sonnet 5** subagent for MECHANICAL work (docs, tests, renames, config, FE slices) · **Opus subagent** (`model: "opus"`, `isolation: "worktree"`) whenever the surface is parity / money / exit doctrine / migrations / the live engine. Same brief content + receipt contract either way (the `delegated-ship` path). |
-| **Builder (refine)** | Codex `gpt-5.6-sol` — reviews+FIXES luna's draft on a fresh `-refine` thread (write access) | — | Architect finishes the fix during self-review if sol is down |
-| **Code review** | opposite vendor of the builder — see the router below | `gpt-5.6-luna` when the reviewer is Codex | **fresh-thread same-vendor** — writer≠reviewer is preserved (different thread) but cross-VENDOR is lost: label the review "same-vendor" in the record |
-| **Plan review** | Codex via `codex-plan-review` (the planner is Fable = Anthropic, so this stays cross-vendor) | `gpt-5.6-luna` | Opus subagent, fresh thread — same-vendor, record the loss |
-| **Advisory ask** | Codex via `codex-ask` | `gpt-5.6-luna` | Opus subagent (plain Agent question) — or skip; ask is never load-bearing |
-| **Recon / Explore** | Claude Explore agents | — | no Codex dependency; always available |
+The owner is moving to the **$20/month tier** (down from $100). Codex is no longer the default
+reviewer for everything — it is a **scarce, budget-gated resource spent only where a second vendor
+has demonstrably earned its keep**. The `codex-*` skills stay enabled; what changes is *when* you
+are allowed to spend a slot.
+
+### The ration rule
+
+| Change class | Reviewer | Waits for a slot? |
+| --- | --- | --- |
+| **money · parity · exit doctrine · migrations · live engine** | **Codex, PRE-MERGE** (`codex-code-review`) | **YES — hold the item** |
+| a plan meeting the size gate (HOLD / migration / money / >~3 files) | **Codex** (`codex-plan-review`) — cheapest leverage in the pipeline | yes, if a slot is free |
+| everything else (clean tier, docs, mechanical, FE slices) | `claude-review` (Opus, fresh thread, distinct lens) | never |
+
+**Pre-merge or not at all.** A Codex slot spent on already-merged code buys an *audit*, not a gate,
+and the two defects that justify this whole mechanism were caught **before** merge (the 2026-07-25
+`premium_pct` one-bar force-exit; Opus catching that sol's own fix would have re-issued the F10
+outage). Never spend a scarce slot reviewing what already shipped — if you want a post-hoc sweep,
+label it an audit so nobody mistakes it for a gate.
+
+**Holding is now a schedule, not a stall.** The old rule — *prefer to hold a parity/money item
+rather than ship it with both builder and reviewer degraded* — becomes practical under a cadence.
+A money/parity item sits with `Cross-vendor review: PENDING (awaiting rationed Codex slot)` and a red
+`verdict` check, which is the DESIGN, not a failure.
+
+⚠️ **A hold has a deadline: two missed slots.** If an item waits through two intended slots, ship it
+with a same-vendor round and record the degradation. The failure mode to avoid is the worst of both —
+delayed shipping *and* no review — which is what happens when a queue has no expiry and nobody keeps it.
+
+### Budget — MEASURE IT, do not assume it
+
+⚠️ **Nobody knows what the $20 tier actually allows.** The plan above assumes roughly a handful of
+real reviews per month; that is an assumption, not a measurement. **On the first review after the
+2026-08-20 reset, record what it consumed against the allowance** and write the number into memory
+topic `codex-builder-lane`. If the real budget turns out to be one or two reviews a month, the
+"hold money items for the slot" rule becomes a throughput problem and the tier table above must
+narrow — better to learn that before it is load-bearing.
+
+### What this costs, stated plainly
+
+Most changes now get a **same-vendor** review. That is weaker than what it replaced, and the loss
+must be written into the verdict line rather than left to imply what it used to. Buy back what
+diversity you can: fresh thread always, a DISTINCT lens per reviewer, more than one reviewer when a
+change can fail in more than one way, and optionally seed the round with local-model candidates.
+
+⚠️ **Local models do NOT restore it.** Seven models scored **0/2** as reviewers. A local model may
+GENERATE candidates for a human-grade reviewer to judge; it may never be the second opinion.
+
+## The table (owner revision 2026-08-15)
+
+| Role | Primary | Fallback |
+| --- | --- | --- |
+| **Main loop (Architect)** | **Opus 5** — orchestrator + FINAL GATE; never builds substantive code | all skills are main-loop-model-agnostic; another model in the seat still owes every gate below |
+| **Planner** | **Fable 5** — Agent tool, `model: "fable"` | **Opus 5** writes the plan itself on a capacity error (don't stall the item) |
+| **Builder** | **Opus subagent** (`model: "opus"`, `isolation: "worktree"`) for parity / money / exit doctrine / migrations / the live engine | **Sonnet 5** subagent for MECHANICAL work only (docs, tests, renames, config, FE slices). Never degrade a money or parity path to Sonnet to save tokens |
+| **Code review** | **money/parity/migration/live-engine → Codex** (`codex-code-review`, rationed slot, PRE-merge) · **everything else → Opus subagent, FRESH thread, distinct lens** | no slot free → hold the item, or after two missed slots ship same-vendor and record it |
+| **Plan review** | **Codex** (`codex-plan-review`) if a slot is free — cheapest leverage | **Opus subagent, fresh thread** (same-vendor, record the loss) |
+| **Advisory ask** | `codex-ask` — ⚠️ never spend a rationed slot on this | Opus subagent, or skip; ask is never load-bearing |
+| **Candidate generation** (pre-review) | `qwen3.8:27b` local, `candgen.py` — see `local-model` skill | optional; skip it, never let it gate |
+| **Log / CI / dump digestion** | `qwen3.5:9b` local (CI, psql) · `qwen3.8:27b` (service logs) | read the raw source yourself |
+| **Recon / Explore** | Claude Explore agents | — |
 
 **When does the Planner stage run?** Only for real items: **HOLD tier, migrations, money/parity
 surfaces, or >~3 files / multi-PR.** A 1-file chip's plan costs more than the chip — go straight to
-a self-contained brief. This is a size gate, not an optional step: an item that meets the bar gets a
-written plan before any code.
+a self-contained brief. This is a size gate, not an optional step.
 
-**Why Fable plans instead of arbitrating at the end** (owner decision 2026-07-25): a second reasoning
-style pays most where it lands *before* code exists — decomposition, design forks, and catching
-"this is already built" (3 of 10 items in one past batch were). As a final arbiter that perspective
-arrives where change is most expensive. Honest cost of the trade: a Codex-built item now sees Codex →
-Opus review → Opus audit (two distinct models at the end, where the old chain had three). The
-mitigation is that the review round stays mandatory and on a fresh thread — do not also collapse it.
+## Review router — writer ≠ reviewer, and buy back diversity where you can
 
-**codex-build pipeline (three perspectives, luna ≠ sol ≠ Opus):** luna DRAFTS (fast/cheap) → sol
-REVIEWS+FIXES the draft (fresh Codex thread, write access) → Architect testing gate → **Opus**
-cross-vendor review (`claude-review`, per the router below) → **Architect receipt audit = final gate**
-→ tiered promotion. Same canonical order as everything else (below); the sol refine is a Codex-internal
-quality pass BEFORE handoff, the Opus review is the cross-vendor gate — both run, not alternatives.
+Every **non-trivial** change gets a *structured* review loop; trivial/docs-only changes skip it (say
+so instead of running a round).
 
-## Review router — reviewer is the opposite vendor of the builder
+**First decide WHICH reviewer** by the ration rule at the top: money / parity / exit doctrine /
+migrations / live engine earn a Codex slot pre-merge; everything else gets `claude-review`. For the
+same-vendor majority, the diversity has to come from somewhere else — three things, in order of value:
 
-Every **non-trivial** change gets a *structured* review loop from the OTHER vendor (not just the
-Architect's audit); trivial/docs-only changes skip it (say so instead of running a round). This is the
-NORMAL path — when the opposite vendor is in an outage (see the ladder below), fall back to same-vendor
-review and RECORD the cross-vendor loss in the review. Pick the review skill by who built it:
+1. **Fresh thread, always.** The reviewer must not have seen the build conversation. This is the
+   minimum and it is not optional — it is now the *only* structural separation left.
+2. **Give the reviewer a distinct LENS**, not a generic "review this". When a change can fail in
+   more than one way, run more than one reviewer with different lenses (correctness / money-path /
+   does-the-test-actually-detect / operational-blast-radius). Perspective diversity is the closest
+   available substitute for vendor diversity.
+3. **Feed it candidates from the local generator** (`candgen.py`, q3.8, no-discard prompt). It is a
+   different model family and it surfaced a real defect at rank 1 once. It also duplicates itself
+   heavily and has found nothing a good builder had not already flagged — a confirmation net, not a
+   discovery engine. **Never let it gate anything.**
 
-| Builder | Vendor | Review with | Reviewer vendor |
-| --- | --- | --- | --- |
-| `codex-build` | OpenAI (Codex) | **`claude-review`** (Opus subagent) | Anthropic ✓ opposite |
-| `ship-a-change` / Architect-direct | Anthropic (Claude) | **`codex-code-review`** (Codex) | OpenAI ✓ opposite |
-| `delegated-ship` (Opus subagent) | Anthropic (Opus) | **`codex-code-review`** (Codex) | OpenAI ✓ opposite |
-| `delegated-ship` (Sonnet 5, mechanical) | Anthropic (Sonnet) | **`codex-code-review`** (Codex) | OpenAI ✓ opposite |
+| Change class (NOT who built it — the tier decides now) | Review with | Note |
+| --- | --- | --- |
+| money · parity · exit doctrine · migrations · live engine | **`codex-code-review`** (rationed slot, pre-merge) | genuine cross-vendor ✓ |
+| clean tier, mechanical, FE slices, ops/alert code | **`claude-review`** (Opus, fresh thread, distinct lens) | same-vendor — record it |
+| trivial / docs-only | none | say so instead of running a round |
 
-⚠️ **A Sonnet build exists only because Codex was unavailable — so its cross-vendor reviewer usually
-is too.** Expect the same-vendor fallback (fresh-thread Opus review) on that path, record the loss,
-and prefer to hold a parity/money item until Codex is back rather than ship it with both the builder
-AND the reviewer degraded. That combination is the weakest configuration this table can produce.
+Reviewers judge against `.claude/skills/codex/checklist.md` and emit
+`APPROVED`/`REQUEST_CHANGES`/`NEEDS_REWORK`. The checklist stays here (path unchanged) so nothing
+else has to move; it is vendor-neutral and always was.
 
-Both reviewers judge against the SAME `.claude/skills/codex/checklist.md` and emit the same
-`APPROVED`/`REQUEST_CHANGES`/`NEEDS_REWORK` tags, so the gate is identical whichever vendor reviews.
-**Plan review is already cross-vendor** (Claude writes the plan, `codex-plan-review` = Codex).
+**Verdict line, PR body.** The literal string `Cross-vendor review:` is the greppable anchor
+`ci-review-verdict.yml` matches — keep it EXACTLY. Three honest forms now:
+```
+Cross-vendor review: APPROVED — gpt-5.6-sol (OpenAI)                      # a rationed slot was spent: genuine cross-vendor
+Cross-vendor review: PENDING (awaiting rationed Codex slot)               # money/parity item on hold — red verdict is the DESIGN
+Cross-vendor review: SKIPPED (clean tier — same-vendor Opus review on a fresh thread, cross-vendor not spent)
+```
+⚠️ Never write `APPROVED — <an Anthropic model> (Anthropic)` and let it read as a cross-vendor pass.
 
 **Canonical order for any change (one sequence everywhere):** orient + classify tier → *(plan, if the
-item meets the size gate)* → build → testing gate **run by the Architect, not the builder** →
-cross-vendor review loop (converge to `APPROVED`) → **Architect receipt audit = the final gate** →
-tiered promotion (owner approval for money/arming/HOLD) → deploy + live-verify → ledger.
+item meets the size gate)* → *(optional: local candidate pass)* → build → testing gate **run by the
+Architect, not the builder** → review loop on a fresh thread (converge to `APPROVED`) → **Architect
+receipt audit = the final gate** → tiered promotion (owner approval for money/arming/HOLD) → deploy +
+live-verify → ledger.
 
-**The review and the audit are two gates. Never merge them into one.** "The orchestrator reviews it
-itself" is only ever *audit on top of a review round*. Proof from 2026-07-25: the cross-vendor review
-found a live Critical that CI structurally could not (`premium_pct` exit rules resolved against the
-INDEX entry price → a one-bar force-exit on every held-PE take), and a later round caught a foreign
-hunk the Architect had already read past during audit. Build → audit, with no review round, would
-have shipped both.
-
-## Detection → response ladder
-
-1. **Model at capacity** (codex runs but errors `at capacity` / `overloaded` / `temporarily
-   unavailable`): the harness (`start.sh`/`resume.sh`) **auto-retries the chain**
-   `$CODEX_MODEL` → `$CODEX_FALLBACK_MODELS` and echoes which model actually served. Override per
-   run: `CODEX_MODEL=... CODEX_FALLBACK_MODELS="m1 m2" ...`; disable: `CODEX_FALLBACK_MODELS=""`.
-2. **Whole chain at capacity**: transient — retry after a delay (10–30 min has worked), OR go
-   cross-vendor now if the queue shouldn't wait (autonomous runs: go now, don't stall).
-3. **Codex CLI down entirely** (command missing, auth broken, hangs): straight to the
-   cross-vendor column. No probe needed — fallback at failure time, not preflight time.
-4. **Codex died MID-BUILD with files on disk**: salvage — keep the worktree edits, the Architect
-   finishes verify/commit personally (proven: #817). Don't re-run from scratch and clobber.
+**The review and the audit are two gates. Never merge them into one.** This mattered when every
+reviewer was a second vendor; it matters MORE for the same-vendor majority. "The orchestrator reviews it
+itself" is only ever *audit on top of a review round*. Proven again 2026-08-15: a same-vendor
+fresh-thread round on PR #1376 found two Majors — a pre-open reserve that was a start gate only, and
+a test asserting a constructor annotation rather than the behaviour — neither of which the build,
+its tests, or the Architect's own reading had caught.
 
 ## Invariants that survive ANY routing
 
 - The **receipt contract** (labeled claims + mandatory open-doubts) and the **audit** are
-  model-independent — an Opus builder owes the same receipt as Codex.
-- **Writer ≠ reviewer** minimum = a different thread; different vendor is preferred, and its loss
-  must be stated in the review record.
+  model-independent — an Opus builder owes the same receipt Codex used to.
+- **EVERY brief opens with STEP 0**: verify the premise before writing anything; reporting the
+  premise is wrong is a SUCCESSFUL outcome. Proven again 2026-08-15 — a builder refuted the
+  Architect's own proposed design (a door projection that could never fire, because a missed cron
+  seeds nothing) and was right.
+- **Writer ≠ reviewer** minimum = a different thread. A different VENDOR is now rationed to the
+  tiers above; wherever it was not spent, say so in the review record rather than dropping it
+  silently.
 - The **Architect keeps merge/deploy/ledger/memory** no matter which model built or reviewed.
-- Parity/money changes gate on byte-identical Golden+Parity rerun by the Architect — never on any
-  builder's or reviewer's say-so, whichever model it was.
+- Parity/money changes gate on a byte-identical Golden+Parity rerun by the Architect — never on any
+  builder's or reviewer's say-so, and never on a local model's output at all.
+- **Local models never merge, deploy, verdict, or decide.** See the `local-model` skill for the full
+  gate list; the red-proof gate on any generated test is mandatory, because a local model has
+  already produced a 4/4-GREEN suite that detected neither of two planted bugs.
+
+## Spending a slot, and keeping the queue
+
+1. **Classify the item's tier first** (the ration table at the top). Clean tier never queues.
+2. If it earns a slot, open the PR with `Cross-vendor review: PENDING (awaiting rationed Codex slot)`
+   — the red `verdict` check is the design while it waits.
+3. Run `codex-code-review` (or `codex-plan-review`) through the harness — **never a hand-rolled
+   `codex exec`**; the harness is where the sandbox decision lives (`start.sh` passes `--sandbox`
+   explicitly, default read-only).
+4. **Record what it cost** against the monthly allowance in memory topic `codex-builder-lane`. This
+   is how the budget stops being an assumption.
+5. Two missed slots → ship with a same-vendor round and record the degradation. Do not let the
+   queue grow without expiry.
+
+⚠️ **Never spend a slot on:** docs, mechanical work, an advisory `codex-ask`, or anything already
+merged. The first three do not need a second vendor; the fourth is an audit wearing a gate's clothes.
+
+## If Codex is unavailable mid-slot
+
+Availability is detected at FAILURE time, never by a preflight probe — call it and fall back when it
+errors.
+
+1. **At capacity**: the harness auto-retries `$CODEX_MODEL` → `$CODEX_FALLBACK_MODELS` and echoes
+   which model served. Transient — retry after 10–30 min.
+2. **Quota exhausted** (the `$20` ceiling, or an `at capacity` that persists): this is the expected
+   steady state near month end. Hold the item to the next cycle, or take the two-missed-slots exit.
+3. **CLI down entirely** (missing, auth broken, hangs): same-vendor round now, record the loss.
+4. **Died MID-review with output on disk**: a failed resume leaves the PREVIOUS round's
+   `review.txt` in place, unchanged — reading it yields a complete, confident review **of the wrong
+   revision**. Capture the file's mtime BEFORE the run and compare after; `PRE_MTIME == POST_MTIME`
+   means no review happened, whatever the file contains. The wrapper exits 0 even when codex fails,
+   so the exit code proves nothing either.
+
+## Turning Codex fully off, or fully back on
+
+Nothing is destructive. The harness scripts, `checklist.md` and the four `codex-*` skills are intact
+and ENABLED — they simply must not be invoked outside the ration rule.
+
+- **Fully off**: add a DISABLED banner to each `codex-*/SKILL.md` and route every tier to
+  `claude-review`.
+- **Back to unrationed** (a higher tier restored): delete the ration section above and revert this
+  file to the 2026-07-25 revision — git history has it. The checklist and receipt contract never
+  changed, so Codex slots straight back in as the opposite vendor on every change.

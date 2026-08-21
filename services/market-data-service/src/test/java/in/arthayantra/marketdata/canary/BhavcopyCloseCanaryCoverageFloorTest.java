@@ -7,8 +7,11 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
+import in.arthayantra.marketdata.constituents.StaticIndexConstituents;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
+import in.arthayantra.marketdata.kite.GapBackfiller;
 import in.arthayantra.marketdata.canary.BhavcopyCloseCanary.CloseMismatch;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
@@ -172,6 +175,9 @@ class BhavcopyCloseCanaryCoverageFloorTest {
         mock(NtfyClient.class),
         mock(IngestRunLedger.class),
         Clock.fixed(Instant.parse("2026-08-10T19:00:00Z"), ZoneOffset.UTC),
+        mock(StaticIndexConstituents.class),
+        mock(GapBackfiller.class),
+        mock(MarketCalendar.class),
         new SimpleMeterRegistry(),
         new MockEnvironment().withProperty("spring.profiles.active", "live"),
         true,
@@ -179,7 +185,8 @@ class BhavcopyCloseCanaryCoverageFloorTest {
         new BigDecimal("0.01"),
         20,
         25,
-        floor);
+        floor,
+        "0 5 16 * * MON-FRI");
   }
 
   private static List<CloseMismatch> offenders(int n) {

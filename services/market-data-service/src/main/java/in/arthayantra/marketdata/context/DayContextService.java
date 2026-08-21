@@ -5,8 +5,10 @@ import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.canary.IngestHealthBoard;
 import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleQueryService;
+import in.arthayantra.marketdata.instruments.UnderlyingRef;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
+import in.arthayantra.marketdata.kite.VixQuoteCache;
 import in.arthayantra.marketdata.options.OptionsDigestService;
 import in.arthayantra.marketdata.upstox.UpstoxGlobalInstrumentsClient;
 import in.arthayantra.marketdata.upstox.WorldIndex;
@@ -111,7 +113,7 @@ public class DayContextService {
   private static final BigDecimal RANGE_NARROW = BigDecimal.valueOf(0.8);
 
   private final OptionsDigestService optionsDigest;
-  private final QuoteGateway quoteGateway;
+  private final VixQuoteCache vixQuotes;
   private final ObjectProvider<UpstoxGlobalInstrumentsClient> worldIndices;
   private final CandleQueryService candles;
   private final IngestHealthBoard healthBoard;
@@ -130,13 +132,13 @@ public class DayContextService {
   /** Wires the reused digest + the market-data-native context ports and the display/config knobs. */
   public DayContextService(
       OptionsDigestService optionsDigest,
-      QuoteGateway quoteGateway,
+      VixQuoteCache vixQuotes,
       ObjectProvider<UpstoxGlobalInstrumentsClient> worldIndices,
       CandleQueryService candles,
       IngestHealthBoard healthBoard,
       MarketCalendar calendar,
       Clock clock,
-      @Value("${artha.context.options-name:NIFTY}") String optionsName,
+      @Value("${artha.context.options-name:NIFTY 50}") String optionsName,
       @Value("${artha.context.index-exchange:NSE}") String indexExchange,
       @Value("${artha.context.index-symbol:NIFTY 50}") String indexSymbol,
       @Value("${artha.context.vix-instrument:INDIA VIX}") String vixSymbol,
@@ -146,14 +148,25 @@ public class DayContextService {
       @Value("${artha.context.vix-elevated:17}") BigDecimal vixElevated,
       @Value("${artha.context.vix-high:22}") BigDecimal vixHigh) {
     this.optionsDigest = optionsDigest;
-    this.quoteGateway = quoteGateway;
+    this.vixQuotes = vixQuotes;
     this.worldIndices = worldIndices;
     this.candles = candles;
     this.healthBoard = healthBoard;
     this.calendar = calendar;
     this.clock = clock;
     this.vixKey = new InstrumentKey("NSE", vixSymbol);
-    this.optionsName = optionsName;
+    // ⚠️ NORMALISED, not trusted. The default was a bare `NIFTY` for the whole life of this
+    // feature, which is not a canonical instrument key: OptionsDigestService answered "no option
+    // expiries for NIFTY", dayContext() fail-softed it into a note, and market_context_days
+    // persisted 26 ROWS spanning 2026-07-13..2026-08-19 with expiry/pcr/max_pain/atm_straddle/
+    // atm_iv ALL NULL while the job logged "persisted ... (1 row)" on each of those nights.
+    // ⚠️ NOT "26 consecutive trading days" -- the range holds 28, and 2026-07-17 and 2026-08-12
+    // have no row AND no MARKET_CONTEXT_DAY run at all (neither is an NSE holiday). That is a
+    // SECOND, separate hole the tidier phrasing concealed (review) -- traced the same evening and
+    // ALREADY FIXED: the whole evening chain is missing both nights, both dates pre-date #1358, and
+    // before it the chain ran 19:30-21:15, outside the hours the machine is up.
+    // Fixing only the default would leave the next person free to write the alias again.
+    this.optionsName = UnderlyingRef.canonical(optionsName);
     this.indexExchange = indexExchange;
     this.indexSymbol = indexSymbol;
     this.overnightTopN = overnightTopN;
@@ -228,8 +241,11 @@ public class DayContextService {
 
   private Vix vix(List<String> notes) {
     try {
-      QuoteGateway.Quote q = quoteGateway.quotes(List.of(vixKey)).get(vixKey);
-      if (q == null || q.lastPrice() == null) {
+      // H31: the VIX read is the single largest cost in this assembly -- it queues behind the
+      // 1/s kite-quote limiter, measured at ~1.5 s of a ~1.9 s day-context against the insight
+      // sweep's 2000 ms read timeout. Served from the short-TTL cache instead of a fresh call.
+      QuoteGateway.Quote q = vixQuotes.quote(vixKey).orElse(null);
+      if (q == null) {
         notes.add("INDIA VIX quote unavailable (off-hours / analytics off)");
         return null;
       }

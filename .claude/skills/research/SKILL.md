@@ -8,7 +8,7 @@ description: Structured no-production-code spike — investigate a question, fea
 For a question, feasibility study, or technology evaluation that must produce **documented findings and
 a verdict, not production code**. Use it before committing to a build when the answer is genuinely
 unknown (does the CLI support X? is this data source usable? which approach wins?). It feeds
-`fable-method` → a plan (`codex-plan-review`) → `codex-build`. Not for tasks where the answer is clear
+`fable-method` → a plan (plan-review round) → `delegated-ship`. Not for tasks where the answer is clear
 — just build those.
 
 ## Rules
@@ -28,12 +28,12 @@ unknown (does the CLI support X? is this data source usable? which approach wins
 2. **Pick depth** (state it):
    - *quick* — read the code + 1–2 probes, answer in chat.
    - *standard* — 1–2 Explore agents for breadth + read-only probes; a short findings summary.
-   - *deep* — multi-agent recon + a scratchpad feasibility spike + a `codex-ask` cross-vendor
+   - *deep* — multi-agent recon + a scratchpad feasibility spike + a fresh-thread Opus
      red-team of the conclusion; a written memo.
 3. **Investigate.** Recon agents for breadth; read the actual code for the load-bearing bits; run
    read-only probes and record the exact command + result. For a feasibility claim, PROVE it with a
    scratchpad spike (e.g. "does `codex exec resume` retain context?" → run it), don't assert it.
-4. **Red-team** (deep, optional otherwise). `codex-ask <topic> "Here's my conclusion: … . Red-team
+4. **Red-team** (deep, optional otherwise). Spawn a fresh Opus subagent: "Here's my conclusion: … . Red-team
    it."` — a disagreement is a strong signal to surface to the owner.
 5. **Synthesize.** Separate what you VERIFIED (cite command/file:line) from what you ASSUMED; list the
    risks and the kill-criteria. Label decision-grade claims computed/sourced/recalled/assumed.
@@ -42,7 +42,7 @@ unknown (does the CLI support X? is this data source usable? which approach wins
    `docs/superpowers/plans/<yyyy-mm-dd>-<topic>.md` (feasibility folded in as a Phase-0 section, the
    [codex-review-harness-spike](../../../docs/superpowers/plans/2026-07-14-codex-review-harness-spike.md)
    plan is the template); small results stay in chat.
-7. **Hand off.** BUILD → `fable-method` → plan → `codex-plan-review` → `codex-build`. DEFER → flip a
+7. **Hand off.** BUILD → `fable-method` → plan → plan-review → `delegated-ship`. DEFER → flip a
    ledger row with the reason (never stop a run to ask; skip + note). Record a durable finding in
    memory if it will matter next session.
 

@@ -29,13 +29,23 @@ Applies to the MAIN session loop only — if you were spawned as a subagent, ign
 and just execute your brief. **Opus 5 is the main loop: orchestrator + final gate.** It never
 builds substantive code; it orients, classifies, briefs, runs the testing gate, audits, merges,
 deploys, verifies live, and talks to the owner. Four stages, each with its own model
-(full table + fallbacks: `.claude/skills/codex/ROUTING.md`):
+(full table + fallbacks: `.claude/skills/codex/ROUTING.md`).
+
+⚠️ **CODEX IS RATIONED (owner, 2026-08-15 — $20/mo tier).** It is no longer the default reviewer;
+it is a scarce slot spent ONLY on **money · parity · exit doctrine · migrations · live engine**, and
+always **PRE-merge** (a slot on merged code buys an audit, not a gate). Everything else gets
+`claude-review` — Opus subagent, FRESH thread, DISTINCT lens — which is **weaker than what it
+replaced**, so buy back what diversity you can and **write the loss into the verdict line** rather
+than letting "reviewed" imply what it used to. Never spend a slot on builds, docs, an advisory ask,
+or anything already merged. ⚠️ The budget is an ASSUMPTION until measured — record the first
+post-2026-08-20 run's cost. Local models do NOT restore cross-vendor review (seven scored 0/2); see
+`.claude/skills/local-model/` for what they ARE measured to do.
 
 | Stage | Model | Note |
 |---|---|---|
-| **Plan** | **Fable 5** (Agent tool, `model: "fable"`) → Opus on capacity error | ONLY for real items: HOLD tier, migrations, money/parity surfaces, or >~3 files / multi-PR. Small chips skip straight to a brief. Non-trivial plans still get `codex-plan-review` (cross-vendor: Fable writes, Codex reviews). |
-| **Build** | **Codex** (`codex-build`) → **Sonnet 5** for MECHANICAL work → **Opus subagent** when Codex is out AND the surface is parity / money / exit doctrine / migrations / the live engine | Never degrade a money or parity path to Sonnet to save tokens — that is exactly where green suites have hidden defects. |
-| **Review** | opposite vendor of the builder, fresh thread (review router in ROUTING.md) | A DISTINCT gate from the audit — see below. |
+| **Plan** | **Fable 5** (Agent tool, `model: "fable"`) → Opus on capacity error | ONLY for real items: HOLD tier, migrations, money/parity surfaces, or >~3 files / multi-PR. Small chips skip straight to a brief. Non-trivial plans get `codex-plan-review` if a slot is free (cheapest leverage), else an Opus fresh-thread round. |
+| **Build** | **Opus subagent** (`delegated-ship`) for parity / money / exit doctrine / migrations / the live engine → **Sonnet 5** for MECHANICAL work only | Never degrade a money or parity path to Sonnet to save tokens — that is exactly where green suites have hidden defects. |
+| **Review** | money/parity/migration/live-engine → **`codex-code-review`** (rationed slot, PRE-merge) · everything else → **`claude-review`** (Opus, FRESH thread, DISTINCT lens) | ⚠️ Same-vendor for the majority. A DISTINCT gate from the audit — see below. |
 | **Audit + ship** | **Opus 5** (main loop) | Final gate, then PR → CI → merge → deploy → live-verify → ledger. |
 
 ⚠️ **The review round and the Architect audit are two gates, not one — never collapse them.**
@@ -101,6 +111,12 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   `-Dspotless.check.skip=true`, which is INERT — no spotless plugin exists in this repo; it rode
   along in ~8 builder briefs on 2026-07-31 before two builders independently caught it. Checkstyle
   is the formatting gate.)
+
+  ```bash
+  # ALWAYS -am. A bare -pl embeds a stale lib and fails as a PHANTOM error in code you never touched.
+  ./mvnw.cmd -pl services/<svc> -am package -DskipTests > build.log 2>&1; echo "MAVEN_EXIT=$?"
+  grep -E "BUILD (SUCCESS|FAILURE)" build.log   # no BUILD line at all = truncated, NOT passed
+  ```
 - ⚠️ **Two ways a Maven run reports GREEN without having run** (both hit builders on 2026-08-01):
   **(1) `mvnw … | Out-File` (or any pipe) reports the PIPELINE's exit code, not Maven's** — a run
   truncated mid-`testCompile`, with no `BUILD` line at all, was reported as "completed, exit 0" and
@@ -133,17 +149,6 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   `compile-errors: 0` on every proof, and read the actual failure text — a JDBC/compile/fixture error
   is a broken proof wearing a passing gate's clothes. Completes the set: a proof can be broken by
   staying green, by being too strong, or by reddening for the wrong reason.
-- **CI `build-test` is sharded per-service** (`.github/workflows/ci-java.yml`): a 3-leg
-  matrix (`market-data` / `backtest` / `strategy-gateway` = strategy-signal + edge-gateway),
-  each runs `mvnw -pl <svc> -am verify` on its own runner (Testcontainers ITs are the
-  2-core bottleneck; serial reactor was ~23m, sharded ~5m). Safe because `jacoco-check`
-  binds PER MODULE, not an aggregate root goal. **Adding a new service?** Add a matrix
-  shard or its tests NEVER run in CI, **and add it to `KNOWN_SERVICES` +
-  the path mapping in `.github/scripts/classify_java_shards.sh`** (since #1252, 2026-08-03, each leg
-  gates on its OWN classifier boolean — a `services/<new>/` path no shard claims is reported as
-  `unowned_services` and HARD-FAILS the run, deliberately, because fanning out to three existing
-  shards only looks busy and builds nothing new). Libs ride upstream via `-am` (covered in ≥1 shard),
-  and a `libs/` edit sets all three booleans so shared-lib breaks still fan out.
 - IT harness: singleton Testcontainers (Timescale 2.18.2-pg17 + redis 7.4), real
   Flyway lineages, `@DynamicPropertySource` for `currentSchema`. Services connect to
   Postgres as `artha` (D10 single-writer by convention); per-schema roles like
@@ -166,6 +171,87 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   and refuse only when NO tick was ever seen — "entries need fresh truth (you can always NOT enter),
   exits need the best available truth (you cannot refuse to leave forever)". Never reintroduce an
   `avgEntryPrice` breakeven fallback on a close path.
+- **Modulith module cycles (strategy-signal):** `notifier` imports `signals` (`SignalEmitted`), so
+  signals code must NEVER import notifier — alert via an in-process event record published from
+  signals + an `@EventListener` in notifier (`DotInputAlert`/`DotAlertListener` is the template).
+  Same class of rule: signals cannot import paper (forced the `PremiumBracketRules` copy).
+  `ModularityTest` (per service) catches violations locally only with a full `-am verify`.
+- **Mock-stack backtest testing:** candle data is real-time/rolling (accrues from
+  boot) — derive a recent covered window, never hardcode dates; every windowed run's
+  regime pre-flight needs ~272 daily benchmark sessions, so backfill `NIFTY 50` 1d
+  via cache-first GET `/api/v1/market/candles` first. Results/trades/folds/montecarlo
+  are keyed by the **run id** (the job's `resultRef`), not the jobId. Submission + the
+  worker now **auto-warm** the primary 1m + benchmark (+ contexts) via market-data's
+  cache-first GET before the pre-flight, so a fresh window no longer 422s — but
+  `libs/market-calendar` covers a FIXED bundled set (currently **2024–2026**; NSE Tuesday +
+  BSE Thursday weekly expiries via `MarketCalendar.nse()`/`.bse()`), so a window outside it
+  (e.g. 2023 or 2027) 500s with "NSE holiday calendar covers years [...]". A horizon-canary
+  test goes red ~45 days before the max covered year ends — the CD-2 yearly-CSV-refresh reminder.
+- **Run the Playwright e2e vs a running mock stack:** `cd e2e &&
+  E2E_OWNER_PASSWORD=<your .env owner pw> npx playwright test` — global-setup reuses a
+  healthy stack and won't overwrite an existing `.env`; the helper password defaults to
+  `e2e-owner-password`, so override it to match your hash.
+
+  ```bash
+  cd e2e && E2E_OWNER_PASSWORD=<your .env owner pw> npx playwright test
+  ```
+- **Drive the gateway API from PowerShell** (live/mock verification): `Invoke-WebRequest
+  -UseBasicParsing` (PS5.1's IE engine prompts otherwise); POST `/api/v1/auth/login`
+  `{"password":...}` (it answers **204**, not 200 — check `-notin 200,204`), then a GET to seed the
+  `XSRF-TOKEN` cookie, echoed as the `X-XSRF-TOKEN` header on mutating calls. **A bodyless
+  `-Method Post` defaults to `application/x-www-form-urlencoded` and the endpoint answers 415**
+  (`HttpMediaTypeNotSupportedException` mapped in #1021; edge-gateway-local endpoints unaffected —
+  gateway uses common-web-core, not the servlet handler): always pass
+  `-ContentType 'application/json' -Body '{}'`. In-container SQL: DB is `artha`/`artha_mock`
+  (not `arthayantra`).
+- **optimizer-service is Python (FastAPI), not Java** — `/api/v1/optimizations/*` lives there
+  (backtest-service owns `/api/v1/backtests/*`). Tests: `(cd services/optimizer-service && python -m
+  pytest tests/ -q)` + `python -m ruff check app tests` (Python 3.14 global, no venv). A sweep needs
+  the strategy to carry a `backtest.optimize` block (`method`+`max_trials`+`objective`+`parameters`,
+  all required) else 422 "no tunable parameters in the optimize block". **ci-optimizer / ci-margin are
+  separate workflows, but their `optimizer-lint-test` / `margin-lint-test` jobs ARE required contexts
+  and DO appear in the default `gh pr checks` rollup** (corrected 2026-08-04 — this bullet asserted the
+  exact opposite, and the stale form sent three separate check-hunts off to `gh run list` for a gate
+  that was in the rollup all along). It was true until 2026-08-03: both workflows were then
+  `paths:`-filtered and genuinely absent. #1252 removed that filter precisely so the jobs could be
+  promoted, because a `paths:`-filtered workflow can NEVER be a required check — a path-skipped
+  workflow's checks stay PENDING forever, while a job or step skipped by an `if:` reports SUCCESS.
+  Both now ALWAYS trigger; a cheap `changes` classifier decides whether real work runs, and the
+  required job carries `if: always()` + a fail-closed first step (measured: `optimizer-lint-test` 33s
+  on #1291, which touched Python, vs 3s on #1290, which did not — both PASS, both in the rollup).
+  **Read the rollup, not `gh run list`.**
+  ⚠️ **The "Python 3.14 global, no venv" line above NO LONGER HOLDS for the CONTRACT tests** (#1209,
+  2026-08-02): `test_openapi_contract.py` in BOTH optimizer- and margin-service now asserts the running
+  interpreter matches `requirements-dev.lock`, so a plain `python -m pytest` on the ambient interpreter
+  **FAILS BY DESIGN** — measured: ambient fastapi 0.136.3 vs the lockfile's 0.115.6, 2 failed / 1 passed.
+  That is the guard working, not breakage: FastAPI's own generated `ValidationError` schema gains
+  `ctx`/`input` across versions, and the committed margin spec had in fact been captured under the
+  WRONG version before this landed. The failure prints the exact remedy — build a venv from the
+  lockfile (`uv venv --python 3.12 .venv-pinned`, `uv pip install --python .venv-pinned
+  --require-hashes -r requirements-dev.lock`) and run capture/tests through it, never the ambient
+  interpreter. Everything ELSE in those services (ruff, the non-contract tests) still runs fine on the
+  global interpreter, so only the contract tests need the venv.
+
+
+  ```bash
+  # Ambient interpreter is FINE for ruff + non-contract tests:
+  (cd services/optimizer-service && python -m pytest tests/ -q && python -m ruff check app tests)
+  # CONTRACT tests need the pinned venv -- on the ambient interpreter they FAIL BY DESIGN:
+  uv venv --python 3.12 .venv-pinned
+  uv pip install --python .venv-pinned --require-hashes -r requirements-dev.lock
+  ```
+## CI, contracts & gates
+- **CI `build-test` is sharded per-service** (`.github/workflows/ci-java.yml`): a 3-leg
+  matrix (`market-data` / `backtest` / `strategy-gateway` = strategy-signal + edge-gateway),
+  each runs `mvnw -pl <svc> -am verify` on its own runner (Testcontainers ITs are the
+  2-core bottleneck; serial reactor was ~23m, sharded ~5m). Safe because `jacoco-check`
+  binds PER MODULE, not an aggregate root goal. **Adding a new service?** Add a matrix
+  shard or its tests NEVER run in CI, **and add it to `KNOWN_SERVICES` +
+  the path mapping in `.github/scripts/classify_java_shards.sh`** (since #1252, 2026-08-03, each leg
+  gates on its OWN classifier boolean — a `services/<new>/` path no shard claims is reported as
+  `unowned_services` and HARD-FAILS the run, deliberately, because fanning out to three existing
+  shards only looks busy and builds nothing new). Libs ride upstream via `-am` (covered in ≥1 shard),
+  and a `libs/` edit sets all three booleans so shared-lib breaks still fan out.
 - **Contract spec drift (springdoc):** `ContractCaptureTest` snapshots `/v3/api-docs`;
   re-capture with `-Dcontracts.capture=true`, regen TS via `npx openapi-typescript@7` →
   `contracts/gen/*.d.ts`. ⚠️ **CAPTURE WITH `-Dtest=ContractCaptureTest` ONLY — NEVER during a full
@@ -206,26 +292,55 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   `BigDecimal` platform-wide, so **every decimal is a JSON string on the wire while springdoc infers
   `number`** — a repo-wide pre-existing lie that existing `{"number","null"}` annotations encode
   rather than fix. Verify by reading the CAPTURED SPEC, never by trusting the annotation.
+
+  ```bash
+  # ONLY with -Dtest=ContractCaptureTest. A capture riding a full `verify` strips `required`
+  # from schemas you never touched (RecordRequiredModelConverter is STATEFUL + springdoc caches).
+  ./mvnw.cmd -pl services/<svc> -am test -Dtest=ContractCaptureTest '-Dcontracts.capture=true'
+  npx openapi-typescript@7 contracts/<svc>.openapi.json -o contracts/gen/<svc>.d.ts
+  ```
 - **EVERY new endpoint returns a typed record, never `Map<String,Object>`** — edge-gateway's
   `MapReturnRatchetTest` freezes the Map-returning handler COUNT per service (Maps are invisible
   to the contract gate); a new Map endpoint fails the strategy-gateway CI shard. Cost 2 CI cycles
   on 2026-07-03 (both new endpoints caught). Records also enumerate into the spec — strictly better.
-- **Modulith module cycles (strategy-signal):** `notifier` imports `signals` (`SignalEmitted`), so
-  signals code must NEVER import notifier — alert via an in-process event record published from
-  signals + an `@EventListener` in notifier (`DotInputAlert`/`DotAlertListener` is the template).
-  Same class of rule: signals cannot import paper (forced the `PremiumBracketRules` copy).
-  `ModularityTest` (per service) catches violations locally only with a full `-am verify`.
-- **Mock-stack backtest testing:** candle data is real-time/rolling (accrues from
-  boot) — derive a recent covered window, never hardcode dates; every windowed run's
-  regime pre-flight needs ~272 daily benchmark sessions, so backfill `NIFTY 50` 1d
-  via cache-first GET `/api/v1/market/candles` first. Results/trades/folds/montecarlo
-  are keyed by the **run id** (the job's `resultRef`), not the jobId. Submission + the
-  worker now **auto-warm** the primary 1m + benchmark (+ contexts) via market-data's
-  cache-first GET before the pre-flight, so a fresh window no longer 422s — but
-  `libs/market-calendar` covers a FIXED bundled set (currently **2024–2026**; NSE Tuesday +
-  BSE Thursday weekly expiries via `MarketCalendar.nse()`/`.bse()`), so a window outside it
-  (e.g. 2023 or 2027) 500s with "NSE holiday calendar covers years [...]". A horizon-canary
-  test goes red ~45 days before the max covered year ends — the CD-2 yearly-CSV-refresh reminder.
+- **margin-service (Python SPAN appliance, `/api/v1/margin`) now carries the same two-artifact
+  contract gate as optimizer-service** — it was the one service with no committed OpenAPI spec at
+  all until closed. `services/margin-service/tests/test_openapi_contract.py` captures BOTH
+  `contracts/margin-service.api-surface.json` (asserted every run) and the FastAPI-native
+  `contracts/margin-service.openapi.json` (asserted by `.github/scripts/margin_spec_staleness.py`,
+  a required, unconditional ci-contracts step — same `app routes -> api-surface.json -> openapi.json`
+  chain as optimizer-service). **Re-capture:** `cd services/margin-service && CONTRACTS_CAPTURE=1
+  python -m pytest tests/test_openapi_contract.py` writes both files, then regenerate the TS client
+  with `npm run gen:api` (frontend-react) or directly `npx openapi-typescript@7
+  contracts/margin-service.openapi.json -o contracts/gen/margin-service.d.ts`. Classified NON_JAVA
+  in `.github/scripts/contract_service_inventory.sh` (no `pom.xml`) — that membership is what
+  CATEGORICALLY excludes it from the openapi-diff breaking gate (that loop iterates the JAVA list
+  only, regardless of spec content) and the Java-only warn-vs-code step. `openapi_relabel_30.py`
+  refusing its spec (exit 2, first at `paths./health.get.responses.200`) is a SEPARATE, additional
+  reason it could not ride the breaking gate even if it were added to that loop: 6 of its pydantic
+  `Optional` fields (`LegIn`/`PositionIn.expiry`+`strike`, `SizeResponse.limitingRail`,
+  `SizeRequest.stop`) carry a primitive `anyOf: [{type: X}, {type: "null"}, ...]` WITH a `title`
+  sibling, and its plain-dict `/health` response carries the SAME primitive nullable-`anyOf` shape
+  but BARE — no `title` on the `anyOf` node itself (the title sits on the parent object schema
+  wrapping it). Closing this gap for real needs BOTH a converter fix (today's converters handle
+  only a bare `$ref`+null `anyOf` or a `type` ARRAY nullable, never a primitive `anyOf`, titled or
+  not) AND including non-Java specs in the breaking loop — a separate, higher-risk redesign, not
+  attempted here. margin-service gets the semantic staleness gate instead — which, like
+  optimizer-service's, projects route surface only (method/path/params/requestBody/response-codes),
+  never component properties or types. **Coverage gap, permanent, not a first-PR artifact:** a
+  response-field rename (e.g. `SizeResponse.target` → `targetPrice`) changes neither the route
+  surface nor any component KEY, so it passes every margin-service gate silently — measured, not
+  assumed. ⚠️ Its 422 responses still use FastAPI's stock `HTTPValidationError` shape, not the
+  shared `{code,message,details}` envelope other services converged on (§8.3) — a pre-existing
+  runtime inconsistency, not a spec/CI defect, left unfixed by this gating change.
+
+
+  ```bash
+  # Re-capture BOTH contract artifacts, then regenerate the TS client:
+  (cd services/margin-service && CONTRACTS_CAPTURE=1 python -m pytest tests/test_openapi_contract.py)
+  npx openapi-typescript@7 contracts/margin-service.openapi.json -o contracts/gen/margin-service.d.ts
+  ```
+## Market data, candles & instruments
 - **Candle sources split by interval:** `CandleReader.read()` serves the `candles_<iv>`
   caggs (5m/15m/1h/1d/1w), **sparse on a fresh boot**; native daily lives in `candles`@1d
   (dense — `readDailyWithWarmup`). The two diverge for 1d (chart overlays hit this).
@@ -242,15 +357,44 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   `GET /api/v1/signal-rejections/dot-health` (per-dot gate-input liveness),
   `GET /api/v1/market/health/ingest` + the `/data-ops/ingest-health` page (per-source EOD ingest
   coverage over `marketdata.ingest_runs`, #686/#699), and the scheduled canaries (ingest-coverage
-  08:45, notifier-health 08:30, paper reconcilers 21:15, PartialBucketCanary every 60s — all IST)
-  — check these BEFORE hand-digging a "feed looks dead" / "batch missed" report.
-  **Measured evening order, 2026-08-04** (do NOT quote the YAML cron defaults — they differ from
-  what is deployed, and reading `${artha.minervini.cron:0 50 19 * * MON-FRI}` as "19:50" put a wrong
-  time into four separate reports the same night): **19:30** CA refresh rides the nightly BHAVCOPY
-  job · **19:31** `MINERVINI_SCREEN` + `MANAS_SCREEN` · **19:35** `MINERVINI_PLANE_DIVERGENCE`
-  (source `MINERVINI_SCHEDULER`) · **19:45** market-context · **19:50** data-quality · **19:55**
-  equity-breadth · **21:15** paper reconcilers. Read `marketdata.ingest_runs` +
-  `marketdata.canary_runs`/`strategy.canary_runs` for the real times, never the defaults.
+  08:45, notifier-health 08:30, paper reconcilers 08:50/08:52, PartialBucketCanary every 60s — all
+  IST) — check these BEFORE hand-digging a "feed looks dead" / "batch missed" report.
+  **Measured schedule, re-read 2026-08-20 from `docker inspect`.** #1358 (`34a7d39c`, 08-17) moved
+  every job inside 08:00–19:00 IST and the reconcilers to MORNING; **#1418 (`f9398ed4`, 08-20) then
+  moved the two swing settles 16:00/16:02 → 18:52/18:53 and buyable-alerts 18:53 → 18:59** (ledger
+  H27). ⚠️ **THIS BLOCK HAS NOW BEEN STALE TWICE — treat any dated cron list here as a HINT, and
+  re-read `docker inspect` every time the value is load-bearing.** The 08-17 revision replaced a
+  ~13-day-stale 19:30–21:15 list that had itself been added as a "measured" correction and had
+  already reached a #1354 review comment; this revision replaced three entries that went stale
+  within three days of that. Never quote the YAML `${ENV:default}` values; they differ from what is
+  deployed.
+  Morning: **08:30** swing-canary + notifier-health · **08:35** swing-catchup (⚠️ the only
+  AUTOMATIC path that takes swing ENTRIES — see below) · **08:45** ingest-coverage · **08:50**
+  paper-reconciliation · **08:52** past-expiry-recon. Afternoon: **16:05** bhavcopy-close-prefetch.
+  Evening: **18:20** upstox-canary · **18:45** bhavcopy-eod · **18:46** nse-eod · **18:47**
+  minervini-screen · **18:48** manas-screen · **18:49** market-context · **18:50** data-quality ·
+  **18:51** equity-breadth · **18:52** minervini-swing-settle · **18:53** manas-swing-settle ·
+  **18:54** heartbeat-swing · **18:55** graduation · **18:56**/**18:57** insights · **18:58**
+  bhavcopy-close · **18:59** buyable-alerts. Also `ARTHA_HEARTBEAT_SESSION` every 10 min 09:00–15:59.
+  ⚠️ **The swing settle is an EXITS-ONLY pass and legitimately reports 0 candidates AND 0 exits** —
+  the entries pass is the NEXT MORNING's 08:35 catch-up (`SwingBatchCatchUp:276` guards on
+  `hasRunWithEntries`, not `hasRun`, precisely so the settle marker cannot suppress it).
+  ⚠️ **"Only path" is wrong and was corrected in cross-vendor review 2026-08-20: 08:35 is the only
+  AUTOMATIC entry path.** The manual `POST /api/v1/signals/<batch>-swing/run` controllers
+  (`MinerviniSwingController:64`, `ManasAroraSwingController:64`) call `runAndRecord(doctrine)` →
+  `entriesEnabled = true` with `sessionDate = null`, so they take entries and never reach
+  `scheduledSettleSession()`. Reason about entry paths as TWO, not one.
+  ⚠️ **WHY 18:52 AND NOT 16:00, because the hour is load-bearing (H27):** most cash equities have no
+  intraday 1d bar at all — their session bar is written by the **18:45 bhavcopy EOD ingest**. At
+  16:00 the settle priced every held stop off the PREVIOUS session's close and still reported a
+  clean "0 exits, 0 exit-skipped". Measured 08-20 after the move: STALE bars fell 10 → 4 and a real
+  stop fired at 18:52:06 (INOXINDIA, exit price = that day's close exactly).
+  ⚠️ **Judge a settle on the STALE-bar count and `exit_skipped`, NEVER on the exit count** — 0 exits
+  is the common correct outcome, and reading it as failure is the exact misreading H27 exists to
+  prevent. A `swing_catchup_runs` row missing before 08:35 is **not** evidence of a missed batch —
+  reading it that way produced a false "Friday's screens were never consumed" alarm on 2026-08-17.
+  Read `marketdata.ingest_runs` + `marketdata.canary_runs`/`strategy.canary_runs` for the real times,
+  never the defaults.
 - **3m reads are a read-time 1m→3m rollup** (`CandleRepository.rangeRolledFromOneMinute`, #365): the
   live SignalEngine 3m-primary depends on this rollup. The unused `candles_3m` cagg + its refresh
   policy were DROPPED (V027, #427) — 3m has no materialized view; only the 1m base feeds it.
@@ -319,78 +463,27 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   MUTUALLY-EXCLUSIVE beans (`LiveKiteConfig:241`) — flipping the quote/ticker source to Upstox/OpenAlgo REMOVES
   the Kite bean entirely (`UpstoxQuoteGateway:75` drops unmapped keys with no Kite delegate), so a live miss
   does NOT fall through to Kite. Kite-as-fallback holds only while the source flag stays Kite (the current
-  default, W-U4 declined). Composite primary+fallback is unbuilt. Drift caught by
-  3 contract canaries (Kite/Upstox/OpenAlgo, CONSUMED-field sentinels). Full map: `docs/symbol-normalization.md`.
-- **Run the Playwright e2e vs a running mock stack:** `cd e2e &&
-  E2E_OWNER_PASSWORD=<your .env owner pw> npx playwright test` — global-setup reuses a
-  healthy stack and won't overwrite an existing `.env`; the helper password defaults to
-  `e2e-owner-password`, so override it to match your hash.
-- **Drive the gateway API from PowerShell** (live/mock verification): `Invoke-WebRequest
-  -UseBasicParsing` (PS5.1's IE engine prompts otherwise); POST `/api/v1/auth/login`
-  `{"password":...}` (it answers **204**, not 200 — check `-notin 200,204`), then a GET to seed the
-  `XSRF-TOKEN` cookie, echoed as the `X-XSRF-TOKEN` header on mutating calls. **A bodyless
-  `-Method Post` defaults to `application/x-www-form-urlencoded` and the endpoint answers 415**
-  (`HttpMediaTypeNotSupportedException` mapped in #1021; edge-gateway-local endpoints unaffected —
-  gateway uses common-web-core, not the servlet handler): always pass
-  `-ContentType 'application/json' -Body '{}'`. In-container SQL: DB is `artha`/`artha_mock`
-  (not `arthayantra`).
-- **optimizer-service is Python (FastAPI), not Java** — `/api/v1/optimizations/*` lives there
-  (backtest-service owns `/api/v1/backtests/*`). Tests: `(cd services/optimizer-service && python -m
-  pytest tests/ -q)` + `python -m ruff check app tests` (Python 3.14 global, no venv). A sweep needs
-  the strategy to carry a `backtest.optimize` block (`method`+`max_trials`+`objective`+`parameters`,
-  all required) else 422 "no tunable parameters in the optimize block". **ci-optimizer / ci-margin are
-  separate workflows, but their `optimizer-lint-test` / `margin-lint-test` jobs ARE required contexts
-  and DO appear in the default `gh pr checks` rollup** (corrected 2026-08-04 — this bullet asserted the
-  exact opposite, and the stale form sent three separate check-hunts off to `gh run list` for a gate
-  that was in the rollup all along). It was true until 2026-08-03: both workflows were then
-  `paths:`-filtered and genuinely absent. #1252 removed that filter precisely so the jobs could be
-  promoted, because a `paths:`-filtered workflow can NEVER be a required check — a path-skipped
-  workflow's checks stay PENDING forever, while a job or step skipped by an `if:` reports SUCCESS.
-  Both now ALWAYS trigger; a cheap `changes` classifier decides whether real work runs, and the
-  required job carries `if: always()` + a fail-closed first step (measured: `optimizer-lint-test` 33s
-  on #1291, which touched Python, vs 3s on #1290, which did not — both PASS, both in the rollup).
-  **Read the rollup, not `gh run list`.**
-  ⚠️ **The "Python 3.14 global, no venv" line above NO LONGER HOLDS for the CONTRACT tests** (#1209,
-  2026-08-02): `test_openapi_contract.py` in BOTH optimizer- and margin-service now asserts the running
-  interpreter matches `requirements-dev.lock`, so a plain `python -m pytest` on the ambient interpreter
-  **FAILS BY DESIGN** — measured: ambient fastapi 0.136.3 vs the lockfile's 0.115.6, 2 failed / 1 passed.
-  That is the guard working, not breakage: FastAPI's own generated `ValidationError` schema gains
-  `ctx`/`input` across versions, and the committed margin spec had in fact been captured under the
-  WRONG version before this landed. The failure prints the exact remedy — build a venv from the
-  lockfile (`uv venv --python 3.12 .venv-pinned`, `uv pip install --python .venv-pinned
-  --require-hashes -r requirements-dev.lock`) and run capture/tests through it, never the ambient
-  interpreter. Everything ELSE in those services (ruff, the non-contract tests) still runs fine on the
-  global interpreter, so only the contract tests need the venv.
-- **margin-service (Python SPAN appliance, `/api/v1/margin`) now carries the same two-artifact
-  contract gate as optimizer-service** — it was the one service with no committed OpenAPI spec at
-  all until closed. `services/margin-service/tests/test_openapi_contract.py` captures BOTH
-  `contracts/margin-service.api-surface.json` (asserted every run) and the FastAPI-native
-  `contracts/margin-service.openapi.json` (asserted by `.github/scripts/margin_spec_staleness.py`,
-  a required, unconditional ci-contracts step — same `app routes -> api-surface.json -> openapi.json`
-  chain as optimizer-service). **Re-capture:** `cd services/margin-service && CONTRACTS_CAPTURE=1
-  python -m pytest tests/test_openapi_contract.py` writes both files, then regenerate the TS client
-  with `npm run gen:api` (frontend-react) or directly `npx openapi-typescript@7
-  contracts/margin-service.openapi.json -o contracts/gen/margin-service.d.ts`. Classified NON_JAVA
-  in `.github/scripts/contract_service_inventory.sh` (no `pom.xml`) — that membership is what
-  CATEGORICALLY excludes it from the openapi-diff breaking gate (that loop iterates the JAVA list
-  only, regardless of spec content) and the Java-only warn-vs-code step. `openapi_relabel_30.py`
-  refusing its spec (exit 2, first at `paths./health.get.responses.200`) is a SEPARATE, additional
-  reason it could not ride the breaking gate even if it were added to that loop: 6 of its pydantic
-  `Optional` fields (`LegIn`/`PositionIn.expiry`+`strike`, `SizeResponse.limitingRail`,
-  `SizeRequest.stop`) carry a primitive `anyOf: [{type: X}, {type: "null"}, ...]` WITH a `title`
-  sibling, and its plain-dict `/health` response carries the SAME primitive nullable-`anyOf` shape
-  but BARE — no `title` on the `anyOf` node itself (the title sits on the parent object schema
-  wrapping it). Closing this gap for real needs BOTH a converter fix (today's converters handle
-  only a bare `$ref`+null `anyOf` or a `type` ARRAY nullable, never a primitive `anyOf`, titled or
-  not) AND including non-Java specs in the breaking loop — a separate, higher-risk redesign, not
-  attempted here. margin-service gets the semantic staleness gate instead — which, like
-  optimizer-service's, projects route surface only (method/path/params/requestBody/response-codes),
-  never component properties or types. **Coverage gap, permanent, not a first-PR artifact:** a
-  response-field rename (e.g. `SizeResponse.target` → `targetPrice`) changes neither the route
-  surface nor any component KEY, so it passes every margin-service gate silently — measured, not
-  assumed. ⚠️ Its 422 responses still use FastAPI's stock `HTTPValidationError` shape, not the
-  shared `{code,message,details}` envelope other services converged on (§8.3) — a pre-existing
-  runtime inconsistency, not a spec/CI defect, left unfixed by this gating change.
+  default). ⚠️ **`application.yml:104` and `UpstoxQuoteGateway:39` BOTH claim "Kite stays the fallback for
+  unmapped keys" — that comment is FALSE; there is no delegate and unmapped keys are silently absent.**
+  Composite primary+fallback is unbuilt — but **W-U4 is NO LONGER declined: the owner reversed it
+  2026-08-17 and asked for Upstox primary + Kite as a rate-limit fallback (ledger H26).** Building that
+  composite is the item; the blocker is instrument identity, not candles. ⚠️ **H26's OUTAGE argument is
+  GONE as of 2026-08-20** — the recurring "Kite outages" of 08-19/08-20 were the HOST's outbound network:
+  five destinations failed in the same window (Kite REST, Kite WS, **Upstox**, Telegram, the liveness
+  heartbeat). Upstox-primary would have bought nothing. The row survives on rate limits and removing the
+  daily 06:00 Kite login; do not re-justify it on resilience.
+  ⚠️ **BE-series NSE equities resolve through a `-BE` twin (H29, #1424, live since 2026-08-20).** Kite's
+  canonical NSE tradingsymbol for a BE-series stock carries a `-BE` suffix while bhavcopy/screens/swing
+  books use the BARE symbol, so `marketdata.instruments` holds both — a tokenless bare row and a tokened
+  `<SYM>-BE` row. `TokenResolverAdapter` falls back to the twin on NSE only, never recursing, never on BSE,
+  and COUNTS every fallback (`ay_instrument_be_suffix_fallback_total`) because the original defect was
+  invisible precisely by fail-softing. ⚠️ **It keys on `instrument_token IS NULL`, which is the NARROWER
+  half of the population (ledger H36): all four affected bare rows are `is_active = f`, but two carry NULL
+  tokens (fixed) and two carry STALE ones Kite rejects as `invalid token` (NOT fixed — `DIACABS`,
+  `MENONBE` 400 every evening).** Drift caught by 3 contract canaries (Kite/Upstox/OpenAlgo,
+  CONSUMED-field sentinels). Full map: `docs/symbol-normalization.md`.
+
+## Strategy engine & paper book
 - **Backtest/optimizer submission identity + precedence (2b):** `strategyId` is the registry **UUID**
   (NOT the slug); omit `strategyVersion` → the optimizer/runner pins the latest published, else latest
   draft. Terminal job status string is `completed`; results are keyed by `resultRef` (the run id), read
@@ -454,6 +547,8 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   position** (pyramiding, `newQty = qty + qty`), it does NOT reject — `uq_paper_positions_open` guards the
   ROW, never the qty. Idempotency for anything that opens positions must claim BEFORE the open (atomic
   marker/lock), never rely on the unique index.
+
+## Deploy & live verification
 - **In-container `now()`/`::date` is UTC, not IST:** a 02:xx-IST row is the *previous* calendar day in
   the DB (e.g. 02:xx IST on 06-29 stores as `2026-06-28` UTC). Filter `signals.generated_at` / candle
   `bucket` by explicit `+05:30` ISO bounds, never `::date = CURRENT_DATE` (off-by-one across IST midnight).
@@ -465,11 +560,31 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   npm run build)` or the service JAR), set `$env:ARTHA_DB_NAME`/`$env:ARTHA_REDIS_DB` to the LIVE
   values (`artha`/`0`, mock `artha_mock`/`1`), then `docker compose -f deploy/docker-compose.yml
   --env-file .env build <svc> && up -d <svc>` — recreates only `<svc>`; unset vars drift the others.
+
+  ```powershell
+  # 0. PRE-FLIGHT (the branch-parked trap: a fresh .class proves a REBUILD, never the SOURCE)
+  git rev-parse --abbrev-ref HEAD                  # on main?
+  git log HEAD --oneline | Select-String <sha>     # is the PR's commit actually in history?
+  # 1. Artifact FIRST -- the Dockerfile COPYs a pre-built jar / dist
+  ./mvnw.cmd -pl services/<svc> -am package -DskipTests
+  # 2. Fingerprint the jar for a symbol only the NEW code has, BEFORE building the image
+  # 3. Deploy (never bare `docker compose` -- unset vars drift siblings onto the wrong DB)
+  $env:ARTHA_DB_NAME = 'artha'; $env:ARTHA_REDIS_DB = '0'      # mock: artha_mock / 1
+  docker compose -f deploy\docker-compose.yml --env-file .env build <svc>
+  docker compose -f deploy\docker-compose.yml --env-file .env up -d <svc>
+  ```
 - **A deploy carrying a NEW migration needs flyway-init FORCED:** `up -d <svc>` treats the exited
   `flyway-init` one-shot as satisfied and may NOT re-run it — `up -d --force-recreate flyway-init`
   first, then ALWAYS DB-probe the new object (`to_regclass`/information_schema). A healthy container
   + an "up to date" flyway log do NOT prove the migration applied (a stale checkout deployed
   "healthy" without its migration once, 2026-07-11; only the probe caught it).
+
+  ```powershell
+  docker compose -f deploy\docker-compose.yml --env-file .env up -d --force-recreate flyway-init
+  docker compose -f deploy\docker-compose.yml --env-file .env up -d <svc>
+  # THEN probe the object itself -- a healthy container + "up to date" log do NOT prove it applied:
+  docker exec ay-timescaledb psql -U artha -d artha -c "SELECT to_regclass('<schema>.<table>');"
+  ```
 - ⚠️ **"13/13 healthy" says NOTHING about whether a service runs current code — and neither does an image
   timestamp.** Found 2026-08-02: five services were silently stale while every container was healthy.
   **The deploy-currency check, in order:** (1) per service, `git log origin/main -1 -- services/<svc>/src/main
@@ -508,10 +623,18 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   one. Fix = renumber the stranded (never-applied) migration HIGHER, never `outOfOrder=true` (2026-07-20).
 - **Thread-dump a stalled JVM service:** `docker exec ay-<svc> sh -c 'kill -3 1'` → dump lands in
   `docker logs` (jstack/jcmd absent in the slim image).
+
+  ```bash
+  docker exec ay-<svc> sh -c 'kill -3 1'   # dump lands in `docker logs`, not stdout of this command
+  ```
 - **Actuator/prometheus ports are per-service, NOT 8080** (8080 = edge-gateway/SPA): strategy-signal
   `127.0.0.1:8082`, market-data `127.0.0.1:8081`. Probe via
   `docker exec ay-<svc> sh -c 'wget -qO- http://127.0.0.1:<port>/actuator/prometheus'`.
 
+  ```bash
+  docker exec ay-strategy-signal-service sh -c 'wget -qO- http://127.0.0.1:8082/actuator/prometheus'
+  docker exec ay-market-data-service     sh -c 'wget -qO- http://127.0.0.1:8081/actuator/prometheus'
+  ```
 ## Frontend (`frontend-react` — React 19 + Vite 6 + Tailwind v4 + shadcn)
 The app is `frontend-react` (the Angular `frontend-ui` was removed after the React cutover, PR #104).
 Stack: React 19, Vite 6, **Tailwind v4 CSS-first** (`@import 'tailwindcss'` + `@theme inline`, NO
@@ -607,7 +730,17 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
 - ⚠️ **BOTH equity source tables are RETRO-MUTABLE — a persisted decision row CANNOT be reproduced
   from current data** (found 2026-08-03, and it silently invalidates A-vs-B measurements). `candles`
   is retroactively rewritten (one symbol's ENTIRE July series was rewritten on 2026-07-31), and
-  `nse_eod_bhavcopy` was **still gaining rows for April–June trade dates months later**. So comparing
+  `nse_eod_bhavcopy` was **still gaining rows for April–June trade dates months later**.
+  ⚠️ **THE TWO HALVES ARE DIFFERENT MECHANISMS AND THIS BULLET USED TO CONFLATE THEM (corrected
+  2026-08-17, N30).** `candles` genuinely MUTATES — an existing bar's value changes from A to B.
+  `nse_eod_bhavcopy` does NOT: measured on the 2026-08-10 event that prompted this, all **13**
+  historical trade dates it wrote had **ZERO rows beforehand** and gained 40,862 — **absence
+  becoming presence, never a rewrite.** **The warning is unchanged and still binding** (a screen that
+  ran when 2026-04-30 was missing saw a different world from one run today, so a persisted decision
+  still cannot be reproduced), but the DETECTION differs and that is why the distinction earns its
+  place: a bhavcopy gap is visible as a per-date row COUNT, while a `candles` rewrite is invisible
+  unless you compare VALUES. Do not reach for a value-diff on bhavcopy or conclude `candles` is safe
+  because row counts match. So comparing
   "what the screen decided then" against "what the data says now" compares two different worlds and
   reports the difference as a divergence. **Any cross-table or historical A-vs-B comparison must gate
   on `fetched_at`** — and note `fetched_at` is an UPSERT timestamp, not first-seen, so it bounds
@@ -806,27 +939,34 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   `research` (no-code spike → findings + BUILD/DEFER verdict), `write-tests` (author tests in
   our harness — naming/Testcontainers/parity/seam-ladder/coverage-debt), `hotfix` (live-incident
   fast-lane: snapshot-first, minimal fix, admin-merge, deploy + canary), `comprehensive-audit`
-  (owner-triggered 360° platform audit — tiered sharded Codex-Sol convergence → one dual-signed
-  doc in `docs/audits/`) — instead of improvising inline.
-- **Codex skill suite** (`.claude/skills/codex-*`, shared harness `.claude/skills/codex/`) =
-  the skill-based, templated form of the codex-builder-lane — persistent-thread Codex sessions
-  instead of on-the-fly `codex exec` strings: `codex-build` (delegate a build in a worktree,
-  `--bypass` — **luna DRAFTS fast/cheap → sol REVIEWS+FIXES on a fresh thread → then Opus cross-vendor
-  review**, three perspectives, receipt contract baked in; **a >~4-checkbox plan uses BATCHED mode** —
-  delegate risk-sized batches on one thread, review each batch's git-index delta, feed fixes forward as
-  binding `--notes`, cross-vendor + audit run ONCE at the end; same analog in `delegated-ship` for Opus
-  builders), `codex-code-review` + `codex-plan-review`
-  (threaded read-only review against `.claude/skills/codex/checklist.md` = our invariants,
-  `APPROVED`/`REQUEST_CHANGES`/`NEEDS_REWORK` convergence), `codex-ask` (advisory second
-  opinion, no gate). Model/effort in one file (`codex/scripts/_common.sh`); state is
-  per-target + gitignored. Codex never merges/deploys — Architect keeps that. Two builder
-  modes (D1): the `docs/handoffs/` brief lane = SHIP mode (Codex commits + opens the PR, per
-  AGENTS.md); `codex-build` = EDIT-ONLY mode (Codex edits the tree, Architect commits —
-  AGENTS.md carries the matching exception). **Model routing + availability fallback:
-  `.claude/skills/codex/ROUTING.md`** — the harness auto-retries the codex chain on
-  at-capacity errors; codex-down → Opus subagent per the table, same receipt contract.
-  **Review router (ROUTING.md): the reviewer is the opposite vendor of the builder** (normal path;
-  during an outage fall back to same-vendor and record the loss) — Codex-built → `claude-review`
-  (Opus subagent); Claude/Opus-built → `codex-code-review` (Codex); both judge the same
-  `checklist.md`. Plan review is already cross-vendor (Claude writes, `codex-plan-review` = Codex).
-  Canonical order: testing gate → cross-vendor review → Architect audit (final gate) → tiered promotion.
+  (owner-triggered 360° platform audit — tiered sharded read-only analyst convergence → one signed
+  doc in `docs/audits/`; analyst is an Opus subagent — a 13-shard Codex audit would eat the whole
+  monthly ration) — instead of improvising inline.
+- **Review + local-model lanes.** `claude-review` (Opus subagent, FRESH thread, DISTINCT lens) is
+  the ONLY review path and judges `.claude/skills/codex/checklist.md` (path is historical; the
+  checklist is vendor-neutral), emitting `APPROVED`/`REQUEST_CHANGES`/`NEEDS_REWORK`. Canonical
+  order: testing gate → review round → Architect audit (final gate) → tiered promotion. ⚠️ **The
+  review and the audit are two gates; the tier lenses inside `delegated-ship` are audit depth, NOT a
+  review round.**
+- **`local-model` skill** (`.claude/skills/local-model/`) = the two ollama models on this box,
+  `qwen3.5:9b` (6.6 GB, 43 tok/s, interactive) and `qwen3.8:27b-q4_K_M` (17 GB, 2.6 tok/s,
+  unattended). They exist for TOKEN BURN, never speed, and they never decide anything. Measured
+  lanes: CI-failure digestion (5/5 both), psql dumps (5/5), service logs (q3.8 5/5, 9b 3/5), doc
+  summaries, SQL drafts (run them and diff the rows), commit-message drafts, prod code from a tight
+  spec on non-money surfaces (q3.8 8/8 vs hidden tests), and defect CANDIDATES before a review round.
+  ⚠️ **Never a review verdict — seven models scored 0/2.** ⚠️ **Any generated test is worthless until
+  red-proofed** — one emitted a 4/4-GREEN suite detecting neither of two planted bugs. ⚠️ **Read
+  `local-model/PROMPTING.md` before writing any prompt for them**: on 2026-08-15 three capability
+  verdicts flipped on a prompt change alone (review 0/2→1/2, psql 0/5→5/5), i.e. we were measuring
+  our probes, not the models — and two wrong verdicts reached merged ledger entries before the owner
+  caught them.
+- **Codex suite — RATIONED 2026-08-15 (owner, $20/mo tier).** `.claude/skills/codex-*` + the
+  `codex/` harness stay ENABLED but budget-gated: `codex-code-review` on money/parity/migration/
+  live-engine PRE-merge, `codex-plan-review` on a size-gate plan if a slot is free. **Never** on
+  builds (`delegated-ship` builds free), docs/mechanical, an advisory `codex-ask`, or merged code.
+  A money/parity item WAITS for a slot with `Cross-vendor review: PENDING (awaiting rationed Codex
+  slot)` — the red `verdict` check is the design; **two missed slots** → ship same-vendor and record
+  it. ⚠️ Always via the harness, never a hand-rolled `codex exec` (the harness owns the sandbox
+  decision). ⚠️ A failed resume leaves the PREVIOUS round's `review.txt` intact — compare its mtime
+  before/after or you will read a confident review of the wrong revision. Full rules + the slot
+  procedure: `.claude/skills/codex/ROUTING.md`.

@@ -149,6 +149,43 @@ public class SwingCatchUpStateRepository {
     }
   }
 
+  /**
+   * Releases {@code RUNNING} rows whose claim predates this process, back to retryable {@code
+   * PENDING}.
+   *
+   * <p><b>Why this exists (cross-vendor review Critical, 2026-08-20).</b> A RuntimeException inside
+   * a claimed run is already handled — the caller holds the claim and writes {@code PENDING} in its
+   * {@code catch}. A <b>hard</b> death (JVM kill, container stop, host power loss) is not: the row
+   * stays {@code RUNNING}, and {@link #claim} will not re-take it until it is {@code
+   * staleLeaseMinutes} old. At a 30-minute lease with an 08:35 cron and a boot door that shuts at
+   * 09:05, <b>the lease can never expire inside the window that still has time to act</b> — so a
+   * crash mid-sweep forfeits that session's entries, and restarting the service does not help.
+   *
+   * <p><b>The claim it rests on:</b> strategy-signal is a single writer (D10 by convention, one
+   * container), so a {@code RUNNING} claim taken BEFORE this process existed cannot be held by
+   * anything alive. That is the whole argument, and it is the reason the cutoff is a process-start
+   * instant rather than a shorter lease: shortening {@code STALE_LEASE_MINUTES} would weaken the
+   * concurrency guard for every caller, which is the opposite trade.
+   *
+   * <p>⚠️ <b>Deliberately NOT restricted to rows a boot sweep created</b> — nothing in the row says
+   * which path claimed it, and an orphan from the cron is exactly as dead. This is stated rather
+   * than hidden: when the boot door is armed, this releases orphans from any path.
+   *
+   * @param processStart an instant at or after this JVM began and before any sweep could claim
+   * @return how many orphaned claims were released
+   */
+  public int releaseClaimsFrom(java.time.Instant processStart) {
+    return jdbc.update(
+        """
+        UPDATE swing_catchup_runs
+           SET status = 'PENDING', reason = 'ORPHANED_BY_RESTART', updated_at = now()
+         WHERE status = 'RUNNING'
+           AND claimed_at IS NOT NULL
+           AND claimed_at < ?
+        """,
+        java.sql.Timestamp.from(processStart));
+  }
+
   /** Returns every retryable row, including rows older than the ordinary rolling session window. */
   public java.util.List<LocalDate> retryableSessions(String batch, int staleLeaseMinutes) {
     return jdbc.query(

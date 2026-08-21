@@ -8,8 +8,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
+import in.arthayantra.marketdata.constituents.StaticIndexConstituents;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
+import in.arthayantra.marketdata.kite.GapBackfiller;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
@@ -98,6 +101,9 @@ class BhavcopyCloseCanaryStaleSessionTest {
         ntfy,
         mock(IngestRunLedger.class),
         Clock.fixed(Instant.parse("2026-08-10T19:00:00Z"), ZoneOffset.UTC),
+        mock(StaticIndexConstituents.class),
+        mock(GapBackfiller.class),
+        mock(MarketCalendar.class),
         meters,
         new MockEnvironment().withProperty("spring.profiles.active", "live"),
         true,
@@ -105,7 +111,8 @@ class BhavcopyCloseCanaryStaleSessionTest {
         new BigDecimal("0.01"),
         20,
         25,
-        100);
+        100,
+        "0 5 16 * * MON-FRI");
   }
 
   private static BhavcopyCloseCanary canary(JdbcTemplate jdbc, NtfyClient ntfy) {

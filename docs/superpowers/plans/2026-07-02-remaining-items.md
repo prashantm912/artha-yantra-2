@@ -293,9 +293,32 @@ item.**
    — "the tidy number hid a defect" and "the defect was already fixed" are different conclusions,
    and only tracing distinguishes them.** This is what `OperatingWindowTest` now exists to prevent.
 
-**Watch, not queued:** boot transient ~163 s is a 3rd consecutive above-band day. Owner ruled
-keep-watching; revisit on a 4th. ⚠️ Today's number is confounded by the mid-session redeploy, so it
-is arguably 2 clean points, not 3 — the 4th observation should come from an undisturbed day.
+✅ **CLOSED 2026-08-21 — the boot transient is not a regression, and the watch was measuring the
+wrong thing.** Owner ruled investigate-on-a-4th; today was the 4th, so it was investigated.
+**`computed` from three boots, and the split is total:**
+
+| boot | start | engine loaded 38/0 | transient | shape |
+|---|---|---|---|---|
+| 2026-08-21 **morning cold** | 02:48:40.463Z | 02:51:42.791Z | **182.3 s** | TWO reloads: 0/38 then 38/0 |
+| 2026-08-21 **evening redeploy** | 12:34:10.963Z | 12:34:58.056Z | **47.1 s** | ONE reload, 38/0 first time |
+| 2026-08-20 **evening redeploy** | 10:29:30.677Z | 10:30:13.182Z | **42.5 s** | ONE reload |
+
+⚠️ **The long transient happens ONLY on a morning cold boot, never on a mid-day redeploy** — and the
+log says exactly why, in one line: `02:50:52.082 kite.status CONNECTED received — requesting bounded
+strategy reload`, followed 50 s later by `reload attempt 1 resolved every universe (38 loaded) —
+retry complete`. The sequence is: 11 s to first contact, an I/O error while market-data is still
+coming up, then `503 DATA_STALE "no term structure"` (market-data is up but has no Kite data), an
+honest `loaded 0 / 38 dropped` at 21 s, **131 s waiting for the Kite session**, then a 50 s bounded
+reload that resolves everything.
+
+⚠️ **So ~131 s of the ~182 s is Kite login latency, which is not ours, and the recovery path works
+exactly as designed.** The engine-load transient is a PROXY for time-to-Kite-connect on a cold
+morning, and the band was set on a mixed population of cold boots and redeploys — which is why the
+same number reads as a 4-day trend when it is really "we booted before Kite was ready", four times.
+⚠️ **If anything is watched here it should be `kite.status CONNECTED` arrival (132 s from boot on
+2026-08-21), not the engine reload.** Not proposing a tripwire: nothing has been shown to be wrong.
+⚠️ **Adjacent, self-healed, recorded not chased:** `INSTRUMENT_SYNC` **FAILURE at 08:30:00** today,
+with SUCCESS either side (08:21:19 and 09:05:00).
 
 **Open, unstarted:** ✅ **H28 is CLOSED 2026-08-21 — measured, and the answer is DO NOT CHANGE THE
 THRESHOLD.** The divergence exists only where KITE writes the bar (BHAVCOPY-sourced rows are

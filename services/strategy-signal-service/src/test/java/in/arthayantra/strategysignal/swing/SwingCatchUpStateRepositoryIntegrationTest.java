@@ -352,6 +352,89 @@ class SwingCatchUpStateRepositoryIntegrationTest extends StrategySignalIntegrati
     assertThat(reason).isEqualTo(refusal);
   }
 
+  /**
+   * The orphan release (cross-vendor review, 2026-08-21) — against the REAL statement, because the
+   * unit test cannot see it.
+   *
+   * <p>⚠️ <b>Why this exists, and it is the same miss as the one two tests above.</b> The boot
+   * door's unit test fakes {@code releaseClaimsFrom} with a stub that moves its own fixture set back
+   * to pending and <b>ignores the cutoff entirely</b>, and it verifies only {@code
+   * releaseClaimsFrom(any())}. So it stays green if the real SQL binds the wrong timestamp, matches
+   * the wrong statuses, or releases claims NEWER than process start — the last of which would hand a
+   * live claim to a second caller and re-open the doubled-entry hole the whole table exists to
+   * close. A mock that implements the desired result is not evidence the statement produces it.
+   *
+   * <p>The cutoff is read from the DATABASE clock rather than {@code Instant.now()}, so the test
+   * asserts the predicate rather than the host-vs-container clock skew.
+   */
+  @Test
+  void releaseClaimsFromFreesOnlyRunningClaimsOlderThanTheCutoff() {
+    String old = "cu-it-orphan-old-" + System.nanoTime();
+    String fresh = "cu-it-orphan-fresh-" + System.nanoTime();
+    String done = "cu-it-orphan-done-" + System.nanoTime();
+    String abandoned = "cu-it-orphan-abandoned-" + System.nanoTime();
+    String pending = "cu-it-orphan-pending-" + System.nanoTime();
+
+    assertThat(state.claim(old, SESSION, 30)).isPresent();
+    assertThat(state.claim(fresh, SESSION, 30)).isPresent();
+    assertThat(state.claim(done, SESSION, 30)).isPresent();
+    state.markDone(done, SESSION);
+    state.markAbandoned(abandoned, SESSION, "ATTEMPT_BUDGET_EXHAUSTED");
+    assertThat(state.claim(pending, SESSION, 30)).isPresent();
+    state.markPending(pending, SESSION, "EXECUTION_FAILED");
+
+    // ⚠️ Backdate EVERY non-`fresh` fixture, not just `old`. First cut backdated only `old`, which
+    // left the terminal and PENDING rows newer than the cutoff — so the TIMESTAMP predicate excluded
+    // them and the STATUS predicate was never exercised. A red-proof that broadened the statuses to
+    // ('RUNNING','DONE','ABANDONED') stayed GREEN, which is a finding about the test, not a pass.
+    // With them backdated, status is the ONLY thing that can spare them.
+    for (String batch : java.util.List.of(old, done, abandoned, pending)) {
+      jdbc.update(
+          "UPDATE swing_catchup_runs SET claimed_at = now() - interval '2 hours'"
+              + " WHERE batch = ? AND session_date = ?",
+          batch, java.sql.Date.valueOf(SESSION));
+    }
+    java.time.Instant cutoff =
+        jdbc.queryForObject("SELECT now() - interval '1 hour'", java.sql.Timestamp.class).toInstant();
+
+    int released = state.releaseClaimsFrom(cutoff);
+
+    assertThat(released)
+        .as("exactly the one RUNNING claim older than the cutoff — a count that grows with the"
+            + " fixture is the tell that the predicate is not doing the filtering")
+        .isEqualTo(1);
+    assertThat(statusOf(old)).isEqualTo("PENDING");
+    assertThat(reasonOf(old)).isEqualTo("ORPHANED_BY_RESTART");
+    assertThat(state.claim(old, SESSION, 30))
+        .as("and it is genuinely reclaimable again — PENDING that cannot be claimed is not a fix")
+        .isPresent();
+
+    assertThat(statusOf(fresh))
+        .as("a claim taken AFTER the cutoff is live; releasing it would hand a running session to a"
+            + " second caller, which is the doubled entry this table exists to prevent")
+        .isEqualTo("RUNNING");
+    assertThat(statusOf(done)).as("terminal DONE must not be resurrected").isEqualTo("DONE");
+    assertThat(statusOf(abandoned)).isEqualTo("ABANDONED");
+    assertThat(statusOf(pending)).isEqualTo("PENDING");
+    assertThat(reasonOf(pending))
+        .as("an already-PENDING row keeps its own refusal reason — the release must not relabel"
+            + " rows it did not free")
+        .isEqualTo("EXECUTION_FAILED");
+  }
+
+  @Test
+  void releaseClaimsFromIsANoOpWhenNothingIsOrphaned() {
+    String batch = "cu-it-orphan-noop-" + System.nanoTime();
+    assertThat(state.claim(batch, SESSION, 30)).isPresent();
+    java.time.Instant cutoff =
+        jdbc.queryForObject("SELECT now() - interval '1 hour'", java.sql.Timestamp.class).toInstant();
+
+    assertThat(state.releaseClaimsFrom(cutoff))
+        .as("the ordinary boot: nothing died holding a claim, so nothing is touched")
+        .isZero();
+    assertThat(statusOf(batch)).isEqualTo("RUNNING");
+  }
+
   @Test
   void latestReturnsTheMostRecentlyUpdatedRowAndEmptyForAnUnknownBatch() {
     String batch = "cu-it-latest-" + System.nanoTime();

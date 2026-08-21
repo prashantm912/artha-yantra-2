@@ -319,6 +319,17 @@ class MonitorSchedulingConfigTest {
           assertThat(scheduler)
               .as("a distinct pool from the fenced monitor detectors")
               .isNotSameAs(context.getBean("monitorTaskScheduler"));
+          // ⚠️ RATCHET (H18, 2026-08-14). Since SwingBatchBootCatchUp dispatches the BOOT sweep onto
+          // this same pool, a CORE size of 1 is what makes a boot landing in the same second as the
+          // 08:35 tick SERIALIZE with it instead of running concurrently. Raising it looks like a
+          // harmless perf change and would silently drop that guarantee back onto the durable claim.
+          //
+          // ⚠️ getCorePoolSize(), NOT getPoolSize(): the latter is the number of threads CURRENTLY
+          // alive, which is 0 until something is submitted — so the obvious spelling asserts 1 == 0
+          // and fails on a correctly configured pool. Measured here, not assumed.
+          assertThat(scheduler.getScheduledThreadPoolExecutor().getCorePoolSize())
+              .as("the boot door and the 08:35 cron share this pool and must not run concurrently")
+              .isEqualTo(1);
         });
   }
 

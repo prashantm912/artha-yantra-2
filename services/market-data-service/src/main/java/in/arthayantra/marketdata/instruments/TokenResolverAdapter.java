@@ -22,6 +22,7 @@ public class TokenResolverAdapter implements InstrumentTokenResolver {
 
   private final InstrumentRepository repository;
   private final Counter beFallbacks;
+  private final Counter inactiveBeFallbacks;
 
   /** Wires the master. */
   public TokenResolverAdapter(InstrumentRepository repository, MeterRegistry meters) {
@@ -29,6 +30,15 @@ public class TokenResolverAdapter implements InstrumentTokenResolver {
     this.beFallbacks =
         Counter.builder("ay_instrument_be_suffix_fallback_total")
             .description("NSE token resolutions that succeeded only via the -BE suffixed symbol")
+            .register(meters);
+    // ⚠️ A SECOND counter rather than a tag on the first, deliberately: the H36 half is a NEW
+    // behaviour on rows that previously resolved (to a token Kite rejects), so it has to be
+    // separable from the H29 half at a glance. Retagging the existing series would also have
+    // changed its shape for anything already reading it.
+    this.inactiveBeFallbacks =
+        Counter.builder("ay_instrument_be_suffix_inactive_fallback_total")
+            .description(
+                "NSE token resolutions that preferred the -BE twin because the bare row was inactive")
             .register(meters);
   }
 
@@ -54,21 +64,56 @@ public class TokenResolverAdapter implements InstrumentTokenResolver {
    * <p>The counter is the point as much as the resolution is: the original failure was invisible
    * because it fail-softed. A silent SUCCESS would repeat that mistake, so every fallback is counted
    * and the first one per symbol is logged.
+   *
+   * <p>⚠️ <b>The second half (ledger H36).</b> H29 closed the tokenless case and left a wider one
+   * open, because it keyed on the condition that matched the two symbols it was looking at. The
+   * bare row can also carry a token that Kite <b>rejects</b> — {@code 400 … invalid token} — and
+   * such a row RESOLVES, so the fallback above never fired for it. Measured 2026-08-21: <b>twelve</b>
+   * NSE symbols in that state, every one {@code is_active = false} with a token. So an inactive bare
+   * row now prefers its {@code -BE} twin.
+   *
+   * <p>⚠️ <b>Strictly additive, and that is a deliberate limit rather than an accident.</b> The twin
+   * only wins when the bare row is absent, tokenless, or inactive; when there is no twin the bare
+   * row's own answer is returned unchanged. NSE holds ~549 inactive-with-token rows and only 160 of
+   * all inactive rows have a twin at all — returning empty for the remainder would turn a broken
+   * {@code 400} into a NEW {@code 404} across a population nobody asked about, which is a wider
+   * change than this fix is for. Nothing that resolved before stops resolving.
    */
   @Override
   public Optional<TokenInfo> resolve(InstrumentKey key) {
-    Optional<TokenInfo> direct = lookup(key.exchange(), key.tradingsymbol());
-    if (direct.isPresent() || !isBeFallbackCandidate(key)) {
+    Optional<Instrument> directRow = repository.findByKey(key.exchange(), key.tradingsymbol());
+    Optional<TokenInfo> direct = directRow.flatMap(TokenResolverAdapter::token);
+    if (!isBeFallbackCandidate(key)) {
+      return direct;
+    }
+    // An ACTIVE bare row that carries a token is the answer, exactly as before. This is the branch
+    // 10,205 of NSE's 11,058 rows take, and nothing below can reach them.
+    boolean directIsUsable = direct.isPresent() && directRow.get().active();
+    if (directIsUsable) {
       return direct;
     }
     Optional<TokenInfo> viaBe = lookup(NSE, key.tradingsymbol() + BE_SUFFIX);
     if (viaBe.isPresent()) {
-      beFallbacks.increment();
-      log.info(
-          "instrument {}:{} resolved via its {} twin — the bare row carries no Kite token (H29)",
-          key.exchange(), key.tradingsymbol(), BE_SUFFIX);
+      if (direct.isPresent()) {
+        inactiveBeFallbacks.increment();
+        log.info(
+            "instrument {}:{} resolved via its {} twin — the bare row is INACTIVE and its token is"
+                + " one Kite rejects (H36)",
+            key.exchange(), key.tradingsymbol(), BE_SUFFIX);
+      } else {
+        beFallbacks.increment();
+        log.info(
+            "instrument {}:{} resolved via its {} twin — the bare row carries no Kite token (H29)",
+            key.exchange(), key.tradingsymbol(), BE_SUFFIX);
+      }
+      return viaBe;
     }
-    return viaBe;
+    // ⚠️ `direct`, NOT empty. This is what keeps the change STRICTLY ADDITIVE: an inactive bare row
+    // with no twin answers exactly what it answered before (a token Kite will reject), rather than
+    // becoming a 404. Turning a broken 400 into a NEW 404 across the ~389 inactive-with-token rows
+    // that have no twin would be a wider behaviour change than the one this fix is for, and on rows
+    // nobody asked about.
+    return direct;
   }
 
   /**
@@ -94,9 +139,13 @@ public class TokenResolverAdapter implements InstrumentTokenResolver {
   }
 
   private Optional<TokenInfo> lookup(String exchange, String tradingsymbol) {
-    return repository
-        .findByKey(exchange, tradingsymbol)
-        .filter(i -> i.instrumentToken() != null)
-        .map(i -> new TokenInfo(i.instrumentToken(), i.instrumentType(), i.segment()));
+    return repository.findByKey(exchange, tradingsymbol).flatMap(TokenResolverAdapter::token);
+  }
+
+  /** A row's token, or empty when it carries none — the tokenless-bare-row case H29 is about. */
+  private static Optional<TokenInfo> token(Instrument row) {
+    return row.instrumentToken() == null
+        ? Optional.empty()
+        : Optional.of(new TokenInfo(row.instrumentToken(), row.instrumentType(), row.segment()));
   }
 }

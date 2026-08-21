@@ -45,8 +45,61 @@ class TokenResolverBeSuffixTest {
         token == null ? null : exchange, "EQ", null, null, null, null, null, null, token != null);
   }
 
+  /** A row that carries a token but is no longer active — the H36 shape. */
+  private static Instrument inactiveRow(String exchange, String tradingsymbol, Long token) {
+    return new Instrument(
+        exchange, tradingsymbol, token, tradingsymbol, exchange, "EQ", null, null, null, null, null,
+        null, false);
+  }
+
   private double fallbackCount() {
     return meters.find("ay_instrument_be_suffix_fallback_total").counter().count();
+  }
+
+  private double inactiveFallbackCount() {
+    return meters.find("ay_instrument_be_suffix_inactive_fallback_total").counter().count();
+  }
+
+  @Test
+  @DisplayName("an INACTIVE bare row prefers its -BE twin, even though it resolves on its own (H36)")
+  void anInactiveBareRowPrefersItsTwin() {
+    // ⚠️ This is the half H29 could not reach, and the reason is worth stating: the bare row here
+    // RESOLVES. `lookup()` returned a token, the fallback never fired, and Kite then answered
+    // `400 … invalid token` every evening. Measured 2026-08-21: TWELVE symbols in this exact state
+    // (DIACABS, MENONBE, TIRUPATIFL, SPECTRUM, MTARTECH, KAMDHENU, PANACHE, NRL, MAHASTEEL, HMVL,
+    // ESAFSFB, BLISSGVS), all `is_active = f` with a token — not the two the ledger row named.
+    when(repository.findByKey(NSE, "DIACABS")).thenReturn(Optional.of(inactiveRow(NSE, "DIACABS", 4747009L)));
+    when(repository.findByKey(NSE, "DIACABS-BE"))
+        .thenReturn(Optional.of(row(NSE, "DIACABS-BE", 4747521L)));
+
+    assertThat(resolver.resolve(new InstrumentKey(NSE, "DIACABS")))
+        .map(TokenInfo::instrumentToken)
+        .as("the ACTIVE twin's token, not the inactive row's own")
+        .contains(4747521L);
+    assertThat(inactiveFallbackCount())
+        .as("counted on its OWN series — this path is new behaviour on rows that used to resolve,"
+            + " so it has to be separable from the H29 half at a glance")
+        .isEqualTo(1.0);
+    assertThat(fallbackCount())
+        .as("and it must NOT inflate the H29 counter, which measures a different population")
+        .isZero();
+  }
+
+  @Test
+  @DisplayName("an INACTIVE bare row with NO twin still answers what it always answered")
+  void anInactiveBareRowWithNoTwinKeepsItsOwnAnswer() {
+    // ⚠️ The property that keeps this change strictly additive, and the one worth a test of its
+    // own: ~389 NSE rows are inactive-with-token and have no -BE twin. Returning empty for them
+    // would turn a broken 400 into a NEW 404 across a population nobody asked about — a wider
+    // behaviour change than the fix is for. They keep resolving exactly as before.
+    when(repository.findByKey(NSE, "GONE")).thenReturn(Optional.of(inactiveRow(NSE, "GONE", 111L)));
+    when(repository.findByKey(NSE, "GONE-BE")).thenReturn(Optional.empty());
+
+    assertThat(resolver.resolve(new InstrumentKey(NSE, "GONE")))
+        .map(TokenInfo::instrumentToken)
+        .contains(111L);
+    assertThat(inactiveFallbackCount()).isZero();
+    assertThat(fallbackCount()).isZero();
   }
 
   @Test

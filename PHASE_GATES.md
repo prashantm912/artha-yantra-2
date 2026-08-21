@@ -199,6 +199,33 @@ subset is CI-enforced).
 > (`revisit-scalper-budget-inr-2026-08-12`). **H2** (18 live `-pe` strategies, 0 signals since 07-21
 > against 69 non-PE) needs no new data — only someone to read the query it already has.
 
+> **CURRENCY UPDATE 2026-08-20 — the redirect below still stands; this is a dated marker, not a
+> summary.** Deliberately NOT a recap of the intervening period: I observed 2026-08-19/20 directly
+> and would be reconstructing the rest, which is exactly the failure the block below warns about.
+>
+> **Frontier now:** the ledger's **group H** (H1…H36 as of tonight) plus the four owner-held PRs
+> (#1283, #1354, #1368, #1376). Two operating changes a returning reader needs, both owner decisions:
+> **(1) Codex is RATIONED** ($20 tier, 2026-08-15) — a slot is spent only on money/parity/migration/
+> live-engine review, PRE-merge; everything else gets a same-vendor `claude-review` round, and the
+> verdict line must record the loss. First measurement 2026-08-20: **~16 min per round, and a slot
+> buys one ROUND, not one item** (two slots that day closed one item). **(2) The deploy floor moved
+> 15:30 → 16:30 IST** — 15:30 cleared the market close but not the 15:53 post-market routine, which
+> spends ~20 min reading `docker logs`; a 15:59 deploy recreated both services mid-run and survived
+> only on ordering luck.
+>
+> **Shipped + deployed 2026-08-20:** H27 (#1418) moved the swing settle 16:00/16:02 → 18:52/18:53 and
+> pinned the session — **live-verified the same evening: STALE bars 10 → 4 and a real stop fired at
+> 18:52:06, exit price equal to that day's close.** H29 (#1424) resolves BE-series NSE symbols through
+> their `-BE` twin. **Merged, deploys 08-21:** #1427 (CONTEXT_SHIFT phone cap) and #1432 (H35 —
+> day-context had asked for a non-canonical `NIFTY` for the whole life of the feature, persisting 26
+> rows of all-null options scalars under a success log line).
+>
+> ⚠️ **The one thing worth carrying forward is a method note, not a status:** every defect found on
+> 08-20 had been wrong for weeks behind a **success-shaped log line**, and both new ones surfaced
+> while tracing something else. `MarketContextEodJob` HAD a guard for a bad digest, ran nightly, and
+> structurally could not see the failure it was written for. **Ask of every guard: what failure can
+> it NOT see, and does that failure look like success?**
+
 > **CURRENCY UPDATE 2026-08-17 — READ THIS, THEN GO STRAIGHT TO THE LEDGER.** These currency blocks
 > had stopped at 2026-08-02, i.e. **15 days stale** — long enough for a reader to take a false
 > picture from them before reaching the redirect at the top of this section. **The one-hop

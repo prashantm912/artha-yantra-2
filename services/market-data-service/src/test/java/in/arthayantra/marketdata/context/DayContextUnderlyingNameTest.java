@@ -13,7 +13,7 @@ import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.candles.CandleQueryService;
 import in.arthayantra.marketdata.canary.IngestHealthBoard;
 import in.arthayantra.marketdata.instruments.UnderlyingRef;
-import in.arthayantra.marketdata.kite.QuoteGateway;
+import in.arthayantra.marketdata.kite.VixQuoteCache;
 import in.arthayantra.marketdata.options.OptionsDigestService;
 import in.arthayantra.marketdata.upstox.UpstoxGlobalInstrumentsClient;
 import java.io.IOException;
@@ -210,7 +210,7 @@ class DayContextUnderlyingNameTest {
       OptionsDigestService digest, IngestHealthBoard board, String configuredName) {
     return new DayContextService(
         digest,
-        mock(QuoteGateway.class),
+        mock(VixQuoteCache.class),
         new org.springframework.beans.factory.support.StaticListableBeanFactory()
             .getBeanProvider(UpstoxGlobalInstrumentsClient.class),
         mock(CandleQueryService.class),

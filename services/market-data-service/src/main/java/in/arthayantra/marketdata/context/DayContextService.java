@@ -8,6 +8,7 @@ import in.arthayantra.marketdata.candles.CandleQueryService;
 import in.arthayantra.marketdata.instruments.UnderlyingRef;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
+import in.arthayantra.marketdata.kite.VixQuoteCache;
 import in.arthayantra.marketdata.options.OptionsDigestService;
 import in.arthayantra.marketdata.upstox.UpstoxGlobalInstrumentsClient;
 import in.arthayantra.marketdata.upstox.WorldIndex;
@@ -112,7 +113,7 @@ public class DayContextService {
   private static final BigDecimal RANGE_NARROW = BigDecimal.valueOf(0.8);
 
   private final OptionsDigestService optionsDigest;
-  private final QuoteGateway quoteGateway;
+  private final VixQuoteCache vixQuotes;
   private final ObjectProvider<UpstoxGlobalInstrumentsClient> worldIndices;
   private final CandleQueryService candles;
   private final IngestHealthBoard healthBoard;
@@ -131,7 +132,7 @@ public class DayContextService {
   /** Wires the reused digest + the market-data-native context ports and the display/config knobs. */
   public DayContextService(
       OptionsDigestService optionsDigest,
-      QuoteGateway quoteGateway,
+      VixQuoteCache vixQuotes,
       ObjectProvider<UpstoxGlobalInstrumentsClient> worldIndices,
       CandleQueryService candles,
       IngestHealthBoard healthBoard,
@@ -147,7 +148,7 @@ public class DayContextService {
       @Value("${artha.context.vix-elevated:17}") BigDecimal vixElevated,
       @Value("${artha.context.vix-high:22}") BigDecimal vixHigh) {
     this.optionsDigest = optionsDigest;
-    this.quoteGateway = quoteGateway;
+    this.vixQuotes = vixQuotes;
     this.worldIndices = worldIndices;
     this.candles = candles;
     this.healthBoard = healthBoard;
@@ -240,8 +241,11 @@ public class DayContextService {
 
   private Vix vix(List<String> notes) {
     try {
-      QuoteGateway.Quote q = quoteGateway.quotes(List.of(vixKey)).get(vixKey);
-      if (q == null || q.lastPrice() == null) {
+      // H31: the VIX read is the single largest cost in this assembly -- it queues behind the
+      // 1/s kite-quote limiter, measured at ~1.5 s of a ~1.9 s day-context against the insight
+      // sweep's 2000 ms read timeout. Served from the short-TTL cache instead of a fresh call.
+      QuoteGateway.Quote q = vixQuotes.quote(vixKey).orElse(null);
+      if (q == null) {
         notes.add("INDIA VIX quote unavailable (off-hours / analytics off)");
         return null;
       }

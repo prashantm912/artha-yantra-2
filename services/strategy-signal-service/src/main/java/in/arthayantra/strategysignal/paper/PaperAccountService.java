@@ -149,13 +149,36 @@ public class PaperAccountService {
     return total.setScale(2, RoundingMode.HALF_UP);
   }
 
-  /** Σ unrealized over ONE book's rows, or ZERO if any single one of them cannot be marked. */
+  /**
+   * Σ unrealized over ONE book's rows. When any single row cannot be marked the book WITHHOLDS —
+   * but only upward: it reports {@code min(0, partial)}, never a positive partial sum.
+   *
+   * <p>⚠️ <b>Why not a flat ZERO (cross-vendor review Critical, 2026-08-21).</b> Returning ZERO on
+   * the first unmarkable row discards every real mark in the book, and ZERO is ABOVE the truth
+   * exactly when the book is losing. That is fail-OPEN on a money rail. The reachable consumer is
+   * the {@code scalper} book (V021: 20 option slots, {@code daily_loss_limit} and {@code
+   * daily_profit_target} both enabled, both evaluated against {@code dayPnl = realized +
+   * unrealizedTotal}) — so ONE unmarkable option among twenty would have erased the whole book's
+   * open P&amp;L from its own daily-loss stop, while simultaneously overstating equity into {@code
+   * PositionSizer}, {@code max_deployment_pct}, the {@code mode: pct} rails and {@code
+   * currentHeatPct}. The original all-or-nothing analysis held only for the two all-cash swing
+   * books, where every row was unmarked before and after so 0 == 0; it was never true of a
+   * PARTIALLY marked book.
+   *
+   * <p><b>What the clamp preserves.</b> A net-POSITIVE partial sum is still withheld to 0 — that is
+   * the cherry-pick this method rightly refuses, since the unmarked rows could be losers. A
+   * net-NEGATIVE partial sum is reported in full: never discard a loss you have actually measured.
+   * The result therefore dominates both a flat ZERO and a raw partial sum in the conservative
+   * direction, and {@link #unrealizedWithheld} still flags the degraded state either way.
+   */
   private BigDecimal unrealizedForBook(List<PositionRow> open) {
     BigDecimal total = BigDecimal.ZERO;
+    boolean withheld = false;
     for (PositionRow pos : open) {
       Optional<BigDecimal> mark = mark(pos);
       if (mark.isEmpty()) {
-        return BigDecimal.ZERO; // withhold the WHOLE book — see unrealizedTotal
+        withheld = true;
+        continue;
       }
       BigDecimal move =
           "BUY".equals(pos.side())
@@ -163,7 +186,7 @@ public class PaperAccountService {
               : pos.avgEntryPrice().subtract(mark.get());
       total = total.add(move.multiply(BigDecimal.valueOf(pos.qty())));
     }
-    return total;
+    return withheld ? total.min(BigDecimal.ZERO) : total;
   }
 
   /** Open positions grouped by their own book (the unit all-or-nothing applies to). */

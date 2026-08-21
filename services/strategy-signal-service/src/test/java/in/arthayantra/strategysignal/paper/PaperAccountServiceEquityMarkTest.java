@@ -277,6 +277,45 @@ class PaperAccountServiceEquityMarkTest {
    * fallback (the loser's loss was erased), loosening every {@code mode: pct} rail. Withholding the
    * whole book must land BELOW the all-marked figure, never above it.
    */
+  /**
+   * The mirror of the test below, and the case the all-or-nothing version got WRONG (cross-vendor
+   * review Critical, 2026-08-21).
+   *
+   * <p>When the MARKED subset is net-negative, a flat ZERO is ABOVE the truth — so the book's own
+   * daily-loss rail sees a healthier number than reality, on the one book that has such a rail
+   * enabled ({@code scalper}: 20 option slots, {@code daily_loss_limit} + {@code
+   * daily_profit_target}, both evaluated against {@code dayPnl = realized + unrealizedTotal}). One
+   * unmarkable option among twenty would have erased the whole book's open loss from its own stop.
+   *
+   * <p>⚠️ No existing test could see this: every other fixture here ends fully marked, or with a
+   * net-POSITIVE marked subset where withholding to 0 is correct. The defect lives only in the
+   * mixed-and-losing state.
+   */
+  @Test
+  void aMeasuredLossIsNeverDiscardedByWithholding() {
+    PositionRow loser = row(1, BOOK, "LOSER", 10, "100.00"); // marks at 40 -> -600
+    PositionRow blind = row(2, BOOK, "BLIND", 10, "100.00"); // no mark of any kind
+    PaperPositionRepository positions = mock(PaperPositionRepository.class);
+    when(positions.listOpen(any(String.class))).thenReturn(List.of(loser, blind));
+    when(positions.listOpen(null)).thenReturn(List.of(loser, blind));
+
+    EquityMarkCache loserOnly = new EquityMarkCache(
+        Clock.fixed(Instant.parse("2026-08-13T03:05:00Z"), ZoneOffset.UTC), 5);
+    loserOnly.put("NSE", "LOSER", new BigDecimal("40.00"), SESSION);
+    PaperAccountService degraded = svc(positions, loserOnly, noTicks());
+
+    assertThat(degraded.unrealizedTotal(BOOK))
+        .as("a flat ZERO here reports the book as FLAT while it is down 600 — fail-OPEN on the rail"
+            + " that is supposed to stop the day. The measured loss must survive.")
+        .isEqualByComparingTo("-600.00");
+    assertThat(degraded.equity(BOOK))
+        .as("and equity must come DOWN by it, not stay at the blind figure")
+        .isEqualByComparingTo("149400.00");
+    assertThat(degraded.unrealizedWithheld(BOOK))
+        .as("still flagged degraded — reporting the loss does not mean the book is fully marked")
+        .isTrue();
+  }
+
   @Test
   void anUnmarkedLoserMustNotPushEquityAboveTheFullyMarkedFigure() {
     PositionRow winner = row(1, BOOK, "WINNER", 10, "100.00"); // marks at 150 -> +500
@@ -300,7 +339,8 @@ class PaperAccountServiceEquityMarkTest {
         .as("truth: +500 winner, -600 loser = -100 unrealized")
         .isEqualByComparingTo("149900.00");
     assertThat(degraded.unrealizedTotal(BOOK))
-        .as("the loser cannot be marked -> the WHOLE book is withheld, not just the loser")
+        .as("the marked subset is net-POSITIVE (+500) — a positive partial is the cherry-pick"
+                + " this refuses, since the unmarked row could be a loser, so it withholds to 0")
         .isEqualByComparingTo("0.00");
     assertThat(degraded.equity(BOOK))
         .as(

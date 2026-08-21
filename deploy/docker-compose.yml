@@ -713,6 +713,14 @@ services:
       # SAME bar the on-time run would have. Default-OFF: it fires real entries + real paper exits.
       ARTHA_SWING_CATCHUP_ENABLED: ${ARTHA_SWING_CATCHUP_ENABLED:-false}
       ARTHA_SWING_CATCHUP_CRON: "${ARTHA_SWING_CATCHUP_CRON:-0 35 8 * * MON-FRI}"
+      # BOOT door for the same sweep (H18, 2026-08-14). Spring never replays a @Scheduled fire that
+      # ticked while the process was down, and this machine boots ~08:00 against that 08:35 cron — so
+      # a boot at 08:38 misses the ONLY pass that takes swing entries and forfeits them permanently.
+      # ⚠️ SEPARATE from ARTHA_SWING_CATCHUP_ENABLED on purpose: that one is `false` here but TRUE in
+      # .env (it arms the live 08:35 entry pass), so reusing it would have shipped the boot door armed
+      # on the first deploy, and shipping it inert would have meant disabling swing entries. BOTH must
+      # be true for the boot door to act; this one alone opens the door.
+      ARTHA_SWING_BOOT_CATCHUP_ENABLED: ${ARTHA_SWING_BOOT_CATCHUP_ENABLED:-false}
       # How many missed sessions the sweep will keep retrying before it abandons one (a held bar that
       # never lands). The scan window is this + 2 most-recent trading days, so a multi-day outage
       # catches up every session in range, oldest first.

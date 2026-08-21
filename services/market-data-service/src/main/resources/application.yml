@@ -95,6 +95,14 @@ artha:
     # env name, so the ${...} placeholder MUST byte-match the compose passthrough
     # ARTHA_SNAPSHOT_RETENTION_DAYS (#653) for a .env override to reach the container.
     snapshot-retention-days: ${ARTHA_SNAPSHOT_RETENTION_DAYS:365}
+    # H31: TTL (seconds) for the INDIA VIX spot quote. LiveQuoteGateway routes every call
+    # through the kite-quote limiter, which is 1/s for the whole service, so a VIX read spends
+    # its time QUEUEING, not talking to Kite -- measured 2026-08-21: GET /market/vix 1.530 s
+    # mean over 31 calls, and the same inline call inside day-context put it at 1.920 s against
+    # the insight sweep's 2000 ms read timeout (6 of 8 responses discarded that morning).
+    # 0 disables the cache. Key MUST byte-match the compose passthrough
+    # ARTHA_VIX_QUOTE_CACHE_TTL_SECONDS (#653) or a .env override never reaches the container.
+    vix-quote-cache-ttl-seconds: ${ARTHA_VIX_QUOTE_CACHE_TTL_SECONDS:30}
   # I1 day-context: the index whose options digest is bundled into GET /context/day-context and
   # persisted as the market_context_days scalar baselines.
   # ⚠️ MUST be a CANONICAL cash-index tradingsymbol. This defaulted to a bare `NIFTY` -- not a

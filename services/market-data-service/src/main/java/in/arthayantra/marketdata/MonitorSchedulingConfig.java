@@ -137,6 +137,39 @@ public class MonitorSchedulingConfig {
   }
 
   /**
+   * A single daemon thread owned solely by {@code NseEodScheduler.retryFailedSources} — the
+   * intra-day retry for the three NSE EOD sources, which fires at 09:50/11:50/14:50 IST, INSIDE
+   * market hours.
+   *
+   * <p><b>Why it cannot sit on the default pool.</b> Its worst case is long and its bad day is
+   * exactly the day it runs. {@code LiveParticipantOiFetcher} walks back six days SEQUENTIALLY,
+   * each call through {@code NseHttpClient}'s 8 s connect + 12 s read budget, so a blackholed
+   * network — connections that HANG rather than refuse, the 2026-08-19/20 shape — holds the thread
+   * for ~120 s, plus ~20 s for FII/DII. On the default pool that stalls all ~32 scheduled methods,
+   * and two of them are in-session write paths that would visibly lose work:
+   * {@code OptionsSnapshotService.scheduledSnapshot} (every 2 minutes, ~70 s per pass — so a hold
+   * this long costs a whole live OI capture) and {@code InstrumentSyncScheduler.morningSyncCatchUp},
+   * whose own javadoc names this hazard as "the exact defect S1 was just fixed for".
+   *
+   * <p><b>Why not {@link #monitorTaskScheduler()}.</b> Same fence as {@code barFlushTaskScheduler}
+   * and {@code oiCaptureTaskScheduler}: that pool is reserved for pure liveness DETECTORS, and this
+   * is an external-HTTP write path — the single worst thing to park next to
+   * {@code FeedWatchdog.check}.
+   *
+   * <p>Moving the CRON MINUTE was the cheaper alternative and is deliberately not what was done. It
+   * would dodge the two collisions named above, but the ~140 s hold stalls the default pool from
+   * whatever minute it starts on; the minute was never the hazard.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler nseRetryTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("nse-retry-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
+
+  /**
    * A single daemon thread owned solely by {@code BhavcopyCloseCanary.prefetchPopulation} — the
    * 16:05 IST pass that fetches the close canary's OWN comparison population (the NIFTY 200
    * reference list) through the rate-limited Kite historical path.

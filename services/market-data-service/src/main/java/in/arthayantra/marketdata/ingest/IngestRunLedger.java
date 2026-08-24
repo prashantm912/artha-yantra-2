@@ -111,11 +111,26 @@ public class IngestRunLedger {
   }
 
   /**
-   * True when {@code source} already has a SUCCESS row for TODAY (IST).
+   * True when {@code source} already has a SUCCESS row for TODAY (IST) that actually WROTE
+   * something.
    *
    * <p>Exists for the intra-day retry: a source that already landed must not be re-fetched, both
    * because it is pointless and because NSE's anti-bot behaviour makes needless requests a real cost
    * (this scheduler's class javadoc calls that out).
+   *
+   * <p>⚠️ {@code status} ALONE is not enough, and this is the whole reason the row count is in the
+   * predicate. {@link #record} stamps SUCCESS on any non-throwing return, and two real paths return
+   * normally having stored nothing: {@code LiveFiiDiiFetcher} iterates an empty JSON array to an
+   * empty list, and {@code LiveParticipantOiFetcher}'s {@code csv.contains("Client Type")} guard is
+   * satisfied by the HEADER LINE alone, so a truncated file parses to zero rows. Both are the
+   * 200-that-is-not-data shape NSE anti-bot actually produces — and on {@code status} alone each
+   * would record SUCCESS and permanently disarm that day's remaining retries, in the exact failure
+   * mode the retry exists for. {@code status} was an audit field before it became a control input.
+   *
+   * <p>⚠️ Honest limit: {@code rows_written} counts rows SUBMITTED to an upsert, not rows STORED
+   * — the NSE upserts are {@code ON CONFLICT DO UPDATE}, so a re-fetch of unchanged data still
+   * counts. This closes the EMPTY-RESPONSE hole and not the general one; do not read a positive
+   * count as proof that new data landed.
    *
    * <p>⚠️ The date comparison is IST on BOTH sides, deliberately. In-container {@code now()} is UTC,
    * so a bare {@code started_at::date} would roll the "today" boundary at 05:30 IST and make an
@@ -130,6 +145,7 @@ public class IngestRunLedger {
       Boolean found =
           jdbc.queryForObject(
               "SELECT EXISTS (SELECT 1 FROM ingest_runs WHERE source = ? AND status = 'SUCCESS'"
+                  + " AND COALESCE(rows_written, 0) > 0"
                   + " AND (started_at AT TIME ZONE 'Asia/Kolkata')::date"
                   + "   = (now() AT TIME ZONE 'Asia/Kolkata')::date)",
               Boolean.class,

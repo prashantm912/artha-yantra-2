@@ -57,7 +57,13 @@ class OperatingWindowTest {
     JOBS.put("artha.bhavcopy.eod-cron", MD + "bhavcopy/BhavcopyBackfillService.java");
     JOBS.put("artha.nse.eod-cron", MD + "nse/NseEodScheduler.java");
     // Intra-day retry for a FAILED NSE pull (2026-08-24). Three firings a day, so the collision
-    // check below expands it to 09:50/11:50/14:50 and each must be free — that is why it is here.
+    // check below expands it to 09:50/11:50/14:50. ⚠️ "Free" there means free of the jobs in THIS
+    // map, which is NOT the same as free: the review of #1451 found 09:50 already shared with
+    // OptionsSnapshotService (0 */2) and InstrumentSyncScheduler (:05,:20,:35,:50 at 9-10), neither
+    // catalogued — and the latter's cron is hardcoded, so a property-keyed map CANNOT hold it. The
+    // real containment is that the retry now owns nseRetryTaskScheduler, not that the minute is
+    // quiet. Registering it here is still right; believing the collision check proves more than the
+    // catalogue covers is what this comment used to do.
     JOBS.put("artha.nse.fii-retry-cron", MD + "nse/NseEodScheduler.java");
     JOBS.put("artha.minervini.cron", MD + "screener/minervini/MinerviniScheduler.java");
     JOBS.put("artha.manas-arora.cron", MD + "screener/manas/ManasScheduler.java");

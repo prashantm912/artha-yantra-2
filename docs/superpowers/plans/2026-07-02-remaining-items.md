@@ -31,11 +31,20 @@ code with zero production callers), [[H31]], [[H35]], [[H36]] built, the boot-tr
 (it is Kite login latency on a cold morning, ~131 s of ~182 s).
 
 ⚠️ **OPEN PRs AND THEIR REAL BLOCKERS — two were not what the record said.**
-- **#1283** — Codex re-reviewed 2026-08-21: **REQUEST_CHANGES**, and STEP 0 found the body's
-  claimed `APPROVED` **never happened** (both artifacts end REQUEST_CHANGES; GitHub has no
-  submitted review). Body corrected in place. **New Major:** the exit probe is sized on declared
-  depth (50 rows) while the Chandelier evaluator scans from `entryIndex`, so ARMED reports clean
-  coverage on a long-held position it cannot see. Owner: build next session.
+- **#1283** — **built 2026-08-24 and now APPROVED** (`2a57dfea`, +`99cb4015`) after **three** Codex
+  rounds. The exit probe is now sized on the span the evaluator actually reads, operand-aware.
+  ⚠️ **BLOCKED ON ONE OWNER RULING, not on review:** `ATR_RESIDUAL_INFLUENCE = 0.05` is **alert
+  policy, not a correctness bound** — Wilder's ATR is a RECURSIVE MMA, so there is no finite exact
+  dependency and the constant is a chosen cut-off. The repo's own measurement gives 12% residual
+  after 42 bars and ±0.78% stop variance; it does NOT establish 5% as immaterial, and review
+  confirmed it cannot show 5% unsafe either. Tighter = more true detections AND more per-position
+  ARMED pages on the live exit path. **Owner decides the default; everything else is green.**
+  ⚠️ **THE REVIEW FOUND SIX REAL DEFECTS ACROSS THREE ROUNDS IN CODE THAT PASSED A FULL VERIFY AND
+  MY OWN AUDIT EACH TIME** — and three of them were me re-making a correction THIS REPO HAD ALREADY
+  WRITTEN DOWN: I claimed manas declares depth 20 when `SwingCoverageDepthRatchetTest:147` already
+  pins 50 and documents that exact error; I then hand-built a Manas fixture, which is the specific
+  thing that ratchet exists to warn about; and I asserted `time_stop` reads no series after reading
+  only its `max_bars` branch. **The record already contained the answer in all three cases.**
 - **#1354** — its Critical was **already fixed nine days ago** on a sibling branch nobody folded
   back (`e7aa0e89`). Folded in, 73 commits of main merged (7 conflicts + 1 clean-merge-that-did-
   not-compile). **Now blocked on a NEW thing: `noTwoJobsCollideOnAMinute` — its 18:59 shutdown

@@ -128,6 +128,10 @@ public class SubscriberHealthCanary {
   // produce. `id` stays null until the INSERT lands, so a later sweep re-attempts it; `endedAt` set
   // with `id` still null means the close is waiting on that open. Cleared only on durable success.
   private volatile Episode episode;
+  // The end of the most recently closed window. A second episode can never start before it, so a
+  // `strategies-idle` close followed by a re-enable DURING the same outage cannot backdate the new
+  // window over the interval that was already accounted for.
+  private volatile Instant lastWindowClosedAt = Instant.EPOCH;
   private long lastResubscribeAtMs;
 
   /** One producer-blind episode. Immutable; every transition replaces it. */
@@ -328,7 +332,7 @@ public class SubscriberHealthCanary {
       }
       return; // already blind; one row per episode
     }
-    Instant startedAt = clampToSessionOpen(now, Instant.ofEpochMilli(receivedAtMs));
+    Instant startedAt = clampStart(now, Instant.ofEpochMilli(receivedAtMs));
     String detail =
         "no candle received for "
             + (receiveGapMs / 1000)
@@ -352,6 +356,7 @@ public class SubscriberHealthCanary {
       log.info("subscriber watchdog: engine blind window closed — {}", reason);
       telemetry.record("recovery", "engine blind window closed — " + reason);
       episode = current.closing(endedAt, reason);
+      lastWindowClosedAt = endedAt; // the next window can never start before this
     }
     flush();
   }
@@ -385,33 +390,48 @@ public class SubscriberHealthCanary {
   }
 
   /**
-   * Last resort at the session boundary: an episode the register never accepted is DROPPED rather
-   * than carried into the next session, where its start would be a lie. Loud, because a silent drop
-   * is how an empty table gets mistaken for a quiet week.
+   * Last resort at the session boundary, for the INSERT that never landed only.
+   *
+   * <p>⚠️ It deliberately does NOT drop an episode that HAS a row. Dropping those was a defect in the
+   * first revision of this fix — a close that failed left a durable row open, and clearing the state
+   * meant nothing would ever close it again, which is precisely the permanent-loss failure the
+   * retryable episode exists to prevent. A row with an id is safe to carry: the retry only sets
+   * {@code ended_at} on a row that already exists, so no stale START can leak into the next session.
+   * An episode with NO id is the opposite — carrying it would open tomorrow's row with today's
+   * start — so that one is dropped, loudly, because a silent drop is how an empty table gets
+   * mistaken for a quiet week.
    */
   private void dropUnflushedEpisode() {
     Episode current = episode;
-    if (current == null) {
-      return;
+    if (current == null || current.id() != null) {
+      return; // nothing pending, or pending a CLOSE on a real row — keep retrying that one
     }
     episode = null;
     log.error(
-        "subscriber watchdog: blind window {} never became durable before the session boundary — "
+        "subscriber watchdog: blind window insert never landed before the session boundary — "
             + "dropping it (started {}, reason {})",
-        current.id() == null ? "(insert never landed)" : "id=" + current.id(),
         current.startedAt(),
         current.reason());
   }
 
   /**
-   * The window can only start inside today's session. Without this a feed already dead at the open
-   * anchors on YESTERDAY's 15:29 bar — or, on a pre-market boot, on the construction-time seed
-   * ({@code SignalEngine} stamps both heartbeats at boot as grace for this canary) — and reports a
-   * whole night of legitimate silence as blindness.
+   * The floor for a window's start: the last bar receipt, but never earlier than today's session
+   * open, and never earlier than the end of the window before it.
+   *
+   * <p>The session clamp is why a feed already dead at 09:15 does not anchor on YESTERDAY's 15:29
+   * bar — or, on a pre-market boot, on the construction-time seed ({@code SignalEngine} stamps both
+   * heartbeats at boot as grace for this canary) — and report a whole night of legitimate silence as
+   * blindness. The previous-close clamp covers the narrower case the review found: disabling every
+   * strategy mid-outage closes the window as {@code strategies-idle}, and re-enabling while the
+   * producer is STILL blind would otherwise open a second window backdated across the interval the
+   * first one already accounted for.
    */
-  private Instant clampToSessionOpen(ZonedDateTime now, Instant lastReceipt) {
-    Instant open = now.toLocalDate().atTime(SESSION_START).atZone(Ist.ZONE).toInstant();
-    return lastReceipt.isBefore(open) ? open : lastReceipt;
+  private Instant clampStart(ZonedDateTime now, Instant lastReceipt) {
+    Instant floor = now.toLocalDate().atTime(SESSION_START).atZone(Ist.ZONE).toInstant();
+    if (lastWindowClosedAt.isAfter(floor)) {
+      floor = lastWindowClosedAt;
+    }
+    return lastReceipt.isBefore(floor) ? floor : lastReceipt;
   }
 
   private void publish(String title, String message) {

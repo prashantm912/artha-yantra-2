@@ -8,6 +8,7 @@ import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBa
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -28,9 +29,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 class BlindWindowRegisterIntegrationTest extends StrategySignalIntegrationTestBase {
 
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private DataSource dataSource;
 
   private BlindWindowRegister register() {
-    return new BlindWindowRegister(jdbc);
+    return new BlindWindowRegister(dataSource);
   }
 
   /** Read back through pgjdbc's OffsetDateTime mapping — a raw {@code Timestamp} would drag the

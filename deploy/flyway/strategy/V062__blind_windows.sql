@@ -44,12 +44,16 @@ COMMENT ON TABLE blind_windows IS
     'Written by SubscriberHealthCanary; a record, never a replay trigger.';
 COMMENT ON COLUMN blind_windows.started_at IS
     'Receipt time of the last bar before the gap -- the last moment the engine is known to have '
-    'had data. On a boot that never saw a bar this is the boot heartbeat, so the window reads '
-    '"blind since boot", which is the truth.';
+    'had data -- CLAMPED so it can never precede today''s 09:15 IST session open, nor the end of '
+    'the preceding window. Without the clamp a feed already dead at the open would anchor on the '
+    'previous session''s last bar (or, on a pre-market boot, on the boot heartbeat seed) and report '
+    'a whole night of legitimate silence as blindness.';
 COMMENT ON COLUMN blind_windows.ended_at IS
     'Receipt time of the newest bar seen by the sweep that OBSERVED recovery -- not the first bar '
-    'back. The detector sweeps every 60s, so this can overstate the true end by up to that much. '
-    'Pinning it exactly would need a transition hook on the engine receive path.';
+    'back. It therefore OVERSTATES the true end by up to one sweep, normally the 60s configured '
+    'cadence but longer whenever the sweep itself is delayed -- fixedDelay is a spacing, not an '
+    'upper bound, and the sweep shares a pool. Pinning it exactly would need a transition hook on '
+    'the engine receive path.';
 COMMENT ON COLUMN blind_windows.closed_reason IS
     'How the window ended -- bars-resumed / session-ended / strategies-idle. session-ended is NOT '
     'a recovery: the outage simply outlasted the session, and conflating the two would report a '

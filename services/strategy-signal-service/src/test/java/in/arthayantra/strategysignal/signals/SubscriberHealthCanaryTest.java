@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.signals;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -17,6 +18,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
@@ -417,6 +419,76 @@ class SubscriberHealthCanaryTest {
     c.sweep();
 
     verify(blindWindows, times(1)).close(eq(7L), any(Instant.class), eq("session-ended"));
+  }
+
+
+  /**
+   * THE FIRST REVISION'S DEFECT, pinned. The boundary path used to drop EVERY unflushed episode,
+   * including one whose row exists and whose close merely failed — so nothing would ever close it
+   * again and the row stayed open forever, which is the permanent-loss failure the retryable episode
+   * exists to prevent. Only an episode with no row may be dropped.
+   */
+  @Test
+  void closeThatFailsAtTheSessionBoundary_isRetriedNotDropped() {
+    MutableClock advancing = new MutableClock(IN_SESSION);
+    when(registry.countEnabledPublished()).thenReturn(1L);
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    when(engine.lastBarReceivedAtMs()).thenReturn(NOW_MS - 200_000);
+    when(engine.lastBarEvaluatedAtMs()).thenReturn(NOW_MS - 200_000);
+    when(redis.opsForValue()).thenReturn(valueOps);
+    when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000));
+    when(blindWindows.open(any(Instant.class), anyString())).thenReturn(7L);
+    when(blindWindows.close(any(), any(Instant.class), anyString())).thenReturn(false); // DB down
+
+    SubscriberHealthCanary c =
+        new SubscriberHealthCanary(
+            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
+            FEED_FRESH);
+    c.sweep(); // window opens, id 7
+    advancing.advanceMs(19_860_000L); // 15:31 IST — past SESSION_END, close attempted and FAILS
+    c.sweep();
+    advancing.advanceMs(60_000);
+    c.sweep(); // still out of session: the durable row must still be retried, not forgotten
+
+    verify(blindWindows, times(2)).close(eq(7L), any(Instant.class), eq("session-ended"));
+  }
+
+  /**
+   * Disabling every strategy mid-outage closes the window as `strategies-idle`. Re-enabling while
+   * the producer is STILL blind must open a window that starts at that close, not back at the
+   * original receipt — otherwise the two windows overlap and the second one re-counts an interval
+   * the first already accounted for.
+   */
+  @Test
+  void reEnablingDuringTheSameOutage_doesNotBackdateTheSecondWindow() {
+    MutableClock advancing = new MutableClock(IN_SESSION);
+    AtomicLong enabled = new AtomicLong(1L);
+    when(registry.countEnabledPublished()).thenAnswer(inv -> enabled.get());
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    when(engine.lastBarReceivedAtMs()).thenReturn(NOW_MS - 200_000); // frozen: still blind
+    when(engine.lastBarEvaluatedAtMs()).thenReturn(NOW_MS - 200_000);
+    when(redis.opsForValue()).thenReturn(valueOps);
+    when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000));
+    registerAccepts();
+
+    SubscriberHealthCanary c =
+        new SubscriberHealthCanary(
+            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
+            FEED_FRESH);
+    c.sweep(); // first window opens at the last receipt
+    advancing.advanceMs(120_000);
+    enabled.set(0L);
+    c.sweep(); // strategies-idle: closes at "now"
+    Instant closedAt = advancing.instant();
+    advancing.advanceMs(120_000);
+    enabled.set(1L);
+    c.sweep(); // re-enabled, producer still blind: a SECOND window opens
+
+    ArgumentCaptor<Instant> starts = ArgumentCaptor.forClass(Instant.class);
+    verify(blindWindows, times(2)).open(starts.capture(), anyString());
+    assertThat(starts.getAllValues().get(1))
+        .as("the second window must not reach back over the interval the first one covered")
+        .isAfterOrEqualTo(closedAt);
   }
 
   /** A test clock whose instant can be advanced, to drive the multi-sweep throttle path. */

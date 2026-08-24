@@ -3,6 +3,7 @@ package in.arthayantra.strategysignal.signals;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import javax.sql.DataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -35,11 +36,30 @@ public class BlindWindowRegister {
 
   private static final Logger log = LoggerFactory.getLogger(BlindWindowRegister.class);
 
+  /**
+   * Seconds any single register statement may run before the driver aborts it.
+   *
+   * <p>⚠️ This is the concession to the monitor-pool invariant, and it is worth stating plainly
+   * rather than leaving as a magic number. {@code SubscriberHealthCanary.sweep} runs on a
+   * SINGLE-thread detector pool whose contract is that "a detector that gains ANY blocking call must
+   * move off this pool too, because a STALLED call starves every sibling while it hangs". The
+   * unbounded HANG is the property that rule exists to prevent, so these statements are bounded:
+   * they cannot hold the detector thread indefinitely, whatever the database does. It is a bound,
+   * not a full answer — moving these writes (and the pre-existing
+   * {@link SubscriberHealthTelemetry} one, which has been on that pool far longer) off the pool
+   * entirely is filed separately.
+   */
+  private static final int STATEMENT_TIMEOUT_SECONDS = 2;
+
   private final JdbcTemplate jdbc;
 
-  /** Wires the strategy datasource. */
-  public BlindWindowRegister(JdbcTemplate jdbc) {
-    this.jdbc = jdbc;
+  /**
+   * Wires the strategy datasource through its OWN {@link JdbcTemplate} rather than the shared bean,
+   * so the timeout above applies here and cannot leak onto every other caller in the service.
+   */
+  public BlindWindowRegister(DataSource dataSource) {
+    this.jdbc = new JdbcTemplate(dataSource);
+    this.jdbc.setQueryTimeout(STATEMENT_TIMEOUT_SECONDS);
   }
 
   /**

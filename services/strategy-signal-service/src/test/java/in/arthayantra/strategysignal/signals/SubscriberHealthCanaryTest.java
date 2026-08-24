@@ -47,6 +47,12 @@ class SubscriberHealthCanaryTest {
   private final SubscriberHealthTelemetry telemetry = mock(SubscriberHealthTelemetry.class);
   private final BlindWindowRegister blindWindows = mock(BlindWindowRegister.class);
 
+  /** The register accepted the write - the default `false` would leave every episode pending. */
+  private void registerAccepts() {
+    when(blindWindows.open(any(Instant.class), anyString())).thenReturn(7L);
+    when(blindWindows.close(any(), any(Instant.class), anyString())).thenReturn(true);
+  }
+
   private SubscriberHealthCanary canary(boolean enabled) {
     when(registry.countEnabledPublished()).thenReturn(1L);
     return new SubscriberHealthCanary(
@@ -227,7 +233,7 @@ class SubscriberHealthCanaryTest {
     when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
     evalKeepingUp(NOW_MS - 200_000);
     feedAgeMs(200_000);
-    when(blindWindows.open(any(Instant.class), anyString())).thenReturn(7L);
+    registerAccepts();
 
     SubscriberHealthCanary c = canary(true);
     c.sweep();
@@ -238,21 +244,126 @@ class SubscriberHealthCanaryTest {
   }
 
   /**
-   * A failed register INSERT must not defeat the latch — otherwise a down database turns one outage
-   * into an ERROR line every 60 s. The id stays null and the close is a no-op the register absorbs.
+   * A failed register INSERT is RETRIED on later sweeps, with the ORIGINAL start - losing the row
+   * would lose the whole artifact for that outage, which is the one thing this feature produces. The
+   * alert side stays latched throughout: exactly one ERROR/telemetry row, however many retries.
    */
   @Test
-  void registerInsertFailed_stillLatchesTheEpisode() {
+  void registerInsertFailed_retriesWithTheOriginalStart() {
     when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
     evalKeepingUp(NOW_MS - 200_000);
     feedAgeMs(200_000);
-    when(blindWindows.open(any(Instant.class), anyString())).thenReturn(null); // fail-soft write
+    when(blindWindows.open(any(Instant.class), anyString()))
+        .thenReturn(null) // first write lost
+        .thenReturn(7L); // second lands
 
     SubscriberHealthCanary c = canary(true);
     c.sweep();
     c.sweep();
+    c.sweep(); // already durable - must not insert a third time
+
+    verify(blindWindows, times(2)).open(eq(Instant.ofEpochMilli(NOW_MS - 200_000)), anyString());
+    verify(telemetry, times(1)).record(eq("feed-blind"), anyString()); // one episode, one alert
+  }
+
+  /**
+   * An eval stall must not be able to hide a producer outage that begins underneath it. Both
+   * heartbeats freeze during an outage, so evalLag stays wide and the eval-stall branch returns
+   * first - before this fix that return also skipped the blind-window transition entirely.
+   */
+  @Test
+  void evalStalledWhileTheProducerGoesBlind_stillOpensTheWindow() {
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    when(engine.lastBarReceivedAtMs()).thenReturn(NOW_MS - 200_000); // frozen: no bars arriving
+    when(engine.lastBarEvaluatedAtMs()).thenReturn(NOW_MS - 400_000); // eval frozen further back
+    feedAgeMs(200_000); // producer blind too
+    registerAccepts();
+
+    canary(true).sweep();
 
     verify(blindWindows, times(1)).open(any(Instant.class), anyString());
+    verify(telemetry, times(1)).record(eq("eval-stall"), anyString()); // the eval branch still fires
+  }
+
+  /** ...and the mirror: bars returning while eval is still stalled must still CLOSE the window. */
+  @Test
+  void barsResumeWhileEvalStillStalled_stillClosesTheWindow() {
+    MutableClock advancing = new MutableClock(IN_SESSION);
+    AtomicLong received = new AtomicLong(NOW_MS - 200_000);
+    when(registry.countEnabledPublished()).thenReturn(1L);
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    when(engine.lastBarReceivedAtMs()).thenAnswer(inv -> received.get());
+    when(engine.lastBarEvaluatedAtMs()).thenReturn(NOW_MS - 600_000); // eval stuck the whole time
+    when(redis.opsForValue()).thenReturn(valueOps);
+    when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000));
+    registerAccepts();
+
+    SubscriberHealthCanary c =
+        new SubscriberHealthCanary(
+            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
+            FEED_FRESH);
+    c.sweep(); // blind, and eval stalled
+    advancing.advanceMs(60_000);
+    long firstBarBack = advancing.millis() - 5_000;
+    received.set(firstBarBack);
+    c.sweep(); // bars back; eval STILL stalled
+
+    verify(blindWindows, times(1))
+        .close(eq(7L), eq(Instant.ofEpochMilli(firstBarBack)), eq("bars-resumed"));
+  }
+
+  /**
+   * A backward clock step makes receiveGap negative, which satisfies "receiving normally" - acting
+   * on it would close a live outage as recovered without a single bar. Measured host failure class
+   * (the July 2026 87-minute drift), so the window must be HELD, not closed.
+   */
+  @Test
+  void clockStepsBackwards_holdsTheWindowInsteadOfClaimingRecovery() {
+    MutableClock advancing = new MutableClock(IN_SESSION);
+    when(registry.countEnabledPublished()).thenReturn(1L);
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    when(engine.lastBarReceivedAtMs()).thenReturn(NOW_MS - 200_000);
+    when(engine.lastBarEvaluatedAtMs()).thenReturn(NOW_MS - 200_000);
+    when(redis.opsForValue()).thenReturn(valueOps);
+    when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000));
+    registerAccepts();
+
+    SubscriberHealthCanary c =
+        new SubscriberHealthCanary(
+            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
+            FEED_FRESH);
+    c.sweep(); // window opens
+    advancing.advanceMs(-600_000); // clock jumps back 10 min so receiveGap goes negative
+    c.sweep();
+
+    verify(blindWindows, never()).close(any(), any(Instant.class), anyString());
+  }
+
+  /**
+   * A feed already dead at the open anchors on YESTERDAY's last bar. Without the clamp the window
+   * would report a whole night of legitimate silence as blindness.
+   */
+  @Test
+  void feedDeadBeforeTheOpen_clampsTheStartToTodaysSessionOpen() {
+    // 09:25 IST on the same NSE session; the last receipt is the PREVIOUS evening's close.
+    Instant morning = Instant.parse("2026-07-07T03:55:00Z");
+    MutableClock at925 = new MutableClock(morning);
+    when(registry.countEnabledPublished()).thenReturn(1L);
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    long yesterdayClose = Instant.parse("2026-07-06T10:00:00Z").toEpochMilli(); // 15:30 IST 07-06
+    when(engine.lastBarReceivedAtMs()).thenReturn(yesterdayClose);
+    when(engine.lastBarEvaluatedAtMs()).thenReturn(yesterdayClose);
+    when(redis.opsForValue()).thenReturn(valueOps);
+    when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(morning.toEpochMilli() - 400_000));
+    registerAccepts();
+
+    new SubscriberHealthCanary(
+            engine, registry, redis, events, telemetry, blindWindows, at925, true, BAR_GAP,
+            FEED_FRESH)
+        .sweep();
+
+    // 09:15 IST on 2026-07-07 == 03:45Z, NOT the 07-06 close
+    verify(blindWindows, times(1)).open(eq(Instant.parse("2026-07-07T03:45:00Z")), anyString());
   }
 
   /** Recovery closes the window at the receipt of the FIRST bar back, not at sweep time. */
@@ -266,7 +377,7 @@ class SubscriberHealthCanaryTest {
     when(engine.lastBarEvaluatedAtMs()).thenAnswer(inv -> received.get());
     when(redis.opsForValue()).thenReturn(valueOps);
     when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000)); // stale producer
-    when(blindWindows.open(any(Instant.class), anyString())).thenReturn(7L);
+    registerAccepts();
 
     SubscriberHealthCanary c =
         new SubscriberHealthCanary(
@@ -295,7 +406,7 @@ class SubscriberHealthCanaryTest {
     when(engine.lastBarEvaluatedAtMs()).thenReturn(NOW_MS - 200_000);
     when(redis.opsForValue()).thenReturn(valueOps);
     when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000));
-    when(blindWindows.open(any(Instant.class), anyString())).thenReturn(7L);
+    registerAccepts();
 
     SubscriberHealthCanary c =
         new SubscriberHealthCanary(

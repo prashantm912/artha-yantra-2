@@ -63,10 +63,15 @@ public class BlindWindowRegister {
    * Closes the window this process opened. {@code reason} distinguishes a real recovery
    * ({@code bars-resumed}) from a window that merely outlasted the session ({@code session-ended})
    * — conflating them would report a still-dead feed as healed.
+   *
+   * <p>Returns whether the close is now DURABLE, so the caller can keep retryable state instead of
+   * dropping it on a swallowed failure. A no-op {@code null} id counts as durable (there was never a
+   * row), and an id already closed counts as durable too (the guard makes the close idempotent
+   * rather than restamping a window with a second, contradicting reason).
    */
-  public void close(Long id, Instant endedAt, String reason) {
+  public boolean close(Long id, Instant endedAt, String reason) {
     if (id == null) {
-      return; // the open never landed; there is no row to close
+      return true; // the open never landed; there is no row to close
     }
     try {
       jdbc.update(
@@ -74,8 +79,10 @@ public class BlindWindowRegister {
           OffsetDateTime.ofInstant(endedAt, ZoneOffset.UTC),
           reason,
           id);
+      return true;
     } catch (RuntimeException e) {
       log.warn("blind-window close failed (id={}, reason={}): {}", id, reason, e.toString());
+      return false;
     }
   }
 }

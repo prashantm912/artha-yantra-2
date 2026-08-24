@@ -63,6 +63,15 @@ import org.springframework.stereotype.Component;
  * backfill the data, never re-decide the bars). It still does NOT page, because market-data's
  * {@code FeedWatchdog} already pages for the same outage and a second push is pure noise.
  *
+ * <p>Three boundaries of that record are worth knowing before reading one. {@code started_at} is
+ * CLAMPED to today's session open — a feed already dead at 09:15 anchors on yesterday's last bar
+ * otherwise, and would report the whole night as blindness. {@code ended_at} is the newest receipt
+ * seen by the sweep that OBSERVED recovery, not the first bar back, so it can overstate the true end
+ * by up to one sweep interval ({@value #SWEEP_INTERVAL_MS} ms); pinning it exactly would need a
+ * transition hook inside the engine's receive path, which is not worth putting on that path. And a
+ * BACKWARD clock step is treated as a fault, never as recovery — a negative receive gap satisfies
+ * "receiving normally", so acting on it would close a live outage with no bar having arrived.
+ *
  * <p><b>Why one global heartbeat is sufficient (not per-channel):</b> {@link SignalEngine} subscribes
  * every candle channel through a SINGLE {@code RedisMessageListenerContainer} on one connection
  * ({@code resubscribe()} builds one container + N listeners on one {@code connectionFactory}), so
@@ -82,6 +91,7 @@ import org.springframework.stereotype.Component;
 public class SubscriberHealthCanary {
 
   private static final Logger log = LoggerFactory.getLogger(SubscriberHealthCanary.class);
+  private static final LocalTime SESSION_START = LocalTime.of(9, 15); // the blind-window floor
   private static final LocalTime ARMED_FROM = LocalTime.of(9, 20); // after warmup + the first 1m bars
   private static final LocalTime SESSION_END = LocalTime.of(15, 30);
   private static final String FEED_HEARTBEAT_KEY = "ticks:last-at"; // epoch millis, written per tick
@@ -112,11 +122,24 @@ public class SubscriberHealthCanary {
   // Single-writer (the @Scheduled thread never overlaps under fixedDelay); volatile for test/read.
   private volatile boolean stalled; // receive-side latch (subscription drop)
   private volatile boolean evalStalled; // eval-side latch (bars arriving, not processed)
-  private volatile boolean feedBlind; // producer-blind latch (feed outage)
-  // The open blind_windows row, or null when the insert itself failed. Kept SEPARATE from the latch
-  // above so a fail-soft register write can never defeat the latch and re-log every sweep.
-  private volatile Long blindWindowId;
+  // The producer-blind episode, or null when there is nothing blind and nothing pending. Held as
+  // RETRYABLE state rather than a bare latch: a fail-soft register write that loses the row would
+  // otherwise lose the whole artifact for the outage, which is the one thing this feature exists to
+  // produce. `id` stays null until the INSERT lands, so a later sweep re-attempts it; `endedAt` set
+  // with `id` still null means the close is waiting on that open. Cleared only on durable success.
+  private volatile Episode episode;
   private long lastResubscribeAtMs;
+
+  /** One producer-blind episode. Immutable; every transition replaces it. */
+  private record Episode(Instant startedAt, String detail, Long id, Instant endedAt, String reason) {
+    Episode withId(Long newId) {
+      return new Episode(startedAt, detail, newId, endedAt, reason);
+    }
+
+    Episode closing(Instant at, String why) {
+      return new Episode(startedAt, detail, id, at, why);
+    }
+  }
 
   /** Wires the engine, the shared Redis, the event bus, telemetry, and the (tunable) thresholds. */
   public SubscriberHealthCanary(
@@ -158,8 +181,11 @@ public class SubscriberHealthCanary {
       boolean inSession = inSession(now);
       if (!inSession || registry.countEnabledPublished() == 0) {
         // A window still open here did NOT recover — the outage outlasted the session, or the
-        // registry went idle. Say which, so a reader never reads a still-dead feed as healed.
-        closeBlindWindow(clock.instant(), inSession ? "strategies-idle" : "session-ended");
+        // registry went idle. Say which, so a reader never reads a still-dead feed as healed. This
+        // is also the LAST retry: an episode that still cannot be written is dropped with an ERROR
+        // rather than carried into the next session, where its start would be a lie.
+        requestClose(clock.instant(), inSession ? "strategies-idle" : "session-ended");
+        dropUnflushedEpisode();
         return; // out of session, or genuinely idle by registry intent
       }
       long nowMs = clock.millis();
@@ -167,6 +193,14 @@ public class SubscriberHealthCanary {
       long evaluated = engine.lastBarEvaluatedAtMs();
       long receiveGap = nowMs - received; // wall-clock since the last bar RECEIVED
       long evalLag = received - evaluated; // receipt-vs-eval (NOT wall-clock: quiet market freezes both)
+
+      // (0) PRODUCER-BLIND BOOKKEEPING — runs BEFORE any remediation branch returns. An eval stall
+      // freezes `evaluated` while a dead feed freezes `received`, so evalLag stays wide and the
+      // eval-stall return below would otherwise hide an outage that started underneath it — and,
+      // worse, prevent the bars-resumed close, mislabelling a real recovery as `session-ended`
+      // hours later. Returns the feed-heartbeat age so the receive branch does not read Redis twice
+      // (MAX_VALUE also when it was never read, which that branch cannot reach).
+      long feedAge = updateBlindWindow(now, nowMs, received, receiveGap);
 
       // (1) EVAL STALL — bars ARRIVING but the signal-eval thread is not processing them. Checked
       // FIRST and independently of the receive path: during an eval block receipt is FRESH, so the
@@ -197,7 +231,6 @@ public class SubscriberHealthCanary {
 
       // (2) RECEIVE GAP (the 2026-07-07 path) — the container silently dropped its subscription.
       if (receiveGap < barGapMs) {
-        closeBlindWindow(Instant.ofEpochMilli(received), "bars-resumed");
         if (stalled) {
           stalled = false;
           log.info(
@@ -206,9 +239,7 @@ public class SubscriberHealthCanary {
         }
         return; // receiving normally
       }
-      long feedAge = feedAgeMs(nowMs);
       if (feedAge != Long.MAX_VALUE && feedAge > feedFreshMs) {
-        openBlindWindow(received, receiveGap, feedAge);
         return; // remediating a known stale producer is market-data's ownership; the RECORD is ours
       }
       // Feed is fresh, or its heartbeat is unavailable; this consumer received no bar for receiveGap.
@@ -245,15 +276,59 @@ public class SubscriberHealthCanary {
   }
 
   /**
-   * Latches the producer-blind episode and registers its window, anchored at the receipt time of the
-   * last bar — the last moment the engine is known to have had data. No ntfy push: market-data's
-   * {@code FeedWatchdog} already pages for this outage.
+   * Drives the producer-blind episode and returns the feed-heartbeat age, so the receive branch does
+   * not read Redis a second time. Returns {@code MAX_VALUE} when the heartbeat was not read at all —
+   * only possible while bars are flowing, which that branch returns before reaching.
+   *
+   * <p>Deliberately independent of every remediation branch: an eval stall freezes {@code evaluated}
+   * while a dead feed freezes {@code received}, so the eval-stall return would otherwise hide an
+   * outage that began underneath it AND block the bars-resumed close.
    */
-  private void openBlindWindow(long receivedAtMs, long receiveGapMs, long feedAgeMs) {
-    if (feedBlind) {
-      return; // one row per episode
+  private long updateBlindWindow(
+      ZonedDateTime now, long nowMs, long receivedAtMs, long receiveGapMs) {
+    if (receiveGapMs < 0) {
+      // The clock stepped BACKWARDS past the receipt stamp — a measured failure class on this host
+      // (the July 2026 87-minute drift; SignalEngine.ageSeconds deliberately refuses to clamp it for
+      // the same reason). A negative gap satisfies "receiving normally", so acting on it would close
+      // a live outage as `bars-resumed` without a single new bar. Hold the episode exactly as it is.
+      log.warn(
+          "subscriber watchdog: clock stepped backwards ({}ms past the last receipt) — blind-window"
+              + " state HELD, neither opened nor closed",
+          receiveGapMs);
+      return Long.MAX_VALUE;
     }
-    feedBlind = true;
+    if (receiveGapMs < barGapMs) {
+      requestClose(Instant.ofEpochMilli(receivedAtMs), "bars-resumed");
+      return Long.MAX_VALUE;
+    }
+    long feedAge = feedAgeMs(nowMs);
+    if (feedAge != Long.MAX_VALUE && feedAge > feedFreshMs) {
+      openOrRetry(now, receivedAtMs, receiveGapMs, feedAge);
+    }
+    return feedAge;
+  }
+
+  /**
+   * Opens the episode, or re-attempts an INSERT that a previous sweep lost. No ntfy push:
+   * market-data's {@code FeedWatchdog} already pages for this outage.
+   */
+  private void openOrRetry(
+      ZonedDateTime now, long receivedAtMs, long receiveGapMs, long feedAgeMs) {
+    Episode current = episode;
+    if (current != null && current.endedAt() != null && !flush()) {
+      return; // a close is still unflushed — keep it rather than conflate two outages in one row
+    }
+    current = episode;
+    if (current != null) {
+      if (current.id() == null) {
+        Long recovered = blindWindows.open(current.startedAt(), current.detail());
+        if (recovered != null) {
+          episode = current.withId(recovered);
+        }
+      }
+      return; // already blind; one row per episode
+    }
+    Instant startedAt = clampToSessionOpen(now, Instant.ofEpochMilli(receivedAtMs));
     String detail =
         "no candle received for "
             + (receiveGapMs / 1000)
@@ -264,20 +339,79 @@ public class SubscriberHealthCanary {
             + "engine did not see them live";
     log.error("subscriber watchdog: engine BLIND — {}", detail);
     telemetry.record("feed-blind", detail);
-    blindWindowId = blindWindows.open(Instant.ofEpochMilli(receivedAtMs), detail);
+    episode = new Episode(startedAt, detail, blindWindows.open(startedAt, detail), null, null);
   }
 
-  /** Closes an open blind window, if any, naming how it ended. No-op when nothing is open. */
-  private void closeBlindWindow(Instant endedAt, String reason) {
-    if (!feedBlind) {
+  /** Marks the open episode closed and tries to make that durable. No-op when nothing is open. */
+  private void requestClose(Instant endedAt, String reason) {
+    Episode current = episode;
+    if (current == null) {
       return;
     }
-    feedBlind = false;
-    Long id = blindWindowId;
-    blindWindowId = null;
-    log.info("subscriber watchdog: engine blind window closed — {}", reason);
-    telemetry.record("recovery", "engine blind window closed — " + reason);
-    blindWindows.close(id, endedAt, reason);
+    if (current.endedAt() == null) {
+      log.info("subscriber watchdog: engine blind window closed — {}", reason);
+      telemetry.record("recovery", "engine blind window closed — " + reason);
+      episode = current.closing(endedAt, reason);
+    }
+    flush();
+  }
+
+  /**
+   * Pushes whatever the episode still owes to the register. Returns true iff nothing is left
+   * pending — so an episode that is open, durable and still blind returns FALSE, which is only ever
+   * consulted from a path that has already set {@code endedAt}.
+   */
+  private boolean flush() {
+    Episode current = episode;
+    if (current == null) {
+      return true;
+    }
+    if (current.id() == null) {
+      Long id = blindWindows.open(current.startedAt(), current.detail());
+      if (id == null) {
+        return false;
+      }
+      current = current.withId(id);
+      episode = current;
+    }
+    if (current.endedAt() == null) {
+      return false; // durable, but the outage is still running
+    }
+    if (!blindWindows.close(current.id(), current.endedAt(), current.reason())) {
+      return false;
+    }
+    episode = null;
+    return true;
+  }
+
+  /**
+   * Last resort at the session boundary: an episode the register never accepted is DROPPED rather
+   * than carried into the next session, where its start would be a lie. Loud, because a silent drop
+   * is how an empty table gets mistaken for a quiet week.
+   */
+  private void dropUnflushedEpisode() {
+    Episode current = episode;
+    if (current == null) {
+      return;
+    }
+    episode = null;
+    log.error(
+        "subscriber watchdog: blind window {} never became durable before the session boundary — "
+            + "dropping it (started {}, reason {})",
+        current.id() == null ? "(insert never landed)" : "id=" + current.id(),
+        current.startedAt(),
+        current.reason());
+  }
+
+  /**
+   * The window can only start inside today's session. Without this a feed already dead at the open
+   * anchors on YESTERDAY's 15:29 bar — or, on a pre-market boot, on the construction-time seed
+   * ({@code SignalEngine} stamps both heartbeats at boot as grace for this canary) — and reports a
+   * whole night of legitimate silence as blindness.
+   */
+  private Instant clampToSessionOpen(ZonedDateTime now, Instant lastReceipt) {
+    Instant open = now.toLocalDate().atTime(SESSION_START).atZone(Ist.ZONE).toInstant();
+    return lastReceipt.isBefore(open) ? open : lastReceipt;
   }
 
   private void publish(String title, String message) {

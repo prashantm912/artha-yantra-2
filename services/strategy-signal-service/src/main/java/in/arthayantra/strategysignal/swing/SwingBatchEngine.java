@@ -3,6 +3,7 @@ package in.arthayantra.strategysignal.swing;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.eval.EntryEvaluator;
@@ -39,6 +40,7 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -69,6 +71,64 @@ public class SwingBatchEngine {
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
   private static final String EX = "NSE";
   private static final String IV = "1d";
+
+  /**
+   * The exchange calendar the data-coverage gate measures against. Static, mirroring {@code
+   * ScalperCalendars} / {@code DataHealthFlags} — the swing universe is NSE-only ({@link #EX}), so
+   * the family never varies it. {@link SwingCoverageProbe} coverage-checks the year range before
+   * querying, so a window reaching outside the bundled years degrades to "no claim" rather than
+   * raising CD-2's {@code IllegalArgumentException} on the money path.
+   */
+  private static final MarketCalendar calendar = MarketCalendar.nse();
+
+  /**
+   * How the data-coverage gate behaves — BOTH halves, entry and exit. Mirrors the T9 coverage
+   * watchdog's three-state shape (`strategy-coverage-watchdog.mode`) because this is the same
+   * situation: a detector whose rate must be OBSERVED in production before anyone arms it.
+   *
+   * <p>ENTRY half ({@link #entryPass}, and the F3 admission probe that must model it):
+   *
+   * <ul>
+   *   <li>{@code DISABLED} — the probe never runs. No rows, no logs, no cost.
+   *   <li>{@code OBSERVE_ONLY} — the probe runs and every would-be refusal is RECORDED (as a
+   *       {@code WOULD_REFUSE_*} row) and LOGGED, but the entry PROCEEDS. Live behaviour is
+   *       byte-identical to a build without the gate.
+   *   <li>{@code ARMED} — a candidate whose coverage is not proven sound is REFUSED.
+   * </ul>
+   *
+   * <p>EXIT half ({@link #exitPass}) — ⚠️ the SAME three states, read DIFFERENTLY, and the asymmetry
+   * is FORCED by doctrine rather than chosen. An exit may never refuse in ANY mode ("entries need
+   * fresh truth — you can always NOT enter; exits need the best available truth — you cannot refuse
+   * to leave forever"), so the axis that varies is OBSERVATION, not admission:
+   *
+   * <ul>
+   *   <li>{@code DISABLED} — the probe never runs. No rows, no logs, no alerts, no cost. The stop is
+   *       still evaluated, exactly as in a build with no gate at all.
+   *   <li>{@code OBSERVE_ONLY} — the probe runs, a durable {@code EXIT_DEGRADED_COVERAGE:*} row is
+   *       written and the degradation is logged at WARN, but ops is NOT paged. The stop is
+   *       evaluated.
+   *   <li>{@code ARMED} — the row and an ERROR line as above, PLUS the per-position ntfy page. The
+   *       stop is evaluated. ARMED on this half means <em>alert loudly</em>; it can never mean
+   *       <em>refuse</em>.
+   * </ul>
+   *
+   * <p>⚠️ The exit row is NOT prefixed {@code WOULD_REFUSE_} the way the entry row is, and that is
+   * deliberate. The prefix exists because an entry row would otherwise claim a refusal for a
+   * candidate that then FIRED. On the exit side there is no counterfactual to distinguish: the exit
+   * fires under every mode, so {@code EXIT_DEGRADED_COVERAGE} states the same true fact — "this stop
+   * was evaluated on degraded coverage" — whichever mode wrote it.
+   *
+   * <p>Ships {@code OBSERVE_ONLY} (owner decision, 2026-08-11; extended to the exit half 2026-08-14).
+   * Arming is a one-word env change once the observed rate justifies it — the same path
+   * `dot-coverage-floor`, the T9 watchdog and the F9 heat caps all took. ⚠️ The seam constructor
+   * defaults to the SAME value as production deliberately: a test seam that armed by default would
+   * let the suite pass against behaviour the live stack does not have.
+   */
+  public enum CoverageGateMode {
+    DISABLED,
+    OBSERVE_ONLY,
+    ARMED
+  }
 
   /**
    * A loaded published swing strategy (identity + compiled definition + neutral setup token). {@code
@@ -166,6 +226,38 @@ public class SwingBatchEngine {
   private final Clock clock;
   private final SwingPaperEffectRepository paperEffects;
   private final SwingBatchRefusalRepository refusals;
+  private final CoverageGateMode coverageGateMode;
+
+  /**
+   * ABSENT and INVALID are not the same thing, and the first cut of this method conflated them
+   * (cross-vendor review, Critical). An absent property takes the shipped default; an explicitly-set
+   * value that does not parse REFUSES THE BOOT.
+   *
+   * <p>Falling back on a typo fails OPEN: an operator who writes {@code ARMD} intending {@code ARMED}
+   * gets a silently inert gate and every coverage-unsafe entry keeps being admitted, with a warn line
+   * as the only trace. The mirror case is no better — a typo meant as {@code DISABLED} would leave
+   * the probe running and writing rows. Either way the operator's stated intent is discarded, which
+   * is exactly what a safety gate must not do quietly. Crashing is loud, immediate and trivially
+   * fixed; running the wrong mode is none of those.
+   *
+   * <p>Blank counts as EXPLICIT: {@code @Value}'s {@code :OBSERVE_ONLY} fallback only applies when
+   * the property is missing, so an empty string means someone set it to nothing.
+   */
+  private static CoverageGateMode parseGateMode(String raw) {
+    if (raw == null) {
+      return CoverageGateMode.OBSERVE_ONLY; // defensive: @Value always supplies the fallback
+    }
+    try {
+      return CoverageGateMode.valueOf(raw.trim().toUpperCase(java.util.Locale.ROOT));
+    } catch (IllegalArgumentException e) {
+      throw new IllegalStateException(
+          "artha.signals.swing-coverage-gate.mode='"
+              + raw
+              + "' is not one of DISABLED / OBSERVE_ONLY / ARMED — refusing to start rather than"
+              + " silently running a mode nobody chose",
+          e);
+    }
+  }
 
   /** Wires the shared collaborators (family-neutral); the family varies only via the doctrine arg. */
   @Autowired
@@ -180,7 +272,8 @@ public class SwingBatchEngine {
       ObjectMapper objectMapper,
       Clock clock,
       SwingPaperEffectRepository paperEffects,
-      SwingBatchRefusalRepository refusals) {
+      SwingBatchRefusalRepository refusals,
+      @Value("${artha.signals.swing-coverage-gate.mode:OBSERVE_ONLY}") String coverageGateMode) {
     this.registry = registry;
     this.candles = candles;
     this.signals = signals;
@@ -192,6 +285,28 @@ public class SwingBatchEngine {
     this.clock = clock;
     this.paperEffects = paperEffects;
     this.refusals = refusals;
+    this.coverageGateMode = parseGateMode(coverageGateMode);
+  }
+
+  /**
+   * Ledger-carrying seam without an explicit gate mode — takes the SAME default as production, so a
+   * test written against this overload cannot pass on behaviour the live stack does not have.
+   */
+  public SwingBatchEngine(
+      StrategyRepository registry,
+      MarketDataCandlesClient candles,
+      SignalRepository signals,
+      SignalPublisher publisher,
+      ApplicationEventPublisher events,
+      Optional<EmissionGuard> emissionGuard,
+      TransactionTemplate tx,
+      ObjectMapper objectMapper,
+      Clock clock,
+      SwingPaperEffectRepository paperEffects,
+      SwingBatchRefusalRepository refusals) {
+    this(
+        registry, candles, signals, publisher, events, emissionGuard, tx, objectMapper, clock,
+        paperEffects, refusals, CoverageGateMode.OBSERVE_ONLY.name());
   }
 
   /** Backwards-compatible seam for focused unit tests that do not exercise the V049 ledgers. */
@@ -207,7 +322,24 @@ public class SwingBatchEngine {
       Clock clock) {
     this(
         registry, candles, signals, publisher, events, emissionGuard, tx, objectMapper, clock,
-        null, null);
+        CoverageGateMode.OBSERVE_ONLY);
+  }
+
+  /** Same seam, with the coverage gate's mode stated explicitly — for tests that exercise it. */
+  public SwingBatchEngine(
+      StrategyRepository registry,
+      MarketDataCandlesClient candles,
+      SignalRepository signals,
+      SignalPublisher publisher,
+      ApplicationEventPublisher events,
+      Optional<EmissionGuard> emissionGuard,
+      TransactionTemplate tx,
+      ObjectMapper objectMapper,
+      Clock clock,
+      CoverageGateMode coverageGateMode) {
+    this(
+        registry, candles, signals, publisher, events, emissionGuard, tx, objectMapper, clock,
+        null, null, coverageGateMode.name());
   }
 
   /** Runs one full daily batch for a family: the entry pass over its funnel, then the exit pass. */
@@ -454,6 +586,11 @@ public class SwingBatchEngine {
     PyramidPolicy pyramid = doctrine.pyramid();
     int fired = 0;
     List<String> refusalReasons = new ArrayList<>();
+    // Symbols refused this run for incomplete data coverage. Aggregated into ONE ops alert at the end
+    // of the pass — a per-symbol alert would page ~17% of the funnel nightly (measured 2026-08-03).
+    java.util.Set<String> coverageRefused = new java.util.LinkedHashSet<>();
+    java.util.Set<String> coverageWouldRefuse = new java.util.LinkedHashSet<>();
+    try {
     for (SwingCandidate c : candidates) {
       if (deadline.expired()) {
         return new EntryResult(candidates.size(), fired, refusalReasons, true);
@@ -505,6 +642,54 @@ public class SwingBatchEngine {
           continue;
         }
         IndicatorBank bank = buildBank(strat.definition(), c.symbol(), series, c.contextSeeds());
+        // Data-coverage gate (2026-08-03 investigation). The ENTRY half is PREVENTIVE by doctrine:
+        // "entries need fresh truth (you can always NOT enter)". A row-based window over a series
+        // with a missing session silently reaches further back than the strategy declares, so the
+        // score is computed off a window that is not the one under test. Refusing costs an
+        // opportunity for one session; entering on a stretched window costs money. The mirror-image
+        // check on the EXIT path deliberately does NOT refuse — see exitPass.
+        //
+        // Deliberately NOT added to refusalReasons. That list is a marker-BLOCKING signal
+        // (SwingBatchRecorder gates the swing_batch_runs completeness marker on it being empty), and
+        // an incomplete window is a NORMAL high-frequency condition, not an exceptional refusal:
+        // measured 2026-08-03, 48 of 278 funnel passers (17.3%) were gapped at batch time. Treating
+        // it as marker-blocking would withhold the completeness marker EVERY night, leaving the
+        // session permanently retryable and the did-not-run canary permanently firing. Evidence is
+        // durable (swing_batch_refusals) and alerting is aggregated once per run instead.
+        // notProvenSound(), NOT materiallyIncomplete(): the latter is FALSE for an undeterminable
+        // probe, so a probe failure used to permit the entry it exists to guard. See the javadoc
+        // on SwingCoverageProbe.Coverage#notProvenSound.
+        //
+        // Three-state by owner decision (2026-08-11), shipping OBSERVE_ONLY — see CoverageGateMode.
+        // DISABLED skips the probe entirely; OBSERVE_ONLY records and logs the would-be refusal but
+        // lets the entry PROCEED, so live behaviour is byte-identical to a build without the gate.
+        if (coverageGateMode != CoverageGateMode.DISABLED) {
+          SwingCoverageProbe.Coverage coverage = entryCoverage(strat, series);
+          if (coverage.notProvenSound()) {
+            boolean armed = coverageGateMode == CoverageGateMode.ARMED;
+            // ⚠️ The reason string is PREFIXED in OBSERVE_ONLY. swing_batch_refusals rows are read
+            // as "this candidate was refused"; writing the bare reason for an entry that then FIRED
+            // would make the table lie, and the arming decision rests on counting these rows.
+            recordCoverageRow(
+                doctrine,
+                effectSession,
+                c.symbol(),
+                (armed ? "" : "WOULD_REFUSE_") + coverageReason(c.symbol(), coverage));
+            if (armed) {
+              // Only an ARMED refusal joins the aggregated ops alert — otherwise the run would page
+              // about entries it allowed.
+              coverageRefused.add(c.symbol());
+              log.warn(
+                  "{} swing entry: {} refused for {} — {}",
+                  doctrine.batchName(), c.symbol(), strat.slug(), coverage.describe());
+              continue;
+            }
+            coverageWouldRefuse.add(c.symbol());
+            log.info(
+                "{} swing entry: {} WOULD be refused for {} (gate OBSERVE_ONLY, entry proceeds) — {}",
+                doctrine.batchName(), c.symbol(), strat.slug(), coverage.describe());
+          }
+        }
         Optional<EntryEvaluator.Evaluation> eval =
             EntryEvaluator.evaluate(strat.definition(), bank, series.size() - 1);
         if (eval.isPresent() && eval.get().entry()) {
@@ -571,7 +756,53 @@ public class SwingBatchEngine {
         }
       }
     }
+    } finally {
+      // finally, not a tail call: the pass has four early returns (deadline, mid-run gate trip) and
+      // the coverage summary must reach ops on every one of them.
+      alertCoverageRefusals(doctrine, effectSession(requiredBarDate), coverageRefused);
+      if (!coverageWouldRefuse.isEmpty()) {
+        // Observation only — deliberately a LOG, not an ntfy alert: the whole point of OBSERVE_ONLY
+        // is to accrue a rate without paging on it. The durable count is the WOULD_REFUSE_ rows.
+        log.info(
+            "{} swing: coverage gate OBSERVE_ONLY would have refused {} candidate(s) this run — {}",
+            doctrine.batchName(), coverageWouldRefuse.size(), coverageWouldRefuse);
+      }
+    }
     return new EntryResult(candidates.size(), fired, refusalReasons, false);
+  }
+
+  /**
+   * ONE aggregated ops alert for the run's data-coverage entry refusals. Per-symbol alerting was
+   * rejected on measured volume: 48 of 278 funnel passers (17.3%) were gapped on 2026-08-03, so a
+   * per-symbol page would bury the exit-side alerts that actually carry money risk. Fail-soft.
+   */
+  private void alertCoverageRefusals(
+      SwingDoctrine doctrine, LocalDate sessionDate, java.util.Set<String> symbols) {
+    if (symbols.isEmpty()) {
+      return;
+    }
+    List<String> sample = symbols.stream().limit(10).toList();
+    String message =
+        sessionDate
+            + ": "
+            + symbols.size()
+            + " symbol(s) refused — the window the entry gate reads is materially incomplete OR"
+            + " undeterminable (the probe could not make a claim: an uncovered calendar year, an"
+            + " invalid bar, or a depth that degraded to zero), so the score would be computed off a"
+            + " window that is stretched or unverified. NOTE:"
+            + " this is PER STRATEGY, and the family runs several with different depths in one pass,"
+            + " so a name refused by one strategy may still have been entered by another. "
+            + String.join(", ", sample)
+            + (symbols.size() > sample.size() ? " (+" + (symbols.size() - sample.size()) + " more)" : "");
+    try {
+      events.publishEvent(
+          new SwingBatchAlert(
+              doctrine.batchName(),
+              doctrine.alertLabel() + " entries refused — data coverage",
+              message));
+    } catch (RuntimeException e) {
+      log.warn("{} swing coverage alert failed: {}", doctrine.batchName(), e.getMessage());
+    }
   }
 
   /** True when the family book's per-book gate (kill-switch / caps / daily-loss) blocks entry. */
@@ -670,6 +901,18 @@ public class SwingBatchEngine {
       }
       if (c.onDeck() && !strat.includesOnDeck()) {
         continue;
+      }
+      // The data-coverage gate is part of "could the entry pass admit this", so the F3 probe must
+      // apply it too (cross-vendor review Major): otherwise a coverage-refused candidate still
+      // increments wouldEnter, never becomes held, and is persisted as a slot-cap drop —
+      // mis-attributing a DATA refusal to the capital cap and corrupting the ledger-F3 measurement.
+      // ⚠️ Mode-gated for the SAME reason the pass above is: the probe answers "could the entry pass
+      // admit this", so it must model the pass as CONFIGURED. If it kept skipping while OBSERVE_ONLY
+      // let the entry through, wouldEnter would UNDER-count exactly the candidates that entered —
+      // the mirror of the mis-attribution this check was added to fix.
+      if (coverageGateMode == CoverageGateMode.ARMED
+          && entryCoverage(strat, series).notProvenSound()) {
+        continue; // fail-closed, same reason as the gate above
       }
       IndicatorBank bank = buildBank(strat.definition(), c.symbol(), series, c.contextSeeds());
       Optional<EntryEvaluator.Evaluation> eval =
@@ -855,6 +1098,87 @@ public class SwingBatchEngine {
         skipped++;
         continue;
       }
+      // Data-coverage gate, EXIT half (2026-08-03 investigation) — DETECTIVE, NEVER PREVENTIVE.
+      //
+      // This deliberately does NOT mirror the entry refusal, and that asymmetry is doctrine, not
+      // preference: "entries need fresh truth (you can always NOT enter), exits need the best
+      // available truth (you cannot refuse to leave forever)." A guard that refused here would
+      // strand a position whose window is short or holed — and that cohort is real, not
+      // hypothetical: 44 symbols (TATASTEEL, WIPRO, TECHM, TRENT, NAUKRI …) currently hold only 44
+      // daily bars after a corporate-action purge. Today they degrade GRACEFULLY — ExitEvaluator's
+      // indicator branch gets a null level from a warming SMA and returns empty, so the sma50 trail
+      // goes inert while the 8% hard stop keeps working. Refusing would replace that graceful
+      // degradation with a hard refusal. So: observe beside the evaluation, never gate it.
+      //
+      // KNOWN AND ACCEPTED FAILURE MODE: this is detection, not prevention. If a gap coincides with
+      // a genuine trail cross, the position still exits at a level computed off a stretched window
+      // and the alert arrives AFTER the fill. That cost is accepted because the only preventive
+      // alternative is a refusal, which is strictly worse on an exit path.
+      // ⚠️ MODE-GATED (owner decision, 2026-08-14). The first cut of the three-state flag gated only
+      // the ENTRY half, so this block probed, logged at ERROR, wrote a swing_batch_refusals row and
+      // fired an ntfy page in EVERY mode — including DISABLED. A flag whose OFF position still turns
+      // a durable-row-writing, paging detector on for every book is not a flag; "ships inert" was
+      // true of half the change and false of the other half.
+      //
+      // The three states read DIFFERENTLY here than on the entry side, and that is forced by the
+      // doctrine above rather than chosen: an exit may never refuse, so the axis that varies is
+      // OBSERVATION, not admission. DISABLED observes nothing; OBSERVE_ONLY records + warns;
+      // ARMED records + errors + PAGES. ARMED on this half means "alert loudly" — see
+      // CoverageGateMode. The evaluation below runs identically under all three.
+      if (coverageGateMode != CoverageGateMode.DISABLED) {
+        // The footprint is OPERAND-AWARE, not just the declared depth. A trail measured off a peak
+        // scanned from entryIndex, or an ATR pinned AT entryIndex, depends on bars that sit outside
+        // any current-bar window on a long-held position — while a basis:indicator trail (the
+        // Minervini shape) depends on none of them and must NOT be widened, or ARMED pages on
+        // history its exit never reads. See SwingCoverageProbe#exitFootprintBars.
+        int exitDeclaredDepth = SwingCoverageProbe.exitLookbackBars(strat.definition(), bank);
+        SwingCoverageProbe.Coverage exitCoverage =
+            SwingCoverageProbe.probeExit(
+                series,
+                exitDeclaredDepth,
+                SwingCoverageProbe.exitFootprintBars(
+                    strat.definition(), bank, (series.size() - 1) - entryIndex),
+                calendar);
+        // ⚠️ UNDETERMINABLE counts as degraded here, and materiallyIncomplete() alone does NOT say
+        // so — it is false when determinable is false, so a probe that FAILED reported the exit as
+        // cleanly covered and said nothing (cross-vendor review, 2026-08-10). On the ENTRY side the
+        // same blindness let the trade through; here it is quieter but the same shape: the operand
+        // cannot express "I do not know", so silence meant both "fine" and "broken".
+        //
+        // Evaluation still proceeds unconditionally — that is the doctrine above and it does not
+        // change. Only the OBSERVATION widens.
+        if (exitCoverage.notProvenSound()) {
+          // ⚠️ NOT prefixed WOULD_REFUSE_ the way the entry row is under OBSERVE_ONLY. That prefix
+          // exists because an entry row would otherwise claim a refusal for a candidate that then
+          // FIRED; here the exit fires under every mode, so this row states the same true fact
+          // whichever mode wrote it and a prefix would invent a distinction that does not exist.
+          recordCoverageRow(
+              doctrine,
+              effectSession(requiredBarDate),
+              primary.tradingsymbol(),
+              coverageDegradedReason(primary.tradingsymbol()));
+          if (coverageGateMode == CoverageGateMode.ARMED) {
+            log.error(
+                "{} swing exit: #{} {} evaluated on INCOMPLETE or UNKNOWN coverage — {} — stop/trail"
+                    + " level may be computed off a stretched window (evaluation NOT blocked)",
+                doctrine.batchName(), primary.id(), primary.tradingsymbol(), exitCoverage.describe());
+            alertExitCoverageDegraded(
+                doctrine,
+                effectSession(requiredBarDate),
+                primary.tradingsymbol(),
+                exitCoverage.describe());
+          } else {
+            // WARN, not ERROR: an observation nobody is acting on must not spend the ERROR budget a
+            // post-deploy log sweep reads as breakage. The durable row is the evidence; the page is
+            // what arming buys.
+            log.warn(
+                "{} swing exit: #{} {} evaluated on INCOMPLETE or UNKNOWN coverage — {} — stop/trail"
+                    + " level may be computed off a stretched window (gate OBSERVE_ONLY: evaluation"
+                    + " NOT blocked, ops NOT paged)",
+                doctrine.batchName(), primary.id(), primary.tradingsymbol(), exitCoverage.describe());
+          }
+        }
+      }
       ExitEvaluator.Position position =
           new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex);
       Optional<ExitEvaluator.ExitDecision> exit =
@@ -949,6 +1273,75 @@ public class SwingBatchEngine {
     } catch (RuntimeException e) {
       log.warn("{} swing refusal alert failed: {}", doctrine.batchName(), e.getMessage());
     }
+  }
+
+  /**
+   * The ENTRY-scoped coverage reading for one strategy over one symbol's series. Single definition
+   * so the emitting pass and the F3 admission probe can never disagree about which candidates the
+   * coverage gate refuses — they were allowed to diverge in the first draft, and the probe then
+   * recorded data refusals as slot-cap drops.
+   */
+  private static SwingCoverageProbe.Coverage entryCoverage(
+      SwingStrategy strat, List<EngineCandle> series) {
+    // probeEntry, not probe: it widens the READ by DEPTH_SLACK while pinning the materiality
+    // denominator to the declared depth. Passing entryLookbackBars() to probe() would restore the
+    // single-number shape whose widening loosened this gate once already.
+    return SwingCoverageProbe.probeEntry(
+        series, SwingCoverageProbe.entryLookbackBars(strat.definition()), calendar);
+  }
+
+  private void recordCoverageRow(
+      SwingDoctrine doctrine, LocalDate sessionDate, String symbol, String reason) {
+    if (refusals == null) {
+      return;
+    }
+    try {
+      refusals.record(doctrine.batchName(), sessionDate, symbol, reason);
+    } catch (RuntimeException e) {
+      log.error(
+          "{} swing: failed to persist coverage event {} for {} {}",
+          doctrine.batchName(), reason, sessionDate, symbol, e);
+    }
+  }
+
+  /**
+   * Per-position ops alert for an exit evaluated on incomplete data. Unlike the entry side this is
+   * NOT aggregated: the held book is small (18 open positions on 2026-08-03) and each degraded exit
+   * carries live money risk, so each one is individually actionable rather than noise. Fail-soft —
+   * this batch is the position's only exit evaluator, so an alerting failure must never propagate.
+   */
+  private void alertExitCoverageDegraded(
+      SwingDoctrine doctrine, LocalDate sessionDate, String symbol, String detail) {
+    try {
+      events.publishEvent(
+          new SwingBatchAlert(
+              doctrine.batchName(),
+              doctrine.alertLabel() + " exit DEGRADED — data coverage",
+              sessionDate
+                  + " "
+                  + symbol
+                  + ": "
+                  + detail
+                  + " — the exit was EVALUATED ANYWAY on the bars present (doctrine: an exit must"
+                  + " never refuse), so the stop/trail level it used may be computed off a stretched"
+                  + " window. Verify before trusting today's level for this position."));
+    } catch (RuntimeException e) {
+      log.warn("{} swing coverage alert failed: {}", doctrine.batchName(), e.getMessage());
+    }
+  }
+
+  /**
+   * ⚠️ Two DIFFERENT refusals, and reporting them as one misleads the operator. A calendar-horizon
+   * failure or a caught probe exception establishes NO missing share at all — calling that
+   * "incomplete coverage" sends someone looking for a data gap that was never measured. Cross-vendor
+   * review, 2026-08-10.
+   */
+  private static String coverageReason(String symbol, SwingCoverageProbe.Coverage coverage) {
+    return (coverage.determinable() ? "INCOMPLETE_COVERAGE:" : "UNDETERMINABLE_COVERAGE:") + symbol;
+  }
+
+  private static String coverageDegradedReason(String symbol) {
+    return "EXIT_DEGRADED_COVERAGE:" + symbol;
   }
 
   private static String mixedLotReason(String symbol) {

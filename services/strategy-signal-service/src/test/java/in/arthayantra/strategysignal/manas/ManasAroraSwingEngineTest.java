@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -28,7 +29,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import in.arthayantra.strategysignal.swing.SwingBatchRefusalRepository;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -473,16 +476,93 @@ class ManasAroraSwingEngineTest {
 
   // ---- harness --------------------------------------------------------------------------------
 
+  /**
+   * CONSUMER PROOF FOR THE RECURSIVE ATR PREFIX specifically — the gap this places is outside {@code
+   * declared + heldBars} yet inside the entry-pinned ATR's decay reach, so ONLY the recursive term
+   * can detect it.
+   *
+   * <p>Added because review round 2 pointed out the sibling test below could not prove this: it
+   * anchors entry at the FIRST bar, so its gap always falls inside the held span and the consumer
+   * stays green even with the recursive term removed. Live Manas declares 50 (unused {@code sma50})
+   * and {@code atrDecayLength(20)} is 59. With a 20-bar hold the footprint is {@code max(50, 20+1+59)
+   * = 80}, while a hypothetical {@code declared + held} would reach only 70 — so a gap 75 bars back
+   * separates them.
+   */
+  @Test
+  void exitCoverageSeesAPreEntryGapInsideTheRecursiveAtrReach() throws IOException {
+    List<EngineCandle> full = longDecline();
+    int lastIndex = full.size() - 1;
+    // 2026-04-15/16/17 — three REAL trading days. An earlier attempt used lastIndex-75..-73, which
+    // began on 2026-04-14 (Ambedkar Jayanti): a dropped non-trading day is not a hole, so only 2
+    // counted and 2*22 did not clear the materiality basis of 50. Measured, not assumed.
+    ExitHarness h = new ExitHarness(droppedAt(full, lastIndex - 74, lastIndex - 73, lastIndex - 72));
+    // entry 20 bars before the end: the gap above sits BEFORE entry, outside declared + held
+    h.stubAnchors(h.anchor(42L, full.get(lastIndex - 20).bucketStart()));
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
+
+    h.engine(SwingBatchEngine.CoverageGateMode.ARMED).runDaily(h.doctrine(false));
+
+    assertThat(h.coverageRows)
+        .as(
+            "a PRE-ENTRY gap inside the recursive Wilder ATR's decay reach can move atrAtEntry and"
+                + " therefore the stop — only the recursive term sees it")
+        .containsExactly("manas-arora|2026-08-04|TESTCO|EXIT_DEGRADED_COVERAGE:TESTCO");
+  }
+
+  /**
+   * THE CONSUMER TEST for the operand-aware exit footprint. Manas is the shape that genuinely reads
+   * from the entry bar — {@code stop_loss basis: atr_multiple} resolves {@code atrAtEntry} (the
+   * recursive Wilder ATR AT the entry index) and its {@code trailing_stop basis: atr_multiple
+   * atr_basis: rolling} ratchets a Chandelier over {@code entryIndex..index}. So a gap early in a
+   * long hold CAN move the stop level, and must raise {@code EXIT_DEGRADED_COVERAGE}.
+   *
+   * <p>The mirror of {@code MinerviniSwingEngineTest#aLongHeldMinerviniPositionDoesNotPageOnHistory-
+   * ItsExitNeverReads}: same gap position, same hold length, opposite requirement — which is the
+   * whole point of making the footprint operand-aware rather than blanket.
+   */
+  @Test
+  void exitCoverageSeesAGapInsideTheHoldForAnEntryPinnedAtrExit() throws IOException {
+    ExitHarness h = new ExitHarness(longDecline());
+    List<EngineCandle> holed = holed(h.series, 2, 10, 11, 12);
+    assertThat(holed).hasSize(h.series.size() - 3);
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(holed);
+
+    h.engine(SwingBatchEngine.CoverageGateMode.ARMED).runDaily(h.doctrine(false));
+
+    assertThat(h.coverageRows)
+        .as(
+            "an entry-pinned recursive ATR and a peak-since-entry Chandelier DO read this history —"
+                + " a gap here can move the stop, so ARMED must report it")
+        .containsExactly("manas-arora|2026-08-04|TESTCO|EXIT_DEGRADED_COVERAGE:TESTCO");
+  }
+
   private final class ExitHarness {
     final StrategyRepository registry = mock(StrategyRepository.class);
     final SignalRepository signals = mock(SignalRepository.class);
     final ManasFunnelClient funnel = mock(ManasFunnelClient.class);
     final MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
     final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
-    final List<EngineCandle> series = craftDecline();
+    final SwingBatchRefusalRepository refusals = mock(SwingBatchRefusalRepository.class);
+    final List<String> coverageRows = new ArrayList<>();
+    final List<EngineCandle> series;
     final UUID publishedVersion = UUID.randomUUID();
 
     ExitHarness() throws IOException {
+      this(craftDecline());
+    }
+
+    /** Same harness over a caller-supplied series — used by the exit-coverage sizing tests. */
+    ExitHarness(List<EngineCandle> bars) throws IOException {
+      this.series = bars;
+      doAnswer(
+              invocation -> {
+                coverageRows.add(
+                    invocation.getArgument(0) + "|" + invocation.getArgument(1) + "|"
+                        + invocation.getArgument(2) + "|" + invocation.getArgument(3));
+                return null;
+              })
+          .when(refusals)
+          .record(any(), any(), any(), any());
       UUID strategyId = UUID.randomUUID();
       JsonNode config = breakoutConfig();
       when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
@@ -505,6 +585,16 @@ class ManasAroraSwingEngineTest {
       return new SwingBatchEngine(
           registry, candles, signals, mock(SignalPublisher.class), events, Optional.empty(),
           passthroughTx(), new ObjectMapper(), Clock.systemUTC());
+    }
+
+    /** Coverage-capable variant: a real refusal repository plus a FIXED clock, so the session key
+     * in a persisted coverage row is deterministic. */
+    SwingBatchEngine engine(SwingBatchEngine.CoverageGateMode mode) {
+      return new SwingBatchEngine(
+          registry, candles, signals, mock(SignalPublisher.class), events, Optional.empty(),
+          passthroughTx(), new ObjectMapper(),
+          Clock.fixed(Instant.parse("2026-08-04T00:00:00Z"), ZoneOffset.UTC),
+          null, refusals, mode.name());
     }
 
     ManasDoctrine doctrine(boolean pyramidEnabled) {
@@ -580,6 +670,57 @@ class ManasAroraSwingEngineTest {
       bars.add(bar(d, 152.0 + 1.125 * (d - 19)));
     }
     return bars;
+  }
+
+  /**
+   * {@link #craftDecline} stretched back to 2026-02-02 — 145 calendar-day bars, so the series is
+   * LONGER than the strategy's declared 50-bar exit depth. Same ending decline, so the exit still
+   * fires; only the history behind it is longer.
+   */
+  private static List<EngineCandle> longDecline() {
+    List<EngineCandle> bars = new ArrayList<>();
+    java.time.LocalDate start = java.time.LocalDate.of(2026, 2, 2);
+    java.time.LocalDate last = java.time.LocalDate.of(2026, 6, 28);
+    int span = (int) java.time.temporal.ChronoUnit.DAYS.between(start, last);
+    for (int d = 0; d < span - 1; d++) {
+      bars.add(barOn(start.plusDays(d), 150.0));
+    }
+    bars.add(barOn(last.minusDays(1), 140.0));
+    bars.add(barOn(last, 120.0));
+    return bars;
+  }
+
+  private static EngineCandle barOn(java.time.LocalDate date, double price) {
+    BigDecimal c = BigDecimal.valueOf(price);
+    return new EngineCandle(
+        date.atStartOfDay().atOffset(IST), c, BigDecimal.valueOf(price + 1),
+        BigDecimal.valueOf(price - 1), c, 1_000L, null);
+  }
+
+  /** Drops the given INDEX positions from a series — precise placement relative to the last bar. */
+  private static List<EngineCandle> droppedAt(List<EngineCandle> series, int... indexes) {
+    java.util.Set<Integer> drop = new java.util.HashSet<>();
+    for (int i : indexes) {
+      drop.add(i);
+    }
+    List<EngineCandle> out = new ArrayList<>();
+    for (int i = 0; i < series.size(); i++) {
+      if (!drop.contains(i)) {
+        out.add(series.get(i));
+      }
+    }
+    return out;
+  }
+
+  /** Drops the given days of {@code month} from a series. */
+  private static List<EngineCandle> holed(List<EngineCandle> series, int month, int... days) {
+    java.util.Set<java.time.LocalDate> drop = new java.util.HashSet<>();
+    for (int d : days) {
+      drop.add(java.time.LocalDate.of(2026, month, d));
+    }
+    List<EngineCandle> out = new ArrayList<>(series);
+    out.removeIf(b -> drop.contains(b.bucketStart().toLocalDate()));
+    return out;
   }
 
   private static EngineCandle bar(int day, double price) {

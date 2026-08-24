@@ -71,7 +71,8 @@ class MonitorSchedulingConfigTest {
   void productionDetectorsTargetTheMonitorScheduler() throws NoSuchMethodException {
     // PartialBucketCanary is deliberately absent — it left this pool at G9, see
     // thePartialBucketCanaryOwnsItsOwnSchedulerBecauseItDoesExternalIo below.
-    assertBoundToMonitorScheduler(SubscriberHealthCanary.class, "sweep");
+    // SubscriberHealthCanary is deliberately absent — it left this pool in #1453, see
+    // theSubscriberWatchdogOwnsItsOwnPoolBecauseItWritesJdbc below.
     assertBoundToMonitorScheduler(DotHealthCanary.class, "sweep");
     assertBoundToMonitorScheduler(StrategyCoverageWatchdog.class, "sweep");
   }
@@ -160,6 +161,41 @@ class MonitorSchedulingConfigTest {
           assertThat(scheduler).isNotSameAs(context.getBean("evalOutcomeTaskScheduler"));
           assertThat(scheduler).isNotSameAs(context.getBean("maintenanceTaskScheduler"));
           assertThat(scheduler).isNotSameAs(context.getBean("telegramTaskScheduler"));
+        });
+  }
+
+  /**
+   * #1453: the subscriber watchdog writes JDBC from its sweep — {@code SubscriberHealthTelemetry}
+   * has for a long time, and the blind-window register now does too — so it cannot stay on a pool
+   * whose contract is "fast, bounded work" and whose rule is that any detector gaining a blocking
+   * call must leave. A statement timeout was not sufficient: it starts only after connection
+   * acquisition (Hikari's 30 s default here, unset in application.yml) and the telemetry insert is
+   * untimed regardless.
+   */
+  @Test
+  void theSubscriberWatchdogOwnsItsOwnPoolBecauseItWritesJdbc() throws NoSuchMethodException {
+    Scheduled scheduled =
+        SubscriberHealthCanary.class.getDeclaredMethod("sweep").getAnnotation(Scheduled.class);
+    assertThat(scheduled).as("SubscriberHealthCanary.sweep is @Scheduled").isNotNull();
+    assertThat(scheduled.scheduler())
+        .as("a JDBC-writing sweep must not share the fenced detector pool")
+        .isEqualTo("subscriberWatchdogTaskScheduler");
+  }
+
+  /** The bean it names must exist and be distinct from the pools it could regress onto. */
+  @Test
+  void theSubscriberWatchdogSchedulerBeanExistsAndIsIsolated() {
+    runner.run(
+        context -> {
+          ThreadPoolTaskScheduler scheduler =
+              context.getBean("subscriberWatchdogTaskScheduler", ThreadPoolTaskScheduler.class);
+          assertThat(scheduler).isNotNull();
+          assertThat(scheduler)
+              .as("a distinct pool from the fenced detector pool it left")
+              .isNotSameAs(context.getBean("monitorTaskScheduler"));
+          assertThat(scheduler)
+              .as("and from the default scheduling pool")
+              .isNotSameAs(context.getBean("taskScheduler"));
         });
   }
 

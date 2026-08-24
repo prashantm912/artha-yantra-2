@@ -30,6 +30,12 @@
 -- days-old window with a recovery it did not witness.
 CREATE TABLE blind_windows (
     id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- Client-generated, one per episode, so the INSERT is IDEMPOTENT. Without it an INSERT that
+    -- COMMITS but loses its RETURNING response is indistinguishable from one that never ran: the
+    -- retry writes a SECOND row, recovery closes only that one, and the first stays open forever --
+    -- so `ended_at IS NULL`, the single thing this table is read for, reports an ongoing outage that
+    -- actually ended. That is corruption of the audit artifact, not a visible duplicate.
+    episode_key   text        NOT NULL UNIQUE,
     started_at    timestamptz NOT NULL,
     ended_at      timestamptz,
     closed_reason text,

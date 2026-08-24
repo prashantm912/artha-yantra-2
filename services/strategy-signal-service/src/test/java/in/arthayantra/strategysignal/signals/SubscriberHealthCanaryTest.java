@@ -51,7 +51,7 @@ class SubscriberHealthCanaryTest {
 
   /** The register accepted the write - the default `false` would leave every episode pending. */
   private void registerAccepts() {
-    when(blindWindows.open(any(Instant.class), anyString())).thenReturn(7L);
+    when(blindWindows.open(anyString(), any(Instant.class), anyString())).thenReturn(7L);
     when(blindWindows.close(any(), any(Instant.class), anyString())).thenReturn(true);
   }
 
@@ -107,7 +107,7 @@ class SubscriberHealthCanaryTest {
     verify(events, never()).publishEvent(any());
     // anchored at the RECEIPT of the last bar, not at detection time 200s later
     verify(blindWindows, times(1))
-        .open(eq(Instant.ofEpochMilli(NOW_MS - 200_000)), anyString());
+        .open(anyString(), eq(Instant.ofEpochMilli(NOW_MS - 200_000)), anyString());
     verify(telemetry, times(1)).record(eq("feed-blind"), anyString());
   }
 
@@ -242,7 +242,7 @@ class SubscriberHealthCanaryTest {
     c.sweep();
     c.sweep();
 
-    verify(blindWindows, times(1)).open(any(Instant.class), anyString());
+    verify(blindWindows, times(1)).open(anyString(), any(Instant.class), anyString());
   }
 
   /**
@@ -255,7 +255,7 @@ class SubscriberHealthCanaryTest {
     when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
     evalKeepingUp(NOW_MS - 200_000);
     feedAgeMs(200_000);
-    when(blindWindows.open(any(Instant.class), anyString()))
+    when(blindWindows.open(anyString(), any(Instant.class), anyString()))
         .thenReturn(null) // first write lost
         .thenReturn(7L); // second lands
 
@@ -264,7 +264,7 @@ class SubscriberHealthCanaryTest {
     c.sweep();
     c.sweep(); // already durable - must not insert a third time
 
-    verify(blindWindows, times(2)).open(eq(Instant.ofEpochMilli(NOW_MS - 200_000)), anyString());
+    verify(blindWindows, times(2)).open(anyString(), eq(Instant.ofEpochMilli(NOW_MS - 200_000)), anyString());
     verify(telemetry, times(1)).record(eq("feed-blind"), anyString()); // one episode, one alert
   }
 
@@ -283,7 +283,7 @@ class SubscriberHealthCanaryTest {
 
     canary(true).sweep();
 
-    verify(blindWindows, times(1)).open(any(Instant.class), anyString());
+    verify(blindWindows, times(1)).open(anyString(), any(Instant.class), anyString());
     verify(telemetry, times(1)).record(eq("eval-stall"), anyString()); // the eval branch still fires
   }
 
@@ -365,12 +365,19 @@ class SubscriberHealthCanaryTest {
         .sweep();
 
     // 09:15 IST on 2026-07-07 == 03:45Z, NOT the 07-06 close
-    verify(blindWindows, times(1)).open(eq(Instant.parse("2026-07-07T03:45:00Z")), anyString());
+    verify(blindWindows, times(1)).open(anyString(), eq(Instant.parse("2026-07-07T03:45:00Z")), anyString());
   }
 
-  /** Recovery closes the window at the receipt of the FIRST bar back, not at sweep time. */
+  /**
+   * Recovery closes the window at a bar RECEIPT, not at sweep time.
+   *
+   * <p>⚠️ This fixture has exactly one bar arrive before the sweep, so here the newest receipt
+   * IS the first bar back. In production they differ: the close stamps the NEWEST receipt the
+   * observing sweep can see, which overstates the true end by up to one sweep. The test name
+   * used to claim "first bar back" generally, which the review of #1453 correctly called out.
+   */
   @Test
-  void barsResume_closesTheWindowAtTheFirstGoodBar() {
+  void barsResume_closesTheWindowAtABarReceiptNotSweepTime() {
     MutableClock advancing = new MutableClock(IN_SESSION);
     AtomicLong received = new AtomicLong(NOW_MS - 200_000);
     when(registry.countEnabledPublished()).thenReturn(1L);
@@ -437,7 +444,7 @@ class SubscriberHealthCanaryTest {
     when(engine.lastBarEvaluatedAtMs()).thenReturn(NOW_MS - 200_000);
     when(redis.opsForValue()).thenReturn(valueOps);
     when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000));
-    when(blindWindows.open(any(Instant.class), anyString())).thenReturn(7L);
+    when(blindWindows.open(anyString(), any(Instant.class), anyString())).thenReturn(7L);
     when(blindWindows.close(any(), any(Instant.class), anyString())).thenReturn(false); // DB down
 
     SubscriberHealthCanary c =
@@ -485,7 +492,7 @@ class SubscriberHealthCanaryTest {
     c.sweep(); // re-enabled, producer still blind: a SECOND window opens
 
     ArgumentCaptor<Instant> starts = ArgumentCaptor.forClass(Instant.class);
-    verify(blindWindows, times(2)).open(starts.capture(), anyString());
+    verify(blindWindows, times(2)).open(anyString(), starts.capture(), anyString());
     assertThat(starts.getAllValues().get(1))
         .as("the second window must not reach back over the interval the first one covered")
         .isAfterOrEqualTo(closedAt);

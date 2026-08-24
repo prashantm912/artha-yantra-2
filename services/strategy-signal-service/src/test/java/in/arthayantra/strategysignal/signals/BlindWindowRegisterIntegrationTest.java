@@ -35,6 +35,10 @@ class BlindWindowRegisterIntegrationTest extends StrategySignalIntegrationTestBa
     return new BlindWindowRegister(dataSource);
   }
 
+  private static String key() {
+    return "ep-" + UUID.randomUUID();
+  }
+
   /** Read back through pgjdbc's OffsetDateTime mapping — a raw {@code Timestamp} would drag the
    * JVM's default zone into the comparison, which is exactly the class of trap this table records. */
   private record Window(Instant startedAt, Instant endedAt, String reason, String detail) {}
@@ -59,7 +63,7 @@ class BlindWindowRegisterIntegrationTest extends StrategySignalIntegrationTestBa
     Instant startedAt = Instant.ofEpochMilli(1_755_000_000_000L); // 2025-08-12T13:20Z, ms precision
     Instant endedAt = startedAt.plusSeconds(900);
 
-    Long id = register().open(startedAt, detail);
+    Long id = register().open(key(), startedAt, detail);
     assertThat(id).isNotNull();
 
     Window open = row(id);
@@ -85,8 +89,8 @@ class BlindWindowRegisterIntegrationTest extends StrategySignalIntegrationTestBa
     String abandoned = "blind-abandoned-" + UUID.randomUUID();
     Instant at = Instant.ofEpochMilli(1_755_100_000_000L);
 
-    Long orphan = register().open(at, abandoned);
-    Long id = register().open(at.plusSeconds(60), mine);
+    Long orphan = register().open(key(), at, abandoned);
+    Long id = register().open(key(), at.plusSeconds(60), mine);
 
     register().close(id, at.plusSeconds(600), "bars-resumed");
 
@@ -98,7 +102,7 @@ class BlindWindowRegisterIntegrationTest extends StrategySignalIntegrationTestBa
   @Test
   void close_isIdempotentAndKeepsTheFirstReason() {
     Instant at = Instant.ofEpochMilli(1_755_200_000_000L);
-    Long id = register().open(at, "blind-idempotent-" + UUID.randomUUID());
+    Long id = register().open(key(), at, "blind-idempotent-" + UUID.randomUUID());
 
     register().close(id, at.plusSeconds(300), "bars-resumed");
     register().close(id, at.plusSeconds(9000), "session-ended");
@@ -106,6 +110,27 @@ class BlindWindowRegisterIntegrationTest extends StrategySignalIntegrationTestBa
     Window row = row(id);
     assertThat(row.reason()).isEqualTo("bars-resumed");
     assertThat(row.endedAt()).isEqualTo(at.plusSeconds(300));
+  }
+
+  /**
+   * THE AMBIGUOUS-COMMIT CASE. An INSERT that commits but loses its RETURNING response is
+   * indistinguishable from one that never ran. Without an idempotency key the retry writes a SECOND
+   * row, recovery closes only that one, and the first stays open forever — so `ended_at IS NULL`,
+   * the only thing this table is read for, would report an ongoing outage that actually ended.
+   */
+  @Test
+  void openIsIdempotentOnTheEpisodeKey() {
+    String episode = key();
+    Instant at = Instant.ofEpochMilli(1_755_400_000_000L);
+
+    Long first = register().open(episode, at, "blind-idem-" + episode);
+    Long second = register().open(episode, at, "blind-idem-" + episode);
+
+    assertThat(second).as("a retry must resolve to the SAME row, not a second one").isEqualTo(first);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM blind_windows WHERE episode_key = ?", Integer.class, episode))
+        .isEqualTo(1);
   }
 
   /** A failed open yields a null id; the matching close must be a silent no-op, not an NPE. */
@@ -119,7 +144,7 @@ class BlindWindowRegisterIntegrationTest extends StrategySignalIntegrationTestBa
   @Test
   void checkConstraintForbidsAHalfClosedRow() {
     Instant at = Instant.ofEpochMilli(1_755_300_000_000L);
-    Long id = register().open(at, "blind-check-" + UUID.randomUUID());
+    Long id = register().open(key(), at, "blind-check-" + UUID.randomUUID());
 
     assertThatThrownBy(
             () -> jdbc.update("UPDATE blind_windows SET ended_at = now() WHERE id = ?", id))

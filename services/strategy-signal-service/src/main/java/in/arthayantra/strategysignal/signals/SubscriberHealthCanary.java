@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.util.Map;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -66,9 +67,11 @@ import org.springframework.stereotype.Component;
  * <p>Three boundaries of that record are worth knowing before reading one. {@code started_at} is
  * CLAMPED to today's session open — a feed already dead at 09:15 anchors on yesterday's last bar
  * otherwise, and would report the whole night as blindness. {@code ended_at} is the newest receipt
- * seen by the sweep that OBSERVED recovery, not the first bar back, so it can overstate the true end
- * by up to one sweep interval ({@value #SWEEP_INTERVAL_MS} ms); pinning it exactly would need a
- * transition hook inside the engine's receive path, which is not worth putting on that path. And a
+ * seen by the sweep that OBSERVED recovery, not the first bar back, so it OVERSTATES the true end by
+ * up to one sweep — normally the {@value #SWEEP_INTERVAL_MS} ms cadence, but longer whenever the
+ * sweep itself is delayed, because {@code fixedDelay} is a spacing and not an upper bound. Pinning it
+ * exactly would need a transition hook inside the engine's receive path, which is not worth putting
+ * on that path. And a
  * BACKWARD clock step is treated as a fault, never as recovery — a negative receive gap satisfies
  * "receiving normally", so acting on it would close a live outage with no bar having arrived.
  *
@@ -135,13 +138,14 @@ public class SubscriberHealthCanary {
   private long lastResubscribeAtMs;
 
   /** One producer-blind episode. Immutable; every transition replaces it. */
-  private record Episode(Instant startedAt, String detail, Long id, Instant endedAt, String reason) {
+  private record Episode(
+      String key, Instant startedAt, String detail, Long id, Instant endedAt, String reason) {
     Episode withId(Long newId) {
-      return new Episode(startedAt, detail, newId, endedAt, reason);
+      return new Episode(key, startedAt, detail, newId, endedAt, reason);
     }
 
     Episode closing(Instant at, String why) {
-      return new Episode(startedAt, detail, id, at, why);
+      return new Episode(key, startedAt, detail, id, at, why);
     }
   }
 
@@ -175,7 +179,10 @@ public class SubscriberHealthCanary {
   }
 
   /** The per-minute in-session receive-gap + eval-gap check. */
-  @Scheduled(fixedDelay = SWEEP_INTERVAL_MS, initialDelay = 120_000, scheduler = "monitorTaskScheduler")
+  @Scheduled(
+      fixedDelay = SWEEP_INTERVAL_MS,
+      initialDelay = 120_000,
+      scheduler = "subscriberWatchdogTaskScheduler") // NOT the monitor pool: this sweep writes JDBC
   public void sweep() {
     try {
       if (!enabled) {
@@ -325,7 +332,7 @@ public class SubscriberHealthCanary {
     current = episode;
     if (current != null) {
       if (current.id() == null) {
-        Long recovered = blindWindows.open(current.startedAt(), current.detail());
+        Long recovered = blindWindows.open(current.key(), current.startedAt(), current.detail());
         if (recovered != null) {
           episode = current.withId(recovered);
         }
@@ -343,7 +350,10 @@ public class SubscriberHealthCanary {
             + "engine did not see them live";
     log.error("subscriber watchdog: engine BLIND — {}", detail);
     telemetry.record("feed-blind", detail);
-    episode = new Episode(startedAt, detail, blindWindows.open(startedAt, detail), null, null);
+    // One key per episode, generated ONCE here: every later retry of this INSERT reuses it, so an
+    // ambiguous commit resolves to the SAME row instead of a second, permanently-open one.
+    String key = UUID.randomUUID().toString();
+    episode = new Episode(key, startedAt, detail, blindWindows.open(key, startedAt, detail), null, null);
   }
 
   /** Marks the open episode closed and tries to make that durable. No-op when nothing is open. */
@@ -372,7 +382,7 @@ public class SubscriberHealthCanary {
       return true;
     }
     if (current.id() == null) {
-      Long id = blindWindows.open(current.startedAt(), current.detail());
+      Long id = blindWindows.open(current.key(), current.startedAt(), current.detail());
       if (id == null) {
         return false;
       }

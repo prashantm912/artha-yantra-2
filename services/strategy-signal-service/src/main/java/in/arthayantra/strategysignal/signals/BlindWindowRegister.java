@@ -63,14 +63,28 @@ public class BlindWindowRegister {
   }
 
   /**
-   * Opens a window at the last moment the engine is known to have had data. Returns the row id, or
-   * {@code null} when the write failed — the caller must treat null as "nothing to close".
+   * Opens a window at the last moment the engine is known to have had data, IDEMPOTENTLY on
+   * {@code episodeKey}. Returns the row id, or {@code null} when the write failed — the caller must
+   * treat null as "nothing to close".
+   *
+   * <p>The key is what makes a retry safe after an AMBIGUOUS COMMIT: a plain INSERT that commits but
+   * loses its {@code RETURNING} response looks exactly like one that never ran, and retrying it
+   * would leave the first row open forever while recovery closed the second — breaking
+   * {@code ended_at IS NULL}, the only thing this table is read for.
    */
-  public Long open(Instant startedAt, String detail) {
+  public Long open(String episodeKey, Instant startedAt, String detail) {
     try {
+      // ON CONFLICT ... DO UPDATE (not DO NOTHING) because DO NOTHING returns no row, so a retry
+      // after an ambiguous commit could not recover the id it needs in order to close the window.
+      // The SET is a deliberate no-op: it re-writes the key to itself purely to make the row
+      // returnable, never overwriting a start or detail already recorded.
       return jdbc.queryForObject(
-          "INSERT INTO blind_windows (started_at, detail) VALUES (?, ?) RETURNING id",
+          "INSERT INTO blind_windows (episode_key, started_at, detail) VALUES (?, ?, ?)"
+              + " ON CONFLICT (episode_key)"
+              + " DO UPDATE SET episode_key = blind_windows.episode_key"
+              + " RETURNING id",
           Long.class,
+          episodeKey,
           OffsetDateTime.ofInstant(startedAt, ZoneOffset.UTC),
           detail);
     } catch (RuntimeException e) {

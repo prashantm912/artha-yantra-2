@@ -76,6 +76,35 @@ public class MonitorSchedulingConfig {
   }
 
   /**
+   * A single daemon thread owned solely by {@code SubscriberHealthCanary.sweep}.
+   *
+   * <p><b>Why it left {@link #monitorTaskScheduler()} (review of #1453).</b> That pool is fenced for
+   * detectors doing "fast, bounded work on the sweep thread", and this sweep no longer qualifies:
+   * {@code SubscriberHealthTelemetry.record} has done a synchronous, UNTIMED JDBC insert from it for
+   * a long time, and #1453 adds the blind-window register on top. The pool's own rule is explicit —
+   * "a detector that gains ANY blocking call must move off this pool too; catching the exception is
+   * not containment, because a STALLED call starves every sibling while it hangs".
+   *
+   * <p><b>Why a statement timeout was not enough.</b> The register bounds its own statements at 2 s,
+   * but that clock starts only AFTER connection acquisition, and the shared Hikari config sets no
+   * acquisition timeout (30 s default) — and the telemetry insert on the same path is untimed
+   * regardless. So the producer-blind branch could hold the shared detector thread for 30 s or
+   * indefinitely, during an outage, which is precisely when the sibling detectors matter most.
+   *
+   * <p><b>Why this is not an async writer.</b> Moving the sweep wholesale keeps it single-threaded
+   * and single-writer, so the blind-window episode state machine stays synchronous. Nothing about
+   * the ordering guarantees changes; only the thread it all happens on.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler subscriberWatchdogTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("subscriber-watchdog-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
+
+  /**
    * A single daemon thread owned solely by {@code PartialBucketCanary}. It was a pure in-memory
    * detector on {@code monitorTaskScheduler} until G9 gave it two external dependencies — an
    * instrument-master lot-size lookup and a Redis-backed store for the at-most-one deferred

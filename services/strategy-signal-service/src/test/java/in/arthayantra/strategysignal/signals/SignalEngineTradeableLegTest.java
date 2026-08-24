@@ -109,6 +109,7 @@ class SignalEngineTradeableLegTest {
         mock(ScalperAccountModel.class),
         mock(PaperPositionRepository.class),
         mock(PaperOrderRejectionRecorder.class),
-        new ManasGoverningStopCache());
+        new ManasGoverningStopCache(),
+        new in.arthayantra.strategysignal.paper.EquityMarkCache(java.time.Clock.systemUTC(), 5));
   }
 }

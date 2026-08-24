@@ -483,9 +483,14 @@ public final class SwingCoverageProbe {
    *
    * These windows OVERLAP — both end at the current bar — so adding them double-counts. The first
    * cut returned {@code declared + heldBars + prefix}; on live Manas that is {@code 50 + heldBars +
-   * 39 = heldBars + 89} where the real requirement is {@code max(50, heldBars + 59)}. It probed 30
-   * bars no exit operand reads, which is the SAME false-page defect this class removes for Minervini,
-   * reintroduced along a different axis.
+   * 39 = heldBars + 89} where the real requirement is {@code max(50, heldBars + 1 + 59)}. It probed
+   * 29 bars no exit operand reads, which is the SAME false-page defect this class removes for
+   * Minervini, reintroduced along a different axis.
+   *
+   * <p>The {@code + 1} is not slop: a suffix of {@code held + 1 + reach} bars starts exactly at
+   * {@code entryIndex - reach}, counting the entry bar itself once. It also matters at {@code reach
+   * = 0} — true range at the entry bar reads the PREVIOUS close, so the oldest pre-entry candle is a
+   * real dependency, not a rounding cushion.
    *
    * <h2>Operand-aware, because most exits do not read the hold at all</h2>
    *

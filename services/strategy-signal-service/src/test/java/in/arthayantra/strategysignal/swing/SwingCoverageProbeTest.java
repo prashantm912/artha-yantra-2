@@ -528,7 +528,7 @@ class SwingCoverageProbeTest {
   /**
    * The two windows OVERLAP (both end at the current bar), so the footprint is their UNION. Summing
    * them probes history no operand reads — the first cut returned {@code heldBars + 89} on live Manas
-   * where the requirement is {@code max(50, heldBars + 59)}, over-probing by 30 bars.
+   * where the requirement is {@code max(50, heldBars + 1 + 59)}, over-probing by 29 bars.
    */
   @Test
   @DisplayName("the footprint UNIONS the current- and entry-anchored windows, never sums them")
@@ -540,10 +540,24 @@ class SwingCoverageProbeTest {
     int decay = SwingCoverageProbe.atrDecayLength(20);
     assertThat(decay).isEqualTo(59);
 
-    // Short hold: the current-anchored 50-bar window still dominates.
+    // Short hold on Manas does NOT let the current window dominate — the 59-bar ATR reach alone
+    // already exceeds 50. Asserting the exact union rather than a comfortable-sounding claim.
     assertThat(SwingCoverageProbe.exitFootprintBars(manas, null, 5))
-        .as("a 5-bar hold cannot need more than the declared window")
-        .isEqualTo(Math.max(declared, 5 + 1 + decay));
+        .as("5 + 1 + 59 = 65 still beats the declared 50")
+        .isEqualTo(65);
+
+    // The current window DOES dominate when the entry-anchored operand has reach 0 — a
+    // peak-since-entry trail reads no pre-entry bar. This is the case the comment above used to
+    // claim falsely, so it is asserted on a shape that actually exhibits it.
+    StrategyDefinition peakTrail =
+        definition(
+            List.of(indicator("sma50", Map.of("period", 50))),
+            List.of(
+                new StrategyDefinition.ExitRuleSpec(
+                    "trailing_stop", Map.of("basis", "index_points", "value", 50))));
+    assertThat(SwingCoverageProbe.exitFootprintBars(peakTrail, null, 5))
+        .as("a reach-0 operand on a 5-bar hold cannot beat the declared 50-bar window")
+        .isEqualTo(SwingCoverageProbe.exitLookbackBars(peakTrail, null));
 
     // Long hold: entry-anchored reach dominates, but only by the UNION, not the sum.
     assertThat(SwingCoverageProbe.exitFootprintBars(manas, null, 100))

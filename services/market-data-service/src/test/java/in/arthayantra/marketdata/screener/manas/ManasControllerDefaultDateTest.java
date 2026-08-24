@@ -35,7 +35,11 @@ class ManasControllerDefaultDateTest {
         funnelService,
         mock(ManasAroraBacktestService.class),
         mock(in.arthayantra.marketdata.screener.ScreenerHistoryRepository.class),
-        screenLock); // a REAL lock — a mocked one returns false from tryLock and would skip instead
+        // ⚠️ A REAL lock. This door calls lock(), not tryLock() — a MOCK makes lock() a no-op, so
+        // the call would proceed UNBLOCKED and manualRunWaitsForTheScreenLock would fail. Not
+        // "skip": that is the scheduled doors' behaviour, and an earlier version of this comment
+        // named the wrong method and the wrong outcome.
+        screenLock);
   }
 
   /**

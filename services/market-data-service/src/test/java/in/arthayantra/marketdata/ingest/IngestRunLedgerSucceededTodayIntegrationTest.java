@@ -72,12 +72,18 @@ class IngestRunLedgerSucceededTodayIntegrationTest extends MarketDataIntegration
    * @param istHour hour of TODAY in IST, so {@code 2} really is 20:30 UTC yesterday
    */
   private void insertAtIstHour(String source, String status, int istHour, int daysAgo) {
+    insertAtIstHour(source, status, istHour, daysAgo, 42L); // a real run wrote rows
+  }
+
+  private void insertAtIstHour(
+      String source, String status, int istHour, int daysAgo, Long rowsWritten) {
     jdbc.update(
-        "INSERT INTO ingest_runs (source, status, started_at) VALUES (?, ?,"
+        "INSERT INTO ingest_runs (source, status, rows_written, started_at) VALUES (?, ?, ?,"
             + " ((((now() AT TIME ZONE 'Asia/Kolkata')::date - make_interval(days => ?))"
             + "   + make_interval(hours => ?)) AT TIME ZONE 'Asia/Kolkata'))",
         source,
         status,
+        rowsWritten,
         daysAgo,
         istHour);
   }
@@ -127,5 +133,60 @@ class IngestRunLedgerSucceededTodayIntegrationTest extends MarketDataIntegration
     assertThat(succeededTodayUnderUtcSession(source))
         .as("02:00 IST is 20:30 UTC yesterday — a UTC ::date comparison gets this wrong")
         .isTrue();
+  }
+
+  /**
+   * Pins that the trap case above actually CROSSES the UTC/IST date boundary.
+   *
+   * <p>The review of #1451 found the fixture and the code under test both derive "today" from the
+   * same {@code AT TIME ZONE 'Asia/Kolkata'} expression, so swapping that zone in both places keeps
+   * every other test green while proving nothing. This asserts the property the fixture is supposed
+   * to have — that a 02:00 IST row really does land on a DIFFERENT UTC date — so a zone change is
+   * caught here rather than silently hollowing out the boundary test.
+   */
+  @Test
+  @DisplayName("the 02:00 IST fixture really does straddle the UTC date boundary")
+  void theEarlyMorningFixtureActuallyCrossesTheBoundary() {
+    String source = uniqueSource();
+    insertAtIstHour(source, "SUCCESS", 2, 0);
+
+    Boolean straddles =
+        jdbc.queryForObject(
+            "SELECT (started_at AT TIME ZONE 'UTC')::date"
+                + " <> (started_at AT TIME ZONE 'Asia/Kolkata')::date"
+                + " FROM ingest_runs WHERE source = ?",
+            Boolean.class,
+            source);
+
+    assertThat(straddles)
+        .as("a 02:00 IST row must sit on the PREVIOUS UTC date, or the trap case is inert")
+        .isTrue();
+  }
+
+  /**
+   * THE SECOND TRAP CASE, found by the post-merge review of #1451. {@code record} stamps SUCCESS on
+   * any non-throwing return, and NSE's soft failure is a 200 carrying no data:
+   * {@code LiveFiiDiiFetcher} iterates an empty JSON array to an empty list, and
+   * {@code LiveParticipantOiFetcher}'s {@code csv.contains("Client Type")} guard is satisfied by the
+   * header line alone. On {@code status} alone, either would disarm the day's remaining retries in
+   * the exact failure mode the retry exists for.
+   */
+  @Test
+  @DisplayName("a SUCCESS that wrote ZERO rows must NOT count — a 200 is not data")
+  void aZeroRowSuccessDoesNotCount() {
+    String source = uniqueSource();
+    insertAtIstHour(source, "SUCCESS", 8, 0, 0L);
+    assertThat(succeededTodayUnderUtcSession(source))
+        .as("an empty NSE response records SUCCESS; it must not disarm the retry")
+        .isFalse();
+  }
+
+  /** A pre-#1451 row predates the column being load-bearing; NULL must read as "no data". */
+  @Test
+  @DisplayName("a SUCCESS with NULL rows_written does not count either")
+  void aNullRowCountSuccessDoesNotCount() {
+    String source = uniqueSource();
+    insertAtIstHour(source, "SUCCESS", 8, 0, null);
+    assertThat(succeededTodayUnderUtcSession(source)).isFalse();
   }
 }

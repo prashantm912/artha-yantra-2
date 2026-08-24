@@ -82,7 +82,10 @@ public class NseEodScheduler {
    * <p>Fail-soft like every other path here — {@code pullAll}'s per-source try/catch is reused
    * unchanged, so a retry that also fails logs and leaves the evening batch as the backstop.
    */
-  @Scheduled(cron = "${artha.nse.fii-retry-cron:0 50 9,11,14 * * MON-FRI}", zone = "Asia/Kolkata")
+  // CronPassthroughParityTest scans this source LINE BY LINE, so cron and zone must share a line.
+  @Scheduled(
+      cron = "${artha.nse.fii-retry-cron:0 50 9,11,14 * * MON-FRI}", zone = "Asia/Kolkata",
+      scheduler = "nseRetryTaskScheduler") // in-session + slow worst case: never the shared pool
   public void retryFailedSources() {
     retryIfFailed(IngestRunLedger.SOURCE_NSE_FII_DII, this::pullFiiDii);
     retryIfFailed(IngestRunLedger.SOURCE_NSE_PARTICIPANT_OI, this::pullParticipantOi);

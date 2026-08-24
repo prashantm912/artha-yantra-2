@@ -602,6 +602,10 @@ public final class SwingCoverageProbe {
    * #atrDecayLength}. At {@code atr_period 20} (both live {@code manas-arora} slugs) this yields 59
    * bars.
    *
+   * <p><b>OWNER RULING 2026-08-24: keep 0.05.</b> Presented with the trade-off below plus the
+   * tighter (1% / ~90 bars) and looser (12% / 42 bars) alternatives, the owner chose 5%. Do not
+   * re-tune this from a code review — it is a policy call with a recorded decision behind it.
+   *
    * <p>⚠️ OWNER-SETTABLE ALERT POLICY, not a correctness constant, and flagged as such by review. The
    * recorded measurement establishes 12% residual after 42 bars and up to ±0.78% stop variance from a
    * differing series start — it does NOT establish that 5% residual is immaterial. Tighter means more

@@ -1,6 +1,9 @@
 import {
+  useEveningChainStatus,
   useIngestHealth,
   type BoardReport,
+  type ChainReport,
+  type ChainSourceProgress,
   type IngestStatus,
   type LastRun,
   type SourceHealth,
@@ -15,6 +18,10 @@ import { cn } from '../../lib/cn.ts';
 // marketdata.ingest_runs ledger: per expected batch source, its last run, the health verdict for the
 // most recent settled trading day, and how many of the last N trading days it silently missed. The
 // per-day GREEN/YELLOW/RED verdicts are computed server-side by the A5 coverage canary's policy.
+//
+// The panel above the table is a SEPARATE read: "can I shut down yet?" — TODAY's evening-chain
+// status (EveningChainCanary), which the ntfy push also fires from. The EOD board below deliberately
+// excludes today; this panel is only today.
 
 /** Text/ring tone per health verdict. The badge always shows the WORD, so colour is never the sole cue. */
 function statusTone(status: IngestStatus): string {
@@ -213,15 +220,109 @@ function SummaryStrip({ board }: { board: BoardReport }) {
   );
 }
 
+/** Tone per source state — colour is never the sole cue, the badge always shows the word too. */
+function chainStateTone(s: ChainSourceProgress): string {
+  if (s.state === 'DONE') return s.status === 'FAILURE' ? 'text-bear ring-bear/40' : 'text-bull ring-bull/40';
+  if (s.state === 'STUCK') return 'text-bear ring-bear/40';
+  return 'text-warn ring-warn/40'; // PENDING
+}
+
+/**
+ * Human label for a source chip: the state, plus the status when it disambiguates DONE. A screener
+ * that skipped because it was already current carries the synthetic `UP_TO_DATE` rather than
+ * `SUCCESS` — no run happened, and the chip should say which of the two it was.
+ */
+function chainStateLabel(s: ChainSourceProgress): string {
+  if (s.state === 'DONE') return s.status ?? 'DONE';
+  if (s.state === 'STUCK') return 'STUCK';
+  return s.status === 'RUNNING' ? 'RUNNING' : 'PENDING';
+}
+
+function ChainSourceChip({ s }: { s: ChainSourceProgress }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium ring-1',
+        chainStateTone(s),
+      )}
+      title={s.startedAt ? `started ${new Date(s.startedAt).toLocaleTimeString()}` : 'not started yet'}
+    >
+      <span className="text-ay-text">{s.source}</span>
+      <span>{chainStateLabel(s)}</span>
+    </span>
+  );
+}
+
+/**
+ * "Can I shut down yet?" — today's evening-chain status. A DIFFERENT read from the EOD board below
+ * (which windows strictly before today): this is live, today only, and is what the ntfy push at the
+ * end of the evening chain also reports.
+ */
+function EveningChainPanel({ chain }: { chain: ChainReport }) {
+  if (!chain.tradingDay) {
+    return (
+      <div className="rounded-lg border border-ay-border bg-surface-1 px-4 py-3 text-sm text-ay-muted">
+        Not a trading day — no evening chain expected.
+      </div>
+    );
+  }
+  // Outstanding = anything not DONE — STUCK blocks completion exactly like PENDING (Critical 1:
+  // an orphaned RUNNING row must never read as "safe to shut down"), so it must be named here too,
+  // not just excluded from `complete` server-side. Server and client MUST agree on this set: a
+  // STUCK-only evening (no PENDING sources) must never render an empty "still pending:" list.
+  const outstanding = chain.sources.filter((s) => s.state !== 'DONE');
+  const outstandingNames = outstanding
+    .map((s) => (s.state === 'STUCK' ? `${s.source} (stuck)` : s.source))
+    .join(', ');
+  // ⚠️ THREE outcomes, not two (review Major 4). A FAILURE row is TERMINAL, so it is DONE and it does
+  // NOT block `chain.complete` — `complete` answers "will anything more run", never "is it safe".
+  // This line used to branch on `complete` alone, so a failed evening was announced as
+  // "complete — safe to shut down" into a role="status" aria-live region: the one reader who gets
+  // ONLY the announcement was told the exact opposite of the truth. Mirrors EveningChainCanary#publish.
+  const failed = chain.sources.filter((s) => s.state === 'DONE' && s.status === 'FAILURE');
+  const failedNames = failed.map((s) => s.source).join(', ');
+  const safeToShutDown = outstanding.length === 0 && failed.length === 0;
+  const headline = outstanding.length
+    ? `Evening chain ${chain.done}/${chain.total} done — still pending: ${outstandingNames}.` +
+      (failed.length ? ` Failed: ${failedNames}.` : '')
+    : failed.length
+      ? `Evening chain finished ${chain.done}/${chain.total} — FAILED: ${failedNames}. Nothing more will run, but it is not clean.`
+      : `Evening chain complete ${chain.done}/${chain.total} — safe to shut down.`;
+  return (
+    <div
+      className={cn(
+        'space-y-2 rounded-lg border px-4 py-3',
+        safeToShutDown ? 'border-bull/40 bg-bull/5' : 'border-warn/40 bg-warn/5',
+      )}
+    >
+      <p role="status" aria-live="polite" className="text-sm font-semibold text-ay-text">
+        {headline}
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {chain.sources.map((s) => (
+          <ChainSourceChip key={s.source} s={s} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function IngestHealthPage() {
   const boardQ = useIngestHealth();
+  const chainQ = useEveningChainStatus();
 
   return (
     <LoadBeat>
       <PageHeader
         title="Ingest Health"
-        help="Per-source EOD ingest health from the ingest_runs ledger: each batch source's last run, its verdict for the most recent settled trading day, and how many of the last ~10 trading days it silently missed. GREEN = healthy, YELLOW = ran but starved (e.g. an empty screen), RED = missing or crashed."
+        help="Per-source EOD ingest health from the ingest_runs ledger: each batch source's last run, its verdict for the most recent settled trading day, and how many of the last ~10 trading days it silently missed. GREEN = healthy, YELLOW = ran but starved (e.g. an empty screen), RED = missing or crashed. The panel above shows TODAY's evening chain — the same check the nightly ntfy push reports."
       />
+
+      <BeatBlock>
+        <QueryState query={chainQ} errorTitle="Couldn't load today's evening-chain status">
+          {(chain) => <EveningChainPanel chain={chain} />}
+        </QueryState>
+      </BeatBlock>
 
       <BeatBlock>
         <QueryState

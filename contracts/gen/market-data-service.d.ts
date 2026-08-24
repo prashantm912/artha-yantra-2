@@ -244,6 +244,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/health/evening-chain/legs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["recordLeg"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/fundamentals/refresh": {
         parameters: {
             query?: never;
@@ -1356,6 +1372,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["ingest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/health/evening-chain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["eveningChain"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2820,6 +2852,19 @@ export interface components {
             requiredMargin: string | null;
             finalMargin: string | null;
         };
+        LegReport: {
+            source?: string;
+            status?: string;
+            /** Format: date-time */
+            startedAt?: string;
+            /** Format: date-time */
+            finishedAt?: string;
+            error?: string | null;
+        };
+        LegRecorded: {
+            source: string;
+            recorded: boolean;
+        };
         RefreshResponse: {
             available: boolean;
             /** Format: int32 */
@@ -3930,6 +3975,29 @@ export interface components {
             missingDays: number;
             days: components["schemas"]["DayVerdict"][];
             lastRun: components["schemas"]["LastRun"] | null;
+        };
+        ChainReport: {
+            /** Format: date-time */
+            generatedAt: string;
+            /** Format: date */
+            day: string;
+            tradingDay: boolean;
+            /** Format: int32 */
+            total: number;
+            /** Format: int32 */
+            done: number;
+            complete: boolean;
+            sources: components["schemas"]["SourceProgress"][];
+        };
+        SourceProgress: {
+            source: string;
+            /** @enum {string} */
+            state: "PENDING" | "STUCK" | "DONE";
+            status: string | null;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            finishedAt: string | null;
         };
         CanaryReport: {
             status: string;
@@ -5995,6 +6063,39 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["MarginResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    recordLeg: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LegReport"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["LegRecorded"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8348,6 +8449,35 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["BoardReport"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    eveningChain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ChainReport"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

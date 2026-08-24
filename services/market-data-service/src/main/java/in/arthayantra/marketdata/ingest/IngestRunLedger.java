@@ -41,6 +41,39 @@ public class IngestRunLedger {
   public static final String SOURCE_EQUITY_BREADTH = "EQUITY_BREADTH";
   // FID P2-4 / audit D8: nightly per-symbol chain, 1m, and EQ-bhavcopy completeness.
   public static final String SOURCE_DATA_QUALITY = "DATA_QUALITY";
+  // The 18:58 bhavcopy-vs-Kite close comparison (BhavcopyCloseCanary). Not an ingest — it is the last
+  // market-data job before the 19:00 shutdown, and EveningChainCanary needs a terminal row to know it
+  // has run. See BhavcopyCloseCanary#sweep for why the skip path records STATUS_SKIPPED.
+  public static final String SOURCE_BHAVCOPY_CLOSE = "BHAVCOPY_CLOSE";
+
+  /**
+   * The two strategy-signal insight sweeps that run inside the evening window (18:56 and 18:57) and
+   * close the chain after market-data's own legs.
+   *
+   * <p>⚠️ These rows are written by ANOTHER service, over HTTP — see {@link
+   * in.arthayantra.marketdata.canary.EveningChainLegController} for why that direction, and why the
+   * rows land in {@code marketdata.ingest_runs} rather than anywhere in the {@code strategy} schema.
+   */
+  public static final String SOURCE_INSIGHT_STRATEGY_EVIDENCE = "INSIGHT_STRATEGY_EVIDENCE";
+
+  public static final String SOURCE_INSIGHT_SELL_DECISION = "INSIGHT_SELL_DECISION";
+
+  /**
+   * A run that legitimately did not happen and will not happen again for this session — terminal, but
+   * emphatically not {@code SUCCESS}.
+   *
+   * <p>Introduced for {@code BhavcopyCloseCanary}'s date guard, whose own javadoc says the skip is
+   * "PERMANENTLY missed for that session, not deferred". To {@code EveningChainCanary} that is DONE
+   * (nothing more will run tonight, which is the shutdown question); to a reader it must not claim a
+   * comparison happened. Recording it {@code SUCCESS} with zero rows would be exactly the class of
+   * quiet lie this ledger exists to prevent.
+   *
+   * <p>The column is free-form {@code TEXT} with no CHECK (V040), so this needs no migration, and no
+   * consumer enumerates statuses generically: {@code IngestHealthBoard} pivots {@code
+   * IngestCoverageCanary.EXPECTED} (which contains none of the sources above), and {@code
+   * EveningChainCanary} tests only for {@code RUNNING} and {@code FAILURE} by name.
+   */
+  public static final String STATUS_SKIPPED = "SKIPPED";
 
   private static final Logger log = LoggerFactory.getLogger(IngestRunLedger.class);
 
@@ -94,6 +127,56 @@ public class IngestRunLedger {
           id);
     } catch (RuntimeException e) {
       log.warn("ingest_runs succeed update failed for id {} — non-fatal: {}", id, e.getMessage());
+    }
+  }
+
+  /**
+   * Stamp the run {@link #STATUS_SKIPPED} with the reason it did not run. No-op when {@code id} is
+   * null; never throws. Terminal, like SUCCESS and FAILURE — use it only where the work will NOT be
+   * retried for this session, never where it is merely deferred.
+   */
+  public void skip(Long id, String reason) {
+    if (id == null) {
+      return;
+    }
+    try {
+      jdbc.update(
+          "UPDATE ingest_runs SET status=?, error=?, finished_at=now() WHERE id=?",
+          STATUS_SKIPPED,
+          reason,
+          id);
+    } catch (RuntimeException e) {
+      log.warn("ingest_runs skip update failed for id {} — non-fatal: {}", id, e.getMessage());
+    }
+  }
+
+  /**
+   * Record a run that already happened elsewhere: one row, inserted terminal, with the caller's own
+   * measured start and finish rather than {@code now()}.
+   *
+   * <p>The start/finish pair is supplied because the only caller is the cross-service leg report (see
+   * {@code EveningChainLegController}) — the run happened in another process and the row must carry
+   * ITS timings, not the moment the report arrived. Everything in-process should keep using {@link
+   * #record}, which cannot mis-state a time it did not measure.
+   *
+   * <p>Fail-soft like every other write here, but the caller is an HTTP handler, so it needs to know:
+   * returns whether the row landed.
+   */
+  public boolean recordCompleted(
+      String source, String status, OffsetDateTime startedAt, OffsetDateTime finishedAt, String error) {
+    try {
+      jdbc.update(
+          "INSERT INTO ingest_runs (source, status, started_at, finished_at, error)"
+              + " VALUES (?, ?, ?, ?, ?)",
+          source,
+          status,
+          startedAt,
+          finishedAt,
+          error);
+      return true;
+    } catch (RuntimeException e) {
+      log.warn("ingest_runs completed-run insert failed for {} — non-fatal: {}", source, e.getMessage());
+      return false;
     }
   }
 

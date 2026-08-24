@@ -15,7 +15,10 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -54,6 +57,67 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
   private static final MarketCalendar CAL = MarketCalendar.nse();
 
   @Autowired JdbcTemplate jdbc;
+
+  /**
+   * Every day this class has touched, so {@link #leaveTheLedgerAsWeFoundIt()} can undo exactly that
+   * much (ledger H19).
+   *
+   * <p>⚠️ <b>Why this class needed it, and why no fixed anchor would have been safe instead.</b> The
+   * dates here are FIXED and in the FUTURE — 2026-09-16 and 2026-09-23 — which looks safe and is,
+   * right up until real time reaches them. That is exactly how the original instance detonated:
+   * {@code EveningChainCanaryIntegrationTest} pinned {@code ANCHOR = 2026-08-12}, real time reached
+   * 2026-08-13, {@code previousTradingDay(today)} landed on a seeded row, and
+   * {@code MarketContextI2IntegrationTest} failed on an assertion in a file the branch never
+   * touched. A past anchor is no better — it passes back through the same window on its way out.
+   * <b>"The class leaves the ledger as it found it" is the only date-independent property.</b>
+   *
+   * <p>What makes this class worse than a leaked row elsewhere is that it seeds REAL source names
+   * ({@code NSE_FII_DII}, {@code BHAVCOPY}, {@code MINERVINI_SCREEN}, …) with {@code SUCCESS} and a
+   * non-zero {@code rows_written}, which is precisely the shape every coverage reader treats as
+   * proof a job ran.
+   */
+  private final Set<LocalDate> touchedDays = new LinkedHashSet<>();
+
+  /**
+   * ⚠️ Deletes only the SOURCES this class seeds, on only the DAYS it touched — never a blanket day
+   * sweep. A blanket delete is the mirror defect: it would destroy rows another Spring context wrote
+   * for the same day (the screener schedulers fire on every {@code ApplicationReadyEvent}), turning
+   * a residue bug into a data-destruction bug.
+   */
+  @AfterEach
+  void leaveTheLedgerAsWeFoundIt() {
+    for (LocalDate day : touchedDays) {
+      for (String source : BOARD_SOURCES) {
+        deleteSource(day, source);
+      }
+      OffsetDateTime start = day.atStartOfDay(Ist.ZONE).toOffsetDateTime();
+      OffsetDateTime end = day.plusDays(1).atStartOfDay(Ist.ZONE).toOffsetDateTime();
+      jdbc.update(
+          "DELETE FROM ingest_runs WHERE source = 'OPTIONS_SNAPSHOT_CAPTURE'"
+              + " AND window_start >= ? AND window_start < ?",
+          start, end);
+      jdbc.update("DELETE FROM minervini_screen_results WHERE screen_date = ?", day);
+      jdbc.update("DELETE FROM manas_arora_screen_results WHERE screen_date = ?", day);
+    }
+    touchedDays.clear();
+  }
+
+  /**
+   * The sources this class may touch — DERIVED from the board's own expected set, never a hand-kept
+   * copy.
+   *
+   * <p>Both {@code IngestCoverageCanary} and {@code IngestHealthBoard} build their entire source
+   * list from {@code IngestCoverageCanary.EXPECTED}, so that constant is exactly "the sources this
+   * board has an opinion about". Deriving from it means the reset scope and the cleanup scope follow
+   * the board automatically: registering a new expected source (as {@code EQUITY_BREADTH} was in
+   * 2026-08) needs no edit here, and — more to the point — a hardcoded list that silently fell
+   * behind would start leaving exactly the rows nobody remembered to clean.
+   *
+   * <p>It also bounds the DESTRUCTION: rows for any source outside this set belong to somebody else
+   * and are none of this class's business, in either direction.
+   */
+  private static final List<String> BOARD_SOURCES =
+      IngestCoverageCanary.EXPECTED.stream().map(IngestCoverageCanary.ExpectedSource::source).toList();
 
   @Test
   void boardPivotsWindowVerdictsCountsMissingDaysAndJoinsLastRun() {
@@ -185,6 +249,7 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   private void seedBatch(LocalDate day, String source, String status, Long rows, boolean finished) {
+    touchedDays.add(day); // recorded HERE, in the funnel, so a new test cannot forget to register
     OffsetDateTime started = day.atTime(19, 0).atZone(Ist.ZONE).toOffsetDateTime();
     OffsetDateTime finishedAt = finished ? day.atTime(19, 1).atZone(Ist.ZONE).toOffsetDateTime() : null;
     jdbc.update(
@@ -197,6 +262,7 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   private void seedCapture(LocalDate day, Long rows) {
+    touchedDays.add(day);
     OffsetDateTime windowStart = day.atStartOfDay(Ist.ZONE).toOffsetDateTime();
     jdbc.update(
         "INSERT INTO ingest_runs (source, window_start, status, rows_written, started_at, finished_at) "
@@ -208,19 +274,40 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   private void clearWindow(LocalDate day) {
+    touchedDays.add(day);
     OffsetDateTime start = day.atStartOfDay(Ist.ZONE).toOffsetDateTime();
     OffsetDateTime end = day.plusDays(1).atStartOfDay(Ist.ZONE).toOffsetDateTime();
+    // ⚠️ SCOPED to the board's own sources. This was an UNFILTERED day-wide DELETE, which is the
+    // mirror of the residue defect and strictly worse: on a date real time has reached it destroys
+    // rows another Spring context legitimately wrote (the screener schedulers fire on every
+    // ApplicationReadyEvent), turning "this class leaves litter" into "this class deletes your
+    // data". Scoping loses nothing the assertions depend on — the board reports on these sources and
+    // no others, so a foreign row could never have changed a verdict anyway.
+    // An explicit IN list rather than `= ANY (?)`: binding a Java String[] to ANY() depends on the
+    // driver doing createArrayOf for you, and a silently mis-bound predicate here would quietly
+    // delete nothing (or everything), which is the failure mode this whole change exists to avoid.
+    Object[] args = new Object[BOARD_SOURCES.size() + 4];
+    for (int i = 0; i < BOARD_SOURCES.size(); i++) {
+      args[i] = BOARD_SOURCES.get(i);
+    }
+    args[BOARD_SOURCES.size()] = start;
+    args[BOARD_SOURCES.size() + 1] = end;
+    args[BOARD_SOURCES.size() + 2] = start;
+    args[BOARD_SOURCES.size() + 3] = end;
     jdbc.update(
-        "DELETE FROM ingest_runs WHERE (source <> 'OPTIONS_SNAPSHOT_CAPTURE' AND started_at >= ? AND started_at < ?) "
-            + "OR (source = 'OPTIONS_SNAPSHOT_CAPTURE' AND window_start >= ? AND window_start < ?)",
-        start,
-        end,
-        start,
-        end);
+        "DELETE FROM ingest_runs WHERE ((source <> 'OPTIONS_SNAPSHOT_CAPTURE'"
+            + " AND source IN (" + placeholders(BOARD_SOURCES.size()) + ")"
+            + " AND started_at >= ? AND started_at < ?)"
+            + " OR (source = 'OPTIONS_SNAPSHOT_CAPTURE' AND window_start >= ? AND window_start < ?))",
+        args);
     // The SCREENER policy reads these, so the day's window is not cleared until they are — without
     // this the screener verdicts depend on whether some OTHER test class happened to seed this date.
     jdbc.update("DELETE FROM minervini_screen_results WHERE screen_date = ?", day);
     jdbc.update("DELETE FROM manas_arora_screen_results WHERE screen_date = ?", day);
+  }
+
+  private static String placeholders(int n) {
+    return String.join(",", java.util.Collections.nCopies(n, "?"));
   }
 
   private void deleteSource(LocalDate day, String source) {
@@ -235,5 +322,75 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
         .filter(s -> s.source().equals(source))
         .findFirst()
         .orElseThrow(() -> new AssertionError("no board row for " + source));
+  }
+
+  /**
+   * ⚠️ LEDGER H19 — the regression test for the cleanup itself, because "the class leaves the ledger
+   * as it found it" is a property no other test in this file can observe.
+   *
+   * <p>It calls {@link #leaveTheLedgerAsWeFoundIt()} directly rather than relying on the
+   * {@code @AfterEach} firing, for the obvious reason that a test cannot assert its own teardown.
+   * The dates deliberately reuse this class's own fixed future days, so if the funnel ever stops
+   * recording a day, the count below stays non-zero.
+   *
+   * <p>Why it matters at all: this class seeds REAL source names with SUCCESS and a non-zero
+   * rows_written at FIXED FUTURE dates (2026-09-16, 2026-09-23). That is safe exactly until real
+   * time reaches them, which is how the original H19 instance detonated — a seeded row became the
+   * "previous trading day" and a DIFFERENT test class failed on an assertion about live coverage.
+   */
+  @Test
+  void theClassLeavesNoIngestRunsBehind() {
+    LocalDate today = LocalDate.of(2026, 9, 16);
+    LocalDate d1 = CAL.previousTradingDay(today);
+    LocalDate d2 = CAL.previousTradingDay(d1);
+    for (LocalDate d : List.of(d1, d2)) {
+      clearWindow(d);
+      seedBatchesHealthy(d);
+      seedCapture(d, 5200L);
+    }
+    assertThat(seededRunRows(d1, d2))
+        .as("the seed must actually have written something, or the cleanup assertion is vacuous")
+        .isGreaterThan(0);
+
+    leaveTheLedgerAsWeFoundIt();
+
+    assertThat(seededRunRows(d1, d2))
+        .as("every ingest_runs row this class wrote must be gone — a future date is safe only until"
+            + " real time reaches it")
+        .isZero();
+    assertThat(seededScreenRows(d1, d2))
+        .as("the screen-result rows it wrote must be gone too — the SCREENER policy reads those")
+        .isZero();
+  }
+
+  private Integer seededRunRows(LocalDate... days) {
+    int total = 0;
+    for (LocalDate day : days) {
+      OffsetDateTime start = day.atStartOfDay(Ist.ZONE).toOffsetDateTime();
+      OffsetDateTime end = day.plusDays(1).atStartOfDay(Ist.ZONE).toOffsetDateTime();
+      Integer n =
+          jdbc.queryForObject(
+              "SELECT count(*) FROM ingest_runs WHERE (started_at >= ? AND started_at < ?)"
+                  + " OR (window_start >= ? AND window_start < ?)",
+              Integer.class, start, end, start, end);
+      total += n == null ? 0 : n;
+    }
+    return total;
+  }
+
+  private Integer seededScreenRows(LocalDate... days) {
+    int total = 0;
+    for (LocalDate day : days) {
+      Integer a =
+          jdbc.queryForObject(
+              "SELECT count(*) FROM minervini_screen_results WHERE screen_date = ?",
+              Integer.class, day);
+      Integer b =
+          jdbc.queryForObject(
+              "SELECT count(*) FROM manas_arora_screen_results WHERE screen_date = ?",
+              Integer.class, day);
+      total += (a == null ? 0 : a) + (b == null ? 0 : b);
+    }
+    return total;
   }
 }

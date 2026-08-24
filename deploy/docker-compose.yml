@@ -426,6 +426,7 @@ services:
       ARTHA_BHAVCOPY_EOD_CRON: "${ARTHA_BHAVCOPY_EOD_CRON:-0 45 18 * * MON-FRI}"
       # NSE FII / participant / DII feeds
       ARTHA_NSE_EOD_CRON: "${ARTHA_NSE_EOD_CRON:-0 46 18 * * MON-FRI}"
+      ARTHA_NSE_FII_RETRY_CRON: "${ARTHA_NSE_FII_RETRY_CRON:-0 50 9,11,14 * * MON-FRI}"
       # minervini screen
       ARTHA_MINERVINI_CRON: "${ARTHA_MINERVINI_CRON:-0 47 18 * * MON-FRI}"
       # manas screen
@@ -622,6 +623,8 @@ services:
       # T9 load-coverage watchdog: ship dormant; owner arms OBSERVE_ONLY, then ARMED.
       ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_MODE: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_MODE:-DISABLED}
       ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_GRACE_MS: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_GRACE_MS:-180000}
+      # Swing data-coverage gate (both halves): ship OBSERVE_ONLY; owner arms after reading the rate.
+      ARTHA_SIGNALS_SWING_COVERAGE_GATE_MODE: ${ARTHA_SIGNALS_SWING_COVERAGE_GATE_MODE-OBSERVE_ONLY}
       # EOD swing missed-batch detector: ship dormant; owner arms after ops ntfy is configured.
       ARTHA_SIGNALS_SWING_MISSED_BATCH_DETECTOR_ENABLED: ${ARTHA_SIGNALS_SWING_MISSED_BATCH_DETECTOR_ENABLED:-false}
       # (The ARTHA_SIGNALS_STARVATION_WATCHDOG_* passthroughs were removed 2026-07-26 with the

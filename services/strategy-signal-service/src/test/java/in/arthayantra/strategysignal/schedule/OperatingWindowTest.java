@@ -10,10 +10,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -56,6 +58,15 @@ class OperatingWindowTest {
     JOBS.put("artha.upstox.canary-cron", MD + "upstox/canary/UpstoxContractCanary.java");
     JOBS.put("artha.bhavcopy.eod-cron", MD + "bhavcopy/BhavcopyBackfillService.java");
     JOBS.put("artha.nse.eod-cron", MD + "nse/NseEodScheduler.java");
+    // Intra-day retry for a FAILED NSE pull (2026-08-24). Three firings a day, so the collision
+    // check below expands it to 09:50/11:50/14:50. ⚠️ "Free" there means free of the jobs in THIS
+    // map, which is NOT the same as free: the review of #1451 found 09:50 already shared with
+    // OptionsSnapshotService (0 */2) and InstrumentSyncScheduler (:05,:20,:35,:50 at 9-10), neither
+    // catalogued — and the latter's cron is hardcoded, so a property-keyed map CANNOT hold it. The
+    // real containment is that the retry now owns nseRetryTaskScheduler, not that the minute is
+    // quiet. Registering it here is still right; believing the collision check proves more than the
+    // catalogue covers is what this comment used to do.
+    JOBS.put("artha.nse.fii-retry-cron", MD + "nse/NseEodScheduler.java");
     JOBS.put("artha.minervini.cron", MD + "screener/minervini/MinerviniScheduler.java");
     JOBS.put("artha.manas-arora.cron", MD + "screener/manas/ManasScheduler.java");
     JOBS.put("artha.context.eod-cron", MD + "context/MarketContextEodJob.java");
@@ -87,13 +98,39 @@ class OperatingWindowTest {
     JOBS.put("artha.evening-chain.check-cron", MD + "canary/EveningChainCanary.java");
   }
 
-  // ⚠️ MERGE (2026-08-21): 17 on this branch, 18 on main, and the UNION is 19 — counted from the
-  // JOBS map itself (19 put() calls, 19 distinct keys, no collisions), not taken from either
-  // side. Taking either number alone leaves the size assertion GREEN while silently dropping
-  // the other side's jobs out of the parity sweep — the same trap this PR's earlier merge hit
-  // at 6 -> 9. The branch contributes artha.evening-chain.check-cron; main contributes the H27
-  // swing-settle moves.
-  private static final int EXPECTED_JOB_COUNT = 19;
+  // ⚠️ MERGE, and the number moved a SECOND time (2026-08-25). Re-derived from the JOBS map
+  // itself — 20 put() calls, 20 distinct keys, no collisions — never carried over from either
+  // side of the merge. Taking one side's number leaves the size assertion GREEN while silently
+  // dropping the other side's jobs out of the parity sweep, which is the trap this PR's earlier
+  // merge already hit at 6 -> 9 and then at 17/18 -> 19. The branch contributes
+  // artha.evening-chain.check-cron; main contributed the H27 swing-settle moves and, on
+  // 2026-08-24, artha.nse.fii-retry-cron (#1454). Recount here on EVERY merge; do not add.
+  private static final int EXPECTED_JOB_COUNT = 20;
+
+  /**
+   * The minutes on which two jobs are allowed to share a trigger, each with its pair spelled out.
+   *
+   * <p>⚠️ This is a DECLARED EXCEPTION, not a relaxation. The default remains "one job per minute",
+   * and every entry here has to name both sides — so a THIRD job landing on 18:59, or either of
+   * these two moving onto some other job's minute, still fails.
+   *
+   * <p>⚠️ Why 18:59 is shared. The evening tail runs one job per minute from 18:45 to 18:59 and the
+   * machine shuts down at 19:00, so there is no free minute left for the pre-shutdown check to move
+   * to — the collision is a symptom of a full tail, and the real remedy is ledger row H37: pull the
+   * whole tail earlier once the bhavcopy anchor measurement establishes how early the 18:45 ingest
+   * can honestly start. That measurement is 1 of >=5 sessions in. Blocking this check on it would
+   * keep the 18:59 shutdown push unbuilt for weeks while the tail stays unobserved, which is the
+   * worse trade: the two jobs genuinely can co-fire (the alert producer reads its own screen output,
+   * the check reads ingest_runs, and they share no writer), whereas an unobserved shutdown boundary
+   * is how a leg goes missing without anyone noticing.
+   *
+   * <p><b>Exit condition:</b> when H37 frees a minute, delete the entry — the assertion below then
+   * fails if it is left behind, so this cannot rot silently.
+   */
+  private static final Map<String, Set<String>> SHARED_MINUTES =
+      Map.of(
+          "18:59",
+          Set.of("artha.minervini.buyable-alerts.cron", "artha.evening-chain.check-cron"));
 
   @Test
   @DisplayName("the catalogue is not silently shrunk")
@@ -188,12 +225,29 @@ class OperatingWindowTest {
     // the same trigger. Spans both services deliberately: they share one machine and one window,
     // and a per-service check would miss exactly the pairs most likely to collide.
     Map<String, String> takenBy = new HashMap<>();
+    Set<String> sharedUsed = new HashSet<>();
     for (Map.Entry<String, String> job : JOBS.entrySet()) {
       for (String at : firings(job.getKey(), codeDefault(job.getKey(), job.getValue()))) {
         String previous = takenBy.putIfAbsent(at, job.getKey());
-        assertThat(previous).as("%s and %s both fire at %s IST", previous, job.getKey(), at).isNull();
+        if (previous == null) {
+          continue;
+        }
+        Set<String> allowed = SHARED_MINUTES.get(at);
+        assertThat(allowed)
+            .as("%s and %s both fire at %s IST, which is not a declared shared minute",
+                previous, job.getKey(), at)
+            .isNotNull();
+        assertThat(Set.of(previous, job.getKey()))
+            .as("%s IST is a declared shared minute, but for a DIFFERENT pair", at)
+            .isEqualTo(allowed);
+        sharedUsed.add(at);
       }
     }
+    // ⚠️ A declared exemption that no longer collides is STALE, and a stale exemption is how a
+    // relaxation outlives the reason for it. Once H37 frees a minute, this is what fails.
+    assertThat(sharedUsed)
+        .as("every declared shared minute must still be a real collision, or be deleted")
+        .containsExactlyInAnyOrderElementsOf(SHARED_MINUTES.keySet());
     assertThat(takenBy).hasSizeGreaterThanOrEqualTo(EXPECTED_JOB_COUNT);
   }
 

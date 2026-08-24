@@ -281,4 +281,131 @@ class MinerviniSchedulerTest {
               verify(repo).replaceAll(eq(day), any());
             });
   }
+
+  /**
+   * ⚠️ H13, and it is a LIVE measurement rather than a hypothetical. On 2026-08-24 the
+   * {@code bhavcopy-complete} door ran 18:46:42→18:47:39 on thread {@code eod-bhavcopy-backfill}
+   * while the 18:47 cron started at 18:46:57 on {@code scheduling-1}. The dedup below them is a
+   * read-then-act on {@code latestScreenDate}, so the cron read the watermark BEFORE the event run
+   * had written it, the skip did not fire, and the evening got two full screens and two ~290-symbol
+   * geometry fan-outs. Both {@code ingest_runs} rows say SUCCESS with 1,800 rows, which is exactly
+   * why nothing noticed.
+   *
+   * <p>The test holds the first door INSIDE the screen on a latch and then opens the second, which
+   * is the only way to reach the window — a sequential call cannot, because by then the watermark
+   * is written and the ordinary dedup handles it. {@code repo.latestScreenDate()} is left returning
+   * null on purpose so the dedup can never be what makes this pass.
+   */
+  @Test
+  void aSecondDoorArrivingMidScreenIsSkippedRatherThanRunningASecondScreen() throws Exception {
+    LocalDate day = LocalDate.of(2026, 8, 24);
+    java.util.concurrent.CountDownLatch insideScreen = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.atomic.AtomicInteger screens =
+        new java.util.concurrent.atomic.AtomicInteger();
+    when(screener.screen(null))
+        .thenAnswer(
+            invocation -> {
+              screens.incrementAndGet();
+              insideScreen.countDown();
+              release.await(5, java.util.concurrent.TimeUnit.SECONDS);
+              return new TrendTemplateService.ScreenResult(day, 0, List.of());
+            });
+
+    MinerviniScheduler scheduler = scheduler(true);
+    Thread eventDoor = new Thread(scheduler::onBhavcopyBackfillCompleted, "event-door");
+    eventDoor.start();
+    org.assertj.core.api.Assertions.assertThat(
+            insideScreen.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        .as("the event door must actually be inside the screen, or this proves nothing")
+        .isTrue();
+
+    scheduler.scheduled(); // the cron door arrives while the first screen is still running
+
+    release.countDown();
+    eventDoor.join(10_000);
+
+    org.assertj.core.api.Assertions.assertThat(screens.get())
+        .as("one screen, not two — the second door found the lock held and skipped")
+        .isEqualTo(1);
+    verify(repo, org.mockito.Mockito.times(1)).replaceAll(eq(day), any());
+  }
+
+  /**
+   * ⚠️ THE WAIT PATH, and it had NO test at all until round 2 of the review caught that — measured,
+   * not argued: reverting {@code acquire()} to a bare {@code tryLock()} left the suite 24/24 green.
+   * That is how an accidental revert of this very behaviour survived a green build and got committed.
+   *
+   * <p>The doors are asymmetric on purpose. {@code scheduled()} runs on the DEFAULT taskScheduler
+   * (pool size 1, ~32 methods) where blocking would starve everything, and skipping costs nothing
+   * because the in-flight run is doing its work. {@code bhavcopy-complete} runs on the dedicated
+   * {@code eod-bhavcopy-backfill} executor and is the trigger that exists to screen the FRESH
+   * watermark (audit H1) — dropping it silently is the regression, so it WAITS.
+   *
+   * <p>The other concurrency test cannot reach this: it uses the event door as the FIRST,
+   * lock-holding door, so the wait branch is never entered.
+   */
+  @Test
+  void theEventDoorWaitsForTheLockWhileTheCronDoorSkips() throws Exception {
+    LocalDate day = LocalDate.of(2026, 8, 24);
+    when(screener.screen(null))
+        .thenReturn(new TrendTemplateService.ScreenResult(day, 0, List.of()));
+    MinerviniScheduler scheduler = scheduler(true);
+    java.util.concurrent.CountDownLatch held = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.CountDownLatch eventFinished = new java.util.concurrent.CountDownLatch(1);
+
+    // ⚠️ A SEPARATE thread holds the lock, never the test thread. ReentrantLock is reentrant, so a
+    // door called from the thread already holding it would sail straight through and the test would
+    // fail for a reason that cannot happen in production, where every door is on its own thread.
+    // (It did, on the first cut of this test.)
+    Thread holder =
+        new Thread(
+            () -> {
+              scheduler.screenLockForTest().lock();
+              held.countDown();
+              try {
+                release.await(10, java.util.concurrent.TimeUnit.SECONDS);
+              } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+              } finally {
+                scheduler.screenLockForTest().unlock();
+              }
+            },
+            "lock-holder");
+    holder.start();
+    org.assertj.core.api.Assertions.assertThat(
+            held.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        .as("the holder must actually hold the lock, or this proves nothing")
+        .isTrue();
+
+    // The CRON door gives up at once and screens nothing.
+    scheduler.scheduled();
+    verify(screener, org.mockito.Mockito.never()).screen(null);
+
+    // The EVENT door waits instead.
+    Thread eventDoor =
+        new Thread(
+            () -> {
+              scheduler.onBhavcopyBackfillCompleted();
+              eventFinished.countDown();
+            },
+            "event-door");
+    eventDoor.start();
+    org.assertj.core.api.Assertions.assertThat(
+            eventFinished.await(750, java.util.concurrent.TimeUnit.MILLISECONDS))
+        .as("the bhavcopy-complete door must WAIT for the screen, never skip it")
+        .isFalse();
+    verify(screener, org.mockito.Mockito.never()).screen(null);
+
+    release.countDown();
+    org.assertj.core.api.Assertions.assertThat(
+            eventFinished.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        .as("…and once the lock frees, the door it waited for must actually screen")
+        .isTrue();
+    eventDoor.join(5_000);
+    holder.join(5_000);
+    verify(screener, org.mockito.Mockito.times(1)).screen(null);
+    verify(repo, org.mockito.Mockito.times(1)).replaceAll(eq(day), any());
+  }
 }

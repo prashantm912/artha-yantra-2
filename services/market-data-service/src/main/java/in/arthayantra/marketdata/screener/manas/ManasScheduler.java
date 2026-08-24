@@ -97,6 +97,11 @@ public class ManasScheduler {
             "manas screen still locked after {} ms — the bhavcopy-complete door gave up; tonight's"
                 + " fresh watermark may go unscreened (H13)",
             EVENT_DOOR_WAIT_MS);
+        ntfy.send(
+            "Manas screen door GAVE UP", "high",
+            "The bhavcopy-complete trigger could not get the screen lock in "
+                + EVENT_DOOR_WAIT_MS
+                + " ms. Tonight's screen may be against a STALE watermark (H13).");
       } else {
         log.warn(
             "manas screen already running — {} trigger skipped (H13: two doors overlapped)", trigger);
@@ -117,9 +122,12 @@ public class ManasScheduler {
    * doors are on the shared pool-size-1 scheduler and skip instead.
    */
   private boolean acquire(String trigger) {
-    return screenLock.tryLock();
+    return "bhavcopy-complete".equals(trigger)
+        ? screenLock.tryLock(EVENT_DOOR_WAIT_MS)
+        : screenLock.tryLock();
   }
 
+  /** See the minervini twin's constant for what this wait is actually for, and what it holds. */
   private static final long EVENT_DOOR_WAIT_MS = 180_000;
 
   private void runLocked(String trigger) {

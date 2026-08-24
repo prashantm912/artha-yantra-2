@@ -36,7 +36,7 @@ public class MinerviniScheduler {
   private final boolean planeDivergenceEnabled;
 
   /**
-   * Serialises the three screen doors against each other (ledger H13).
+   * Serialises every screen door against the others (ledger H13).
    *
    * <p>⚠️ FOUR doors, not three: the two {@code @EventListener}s, the {@code @Scheduled} cron, and
    * {@code runOnce} behind {@code POST /run}. The lock covers all four.
@@ -50,8 +50,9 @@ public class MinerviniScheduler {
    * cost load rather than data, but two concurrent {@code replaceAll} on one screen date is a
    * delete/insert interleave waiting for a slower evening.
    *
-   * <p>A JVM lock is sufficient BECAUSE all three doors are in-process (two {@code @EventListener},
-   * one {@code @Scheduled}) and market-data runs one container — the same single-writer convention
+   * <p>A JVM lock is sufficient BECAUSE every door is in-process (two {@code @EventListener}, one
+   * {@code @Scheduled}, and {@code runOnce} behind {@code POST /run}) and market-data runs one
+   * container — the same single-writer convention
    * the rest of the ingest path assumes. It is not a distributed claim and must not be read as one.
    */
   private final ReentrantLock screenLock = new ReentrantLock();
@@ -167,6 +168,15 @@ public class MinerviniScheduler {
             "minervini screen still locked after {} ms — the bhavcopy-complete door gave up;"
                 + " tonight's fresh watermark may go unscreened (H13)",
             EVENT_DOOR_WAIT_MS);
+        // ⚠️ PAGED, not just logged. A container recreate destroys docker logs, so an ERROR line is
+        // volatile evidence for exactly the kind of event nobody is watching at 18:47. This class
+        // already pages on the sibling failure with the same framing, and ntfy is already injected.
+        ntfy.send(
+            "Minervini screen door GAVE UP", "high",
+            "The bhavcopy-complete trigger could not get the screen lock in "
+                + EVENT_DOOR_WAIT_MS
+                + " ms. Tonight's screen may be against a STALE watermark, and the next swing batch"
+                + " would then read a stale funnel (H13).");
       } else {
         log.warn(
             "minervini screen already running — {} trigger skipped (H13: two doors overlapped)",
@@ -181,12 +191,44 @@ public class MinerviniScheduler {
     }
   }
 
-  /** Waits for the screen lock in the way this door can afford — see {@link #runQuietly}. */
-  private boolean acquire(String trigger) {
-    return screenLock.tryLock();
+  /**
+   * The screen lock, for tests that need to hold it from outside — the only way to exercise the
+   * WAIT path, since every in-process door releases it before returning.
+   *
+   * <p>⚠️ Package-private and test-only. Production code must go through {@link #acquire}; taking
+   * this directly would bypass the per-door policy that is the whole point of H13's fix.
+   */
+  ReentrantLock screenLockForTest() {
+    return screenLock;
   }
 
-  /** Long enough to outlast a slow backfill, short enough that a wedged screen cannot hold a boot. */
+  /** Waits for the screen lock in the way this door can afford — see {@link #runQuietly}. */
+  private boolean acquire(String trigger) {
+    if (!"bhavcopy-complete".equals(trigger)) {
+      return screenLock.tryLock();
+    }
+    try {
+      return screenLock.tryLock(EVENT_DOOR_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return false;
+    }
+  }
+
+  /**
+   * How long the {@code bhavcopy-complete} door waits for the screen lock.
+   *
+   * <p>⚠️ It is NOT waiting for the backfill — the backfill has already finished by the time this
+   * event fires. It waits for the in-flight SCREEN, measured at 52-57 s on 2026-08-24. The worst
+   * realistic wait is one screen plus one barging {@code POST /run} (the lock is unfair), so about
+   * 120 s; 180 s leaves roughly a minute of headroom.
+   *
+   * <p>⚠️ What the wait HOLDS is the {@code eod-bhavcopy-backfill} executor, not a boot thread — and
+   * because both schedulers' listeners run sequentially on that one executor the worst case is
+   * 2 x 180 s. During it {@code BhavcopyBackfillService.running} stays true and a manual backfill
+   * trigger 409s. Harmless, but that is the actual cost, not the one an earlier version of this
+   * comment claimed.
+   */
   private static final long EVENT_DOOR_WAIT_MS = 180_000;
 
   private void runLocked(String trigger) {

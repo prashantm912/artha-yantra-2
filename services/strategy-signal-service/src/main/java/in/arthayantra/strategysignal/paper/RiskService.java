@@ -68,6 +68,7 @@ public class RiskService {
   private final PaperMarginClient marginClient;
   private final NotifierClient notifier;
   private final Clock clock;
+
   private final ManasGoverningStopCache governingStopCache;
   private final PyramidRiskCapAuditor pyramidRiskCapAuditor;
 

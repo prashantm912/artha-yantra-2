@@ -341,7 +341,7 @@ public class SubscriberHealthCanary {
         Long recovered = blindWindows.open(current.key(), current.startedAt(), current.detail());
         if (recovered != null) {
           episode = current.withId(recovered);
-          writeOwedTelemetry(); // the row landed on a retry — now the forensic write is safe
+          writeOwedOpen(); // the row landed on a retry — only now is the forensic write safe
         }
       }
       return; // already blind; one row per episode
@@ -367,7 +367,9 @@ public class SubscriberHealthCanary {
     episode = new Episode(key, startedAt, detail, blindWindows.open(key, startedAt, detail), null, null);
     log.error("subscriber watchdog: engine BLIND — {}", detail); // never blocks; always immediate
     owedOpenDetail = detail;
-    writeOwedTelemetry();
+    if (episode.id() != null) {
+      writeOwedOpen(); // the row landed on the first attempt
+    }
   }
 
   /**
@@ -384,6 +386,26 @@ public class SubscriberHealthCanary {
     if (current == null) {
       return;
     }
+    if (endedAt.isBefore(current.startedAt())) {
+      // A window cannot end before it began. This is the backward-clock guard's second half, and the
+      // review found the first half BYPASSABLE: the negative-receive-gap check lives in
+      // updateBlindWindow, which the SESSION GATE returns before ever reaching. The measured
+      // 87-minute host drift moves 10:00 IST to 08:33 -- outside ARMED_FROM -- so the sweep took the
+      // out-of-session branch and would have persisted `session-ended` with an INVERTED interval
+      // while the outage was still running.
+      //
+      // Guarding HERE rather than at the top of sweep() is deliberate: it covers every caller,
+      // including any future one, and states the invariant instead of re-deriving the clock
+      // condition. There is deliberately no CHECK constraint for it -- close() is fail-soft and
+      // retried, so a row that could never satisfy the constraint would retry forever; a code guard
+      // refuses the impossible write instead of generating an unbounded retry.
+      log.warn(
+          "subscriber watchdog: refusing to close the blind window at {} -- before its start {}; "
+              + "the clock stepped backwards. Window HELD.",
+          endedAt,
+          current.startedAt());
+      return;
+    }
     if (current.endedAt() == null) {
       episode = current.closing(endedAt, reason);
       lastWindowClosedAt = endedAt; // the next window can never start before this
@@ -391,33 +413,36 @@ public class SubscriberHealthCanary {
       owedCloseReason = reason;
     }
     flush();
-    writeOwedTelemetry();
   }
 
   /**
-   * Writes the forensic {@code subscriber_health_events} rows this episode owes — but ONLY once the
-   * durable write they describe has actually landed.
+   * Discharges the owed {@code feed-blind} row, at the exact instant the INSERT is known to have
+   * landed -- never inferred afterwards from whatever episode happens to be installed.
    *
-   * <p>⚠️ Ordering telemetry after the register CALL was not enough, which is what the fifth review
-   * round caught. {@code open()} can fail fast and return null, and {@code flush()} can return
-   * false; the sweep would then still spend its thread on an UNBOUNDED insert into a different
-   * table, and a stall there means no later sweep ever retries the write that matters. A restart
-   * then loses the opening episode, or leaves a recovered one open forever. So the rule is not
-   * "telemetry last" but "telemetry only once the thing it reports is durable".
+   * <p>⚠️ The inferring version was wrong and the review caught it. If an open failed and bars
+   * recovered before the next blind sweep, ONE {@code flush()} could open AND close the row together
+   * and clear the episode -- after which "is there a durable episode?" was false and the OPENING
+   * event was silently dropped, leaving a recovery-only timeline that reads as if the engine had
+   * never been blind. Durability belongs to the transition that achieved it, not to a field read
+   * later.
    */
-  private void writeOwedTelemetry() {
-    Episode current = episode;
-    if (owedOpenDetail != null && current != null && current.id() != null) {
-      String detail = owedOpenDetail;
-      owedOpenDetail = null;
-      telemetry.record("feed-blind", detail);
+  private void writeOwedOpen() {
+    String detail = owedOpenDetail;
+    if (detail == null) {
+      return;
     }
-    if (owedCloseReason != null && current == null) {
-      // episode == null is exactly "the close flushed durably and nothing is pending"
-      String reason = owedCloseReason;
-      owedCloseReason = null;
-      telemetry.record("recovery", "engine blind window closed — " + reason);
+    owedOpenDetail = null;
+    telemetry.record("feed-blind", detail);
+  }
+
+  /** Discharges the owed {@code recovery} row, at the instant the close itself became durable. */
+  private void writeOwedClose() {
+    String reason = owedCloseReason;
+    if (reason == null) {
+      return;
     }
+    owedCloseReason = null;
+    telemetry.record("recovery", "engine blind window closed — " + reason);
   }
 
   /**
@@ -437,6 +462,7 @@ public class SubscriberHealthCanary {
       }
       current = current.withId(id);
       episode = current;
+      writeOwedOpen(); // durable HERE, before any later transition can clear the episode
     }
     if (current.endedAt() == null) {
       return false; // durable, but the outage is still running
@@ -445,6 +471,7 @@ public class SubscriberHealthCanary {
       return false;
     }
     episode = null;
+    writeOwedClose(); // durable at this exact point, not "whenever nothing is pending"
     return true;
   }
 

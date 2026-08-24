@@ -608,6 +608,69 @@ class SubscriberHealthCanaryTest {
     verify(telemetry, times(1)).record(eq("recovery"), anyString());
   }
 
+  /**
+   * The backward-clock guard's BYPASS, which the existing clock test could not reach because it
+   * steps back only ten minutes and so stays inside the session. The measured 87-minute host drift
+   * moves 10:00 IST to 08:33 -- outside ARMED_FROM -- so the sweep takes the out-of-session branch
+   * and never reaches the negative-receive-gap check at all. It must still refuse to close.
+   */
+  @Test
+  void clockStepsBackPastTheSessionStart_stillRefusesToCloseTheWindow() {
+    MutableClock advancing = new MutableClock(IN_SESSION);
+    when(registry.countEnabledPublished()).thenReturn(1L);
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    when(engine.lastBarReceivedAtMs()).thenReturn(NOW_MS - 200_000);
+    when(engine.lastBarEvaluatedAtMs()).thenReturn(NOW_MS - 200_000);
+    when(redis.opsForValue()).thenReturn(valueOps);
+    when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000));
+    registerAccepts();
+
+    SubscriberHealthCanary c =
+        new SubscriberHealthCanary(
+            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
+            FEED_FRESH);
+    c.sweep(); // 10:00 IST -- window opens
+    advancing.advanceMs(-87 * 60_000L); // the measured July 2026 drift: 10:00 IST becomes 08:33
+    c.sweep();
+
+    verify(blindWindows, never()).close(any(), any(Instant.class), anyString());
+  }
+
+  /**
+   * A single flush can OPEN and CLOSE the row together -- when the first open failed and bars came
+   * back before the next blind sweep. Inferring "was it durable?" from the episode afterwards then
+   * dropped the OPENING event, leaving a recovery-only timeline that reads as if the engine had
+   * never been blind.
+   */
+  @Test
+  void openAndCloseInOneFlush_stillReportsBothEvents() {
+    MutableClock advancing = new MutableClock(IN_SESSION);
+    AtomicLong received = new AtomicLong(NOW_MS - 200_000);
+    when(registry.countEnabledPublished()).thenReturn(1L);
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    when(engine.lastBarReceivedAtMs()).thenAnswer(inv -> received.get());
+    when(engine.lastBarEvaluatedAtMs()).thenAnswer(inv -> received.get());
+    when(redis.opsForValue()).thenReturn(valueOps);
+    when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000));
+    when(blindWindows.open(anyString(), any(Instant.class), anyString()))
+        .thenReturn(null) // the opening INSERT is lost
+        .thenReturn(7L); // and lands on the retry inside the CLOSING flush
+    when(blindWindows.close(any(), any(Instant.class), anyString())).thenReturn(true);
+
+    SubscriberHealthCanary c =
+        new SubscriberHealthCanary(
+            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
+            FEED_FRESH);
+    c.sweep(); // blind; open fails
+    advancing.advanceMs(60_000);
+    received.set(advancing.millis() - 5_000);
+    c.sweep(); // bars back: one flush opens AND closes the row
+
+    InOrder order = inOrder(telemetry);
+    order.verify(telemetry).record(eq("feed-blind"), anyString());
+    order.verify(telemetry).record(eq("recovery"), anyString());
+  }
+
   /** A test clock whose instant can be advanced, to drive the multi-sweep throttle path. */
   private static final class MutableClock extends Clock {
     private Instant instant;

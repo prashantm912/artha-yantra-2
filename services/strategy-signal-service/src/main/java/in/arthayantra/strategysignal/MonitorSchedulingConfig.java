@@ -15,8 +15,11 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  * their sweeps keep firing regardless of what the default pool is doing.
  *
  * <p>Scope-fenced: ONLY pure detectors move onto {@link #monitorTaskScheduler()} via
- * {@code @Scheduled(scheduler = "monitorTaskScheduler")} — {@code SubscriberHealthCanary.sweep},
- * {@code PartialBucketCanary.sweep}, {@code DotHealthCanary.sweep}. The engine reload trio, PaperScheduler, and every EOD/batch job
+ * {@code @Scheduled(scheduler = "monitorTaskScheduler")} — {@code DotHealthCanary.sweep} and
+ * {@code StrategyCoverageWatchdog.sweep}. ⚠️ {@code SubscriberHealthCanary.sweep} LEFT this pool in
+ * #1453 once it was writing JDBC (see {@link #subscriberWatchdogTaskScheduler()}), and
+ * {@code PartialBucketCanary.sweep} left at G9 — both are listed here because a stale tenant list is
+ * how the JDBC write stayed invisible on a pool documented as in-memory only. The engine reload trio, PaperScheduler, and every EOD/batch job
  * keep the default pool (their serial single-thread assumption is load-bearing), except for the
  * synchronous swing missed-batch detector and the synchronous multi-session
  * {@code SwingBatchCatchUp}, which each have their own fenced pool below.
@@ -71,6 +74,35 @@ public class MonitorSchedulingConfig {
     ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
     scheduler.setPoolSize(1);
     scheduler.setThreadNamePrefix("monitor-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
+
+  /**
+   * A single daemon thread owned solely by {@code SubscriberHealthCanary.sweep}.
+   *
+   * <p><b>Why it left {@link #monitorTaskScheduler()} (review of #1453).</b> That pool is fenced for
+   * detectors doing "fast, bounded work on the sweep thread", and this sweep no longer qualifies:
+   * {@code SubscriberHealthTelemetry.record} has done a synchronous, UNTIMED JDBC insert from it for
+   * a long time, and #1453 adds the blind-window register on top. The pool's own rule is explicit —
+   * "a detector that gains ANY blocking call must move off this pool too; catching the exception is
+   * not containment, because a STALLED call starves every sibling while it hangs".
+   *
+   * <p><b>Why a statement timeout was not enough.</b> The register bounds its own statements at 2 s,
+   * but that clock starts only AFTER connection acquisition, and the shared Hikari config sets no
+   * acquisition timeout (30 s default) — and the telemetry insert on the same path is untimed
+   * regardless. So the producer-blind branch could hold the shared detector thread for 30 s or
+   * indefinitely, during an outage, which is precisely when the sibling detectors matter most.
+   *
+   * <p><b>Why this is not an async writer.</b> Moving the sweep wholesale keeps it single-threaded
+   * and single-writer, so the blind-window episode state machine stays synchronous. Nothing about
+   * the ordering guarantees changes; only the thread it all happens on.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler subscriberWatchdogTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("subscriber-watchdog-sched-");
     scheduler.setDaemon(true);
     return scheduler;
   }

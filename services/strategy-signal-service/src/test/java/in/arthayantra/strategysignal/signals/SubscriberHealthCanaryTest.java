@@ -9,6 +9,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import in.arthayantra.strategysignal.registry.StrategyRepository;
@@ -110,7 +111,9 @@ class SubscriberHealthCanaryTest {
     // anchored at the RECEIPT of the last bar, not at detection time 200s later
     verify(blindWindows, times(1))
         .open(anyString(), eq(Instant.ofEpochMilli(NOW_MS - 200_000)), anyString());
-    verify(telemetry, times(1)).record(eq("feed-blind"), anyString());
+    // ⚠️ and NO second durable write: blind_windows already carries start, end, reason and detail,
+    // so a telemetry row here would be redundant AND an ordering hazard on the watchdog thread
+    verify(telemetry, never()).record(eq("feed-blind"), anyString());
   }
 
   @Test
@@ -266,8 +269,8 @@ class SubscriberHealthCanaryTest {
     c.sweep();
     c.sweep(); // already durable - must not insert a third time
 
-    verify(blindWindows, times(2)).open(anyString(), eq(Instant.ofEpochMilli(NOW_MS - 200_000)), anyString());
-    verify(telemetry, times(1)).record(eq("feed-blind"), anyString()); // one episode, one alert
+    verify(blindWindows, times(2))
+        .open(anyString(), eq(Instant.ofEpochMilli(NOW_MS - 200_000)), anyString());
   }
 
   /**
@@ -286,7 +289,7 @@ class SubscriberHealthCanaryTest {
     canary(true).sweep();
 
     verify(blindWindows, times(1)).open(anyString(), any(Instant.class), anyString());
-    verify(telemetry, times(1)).record(eq("eval-stall"), anyString()); // the eval branch still fires
+    verify(telemetry, times(1)).record(eq("eval-stall"), anyString()); // a DIFFERENT branch, unchanged
   }
 
   /** ...and the mirror: bars returning while eval is still stalled must still CLOSE the window. */
@@ -501,114 +504,6 @@ class SubscriberHealthCanaryTest {
   }
 
   /**
-   * ⚠️ ORDERING, and it is correctness rather than style. `telemetry.record` writes a DIFFERENT
-   * table (`subscriber_health_events`) through an UNBOUNDED insert. With it first, a stall there
-   * would stop `blind_windows` from ever being ATTEMPTED — losing the artifact this feature exists
-   * to produce, to a failure in a table nothing here depends on.
-   */
-  @Test
-  void openRegistersTheWindowBeforeWritingTelemetry() {
-    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
-    evalKeepingUp(NOW_MS - 200_000);
-    feedAgeMs(200_000);
-    registerAccepts();
-
-    canary(true).sweep();
-
-    InOrder order = inOrder(blindWindows, telemetry);
-    order.verify(blindWindows).open(anyString(), any(Instant.class), anyString());
-    order.verify(telemetry).record(eq("feed-blind"), anyString());
-  }
-
-  /**
-   * The mirror, and the sharper half: telemetry running before the close was PERSISTED meant a stall
-   * could block after recovery was observed but before `ended_at` was written — and a restart then
-   * loses the in-memory episode and leaves the row open forever.
-   */
-  @Test
-  void recoveryPersistsTheCloseBeforeWritingTelemetry() {
-    MutableClock advancing = new MutableClock(IN_SESSION);
-    AtomicLong received = new AtomicLong(NOW_MS - 200_000);
-    when(registry.countEnabledPublished()).thenReturn(1L);
-    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
-    when(engine.lastBarReceivedAtMs()).thenAnswer(inv -> received.get());
-    when(engine.lastBarEvaluatedAtMs()).thenAnswer(inv -> received.get());
-    when(redis.opsForValue()).thenReturn(valueOps);
-    when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000));
-    registerAccepts();
-
-    SubscriberHealthCanary c =
-        new SubscriberHealthCanary(
-            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
-            FEED_FRESH);
-    c.sweep();
-    advancing.advanceMs(60_000);
-    received.set(advancing.millis() - 5_000);
-    c.sweep();
-
-    InOrder order = inOrder(blindWindows, telemetry);
-    order.verify(blindWindows).close(eq(7L), any(Instant.class), eq("bars-resumed"));
-    order.verify(telemetry).record(eq("recovery"), anyString());
-  }
-
-  /**
-   * The failure path the ordering tests could NOT reach, because `registerAccepts()` forces success.
-   * A fast register failure must not spend the sweep thread on the unbounded telemetry insert: if it
-   * stalled there, no later sweep would ever retry the write that actually matters.
-   */
-  @Test
-  void openThatFailsWritesNoTelemetryUntilTheRowLands() {
-    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
-    evalKeepingUp(NOW_MS - 200_000);
-    feedAgeMs(200_000);
-    when(blindWindows.open(anyString(), any(Instant.class), anyString()))
-        .thenReturn(null) // first attempt lost
-        .thenReturn(7L); // second lands
-
-    SubscriberHealthCanary c = canary(true);
-    c.sweep();
-    verify(telemetry, never()).record(eq("feed-blind"), anyString());
-
-    c.sweep(); // the retry lands the row — only NOW is the forensic write safe
-    verify(telemetry, times(1)).record(eq("feed-blind"), anyString());
-
-    c.sweep(); // already reported: exactly once per episode
-    verify(telemetry, times(1)).record(eq("feed-blind"), anyString());
-  }
-
-  /** The mirror on the close path: a failed flush must not report a recovery it did not persist. */
-  @Test
-  void closeThatFailsWritesNoRecoveryTelemetryUntilItPersists() {
-    MutableClock advancing = new MutableClock(IN_SESSION);
-    AtomicLong received = new AtomicLong(NOW_MS - 200_000);
-    when(registry.countEnabledPublished()).thenReturn(1L);
-    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
-    when(engine.lastBarReceivedAtMs()).thenAnswer(inv -> received.get());
-    when(engine.lastBarEvaluatedAtMs()).thenAnswer(inv -> received.get());
-    when(redis.opsForValue()).thenReturn(valueOps);
-    when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000));
-    when(blindWindows.open(anyString(), any(Instant.class), anyString())).thenReturn(7L);
-    when(blindWindows.close(any(), any(Instant.class), anyString()))
-        .thenReturn(false) // the close is lost
-        .thenReturn(true); // and lands on the retry
-
-    SubscriberHealthCanary c =
-        new SubscriberHealthCanary(
-            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
-            FEED_FRESH);
-    c.sweep(); // blind
-    advancing.advanceMs(60_000);
-    received.set(advancing.millis() - 5_000);
-    c.sweep(); // recovery observed, close FAILS
-    verify(telemetry, never()).record(eq("recovery"), anyString());
-
-    advancing.advanceMs(60_000);
-    received.set(advancing.millis() - 5_000);
-    c.sweep(); // retry persists it
-    verify(telemetry, times(1)).record(eq("recovery"), anyString());
-  }
-
-  /**
    * The backward-clock guard's BYPASS, which the existing clock test could not reach because it
    * steps back only ten minutes and so stays inside the session. The measured 87-minute host drift
    * moves 10:00 IST to 08:33 -- outside ARMED_FROM -- so the sweep takes the out-of-session branch
@@ -638,12 +533,12 @@ class SubscriberHealthCanaryTest {
 
   /**
    * A single flush can OPEN and CLOSE the row together -- when the first open failed and bars came
-   * back before the next blind sweep. Inferring "was it durable?" from the episode afterwards then
-   * dropped the OPENING event, leaving a recovery-only timeline that reads as if the engine had
-   * never been blind.
+   * back before the next blind sweep. What must hold is that the two REGISTER calls happen in order
+   * and nothing else gets between them: an earlier revision discharged a telemetry insert in that
+   * gap, so a stall there left a recovered window permanently open after a restart.
    */
   @Test
-  void openAndCloseInOneFlush_stillReportsBothEvents() {
+  void openAndCloseInOneFlush_runsTheRegisterCallsBackToBack() {
     MutableClock advancing = new MutableClock(IN_SESSION);
     AtomicLong received = new AtomicLong(NOW_MS - 200_000);
     when(registry.countEnabledPublished()).thenReturn(1L);
@@ -666,9 +561,52 @@ class SubscriberHealthCanaryTest {
     received.set(advancing.millis() - 5_000);
     c.sweep(); // bars back: one flush opens AND closes the row
 
-    InOrder order = inOrder(telemetry);
-    order.verify(telemetry).record(eq("feed-blind"), anyString());
-    order.verify(telemetry).record(eq("recovery"), anyString());
+    // two opens (the lost one, then the retry inside the closing flush), then the close -- and
+    // NOTHING between the successful open and the close it is paired with
+    InOrder order = inOrder(blindWindows);
+    order.verify(blindWindows, times(2)).open(anyString(), any(Instant.class), anyString());
+    order.verify(blindWindows).close(eq(7L), any(Instant.class), eq("bars-resumed"));
+    verifyNoMoreInteractions(blindWindows);
+  }
+
+  /**
+   * A backward clock step can make a live session look CLOSED. The close is then refused (a window
+   * cannot end before it began) -- but the boundary path used to drop any episode without a row
+   * regardless, destroying the episode for an outage that was still running. If bars then recovered
+   * while the clock stayed warped, no row would ever be created at all.
+   */
+  @Test
+  void falseSessionBoundaryFromAClockStep_doesNotDropAPendingOpen() {
+    MutableClock advancing = new MutableClock(IN_SESSION);
+    when(registry.countEnabledPublished()).thenReturn(1L);
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    when(engine.lastBarReceivedAtMs()).thenReturn(NOW_MS - 200_000);
+    when(engine.lastBarEvaluatedAtMs()).thenReturn(NOW_MS - 200_000);
+    when(redis.opsForValue()).thenReturn(valueOps);
+    when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000));
+    when(blindWindows.open(anyString(), any(Instant.class), anyString()))
+        .thenReturn(null) // the opening INSERT is lost, so the episode has no row yet
+        .thenReturn(7L);
+
+    SubscriberHealthCanary c =
+        new SubscriberHealthCanary(
+            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
+            FEED_FRESH);
+    c.sweep(); // blind, open failed -> episode with id == null
+    advancing.advanceMs(-87 * 60_000L); // the clock steps back out of the apparent session
+    c.sweep(); // close REFUSED -> the episode must survive
+    advancing.advanceMs(87 * 60_000L); // clock corrected, still blind
+    c.sweep();
+
+    // ⚠️ Both opens fire either way, so counting them proves nothing -- dropping the episode simply
+    // mints a NEW one on the next blind sweep. The distinguishing artifact is the episode KEY: a
+    // surviving episode RETRIES its own key, a dropped one is replaced by a different key (and a
+    // start re-clamped to the session floor, losing the real beginning of the outage).
+    ArgumentCaptor<String> keys = ArgumentCaptor.forClass(String.class);
+    verify(blindWindows, times(2)).open(keys.capture(), any(Instant.class), anyString());
+    assertThat(keys.getAllValues().get(1))
+        .as("the retry must reuse the ORIGINAL episode key, not open a fresh window")
+        .isEqualTo(keys.getAllValues().get(0));
   }
 
   /** A test clock whose instant can be advanced, to drive the multi-sweep throttle path. */

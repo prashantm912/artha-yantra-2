@@ -64,6 +64,17 @@ import org.springframework.stereotype.Component;
  * backfill the data, never re-decide the bars). It still does NOT page, because market-data's
  * {@code FeedWatchdog} already pages for the same outage and a second push is pure noise.
  *
+ * <p><b>This branch writes ONE durable record, deliberately.</b> Earlier revisions also wrote a
+ * {@code feed-blind}/{@code recovery} pair into {@code subscriber_health_events}, and three review
+ * rounds went into ordering those two writes safely under partial failure — telemetry before the
+ * register lost the artifact, telemetry after the CALL was not the same as after SUCCESS, and
+ * discharging it inside {@code flush()} put an unbounded insert BETWEEN an open and its required
+ * close. The second write was the problem: {@code blind_windows} already carries the start, the end,
+ * the reason and the detail, so the telemetry row was a redundant record whose only real effect was
+ * to create an ordering hazard on a watchdog thread. It is gone. The log lines remain, because they
+ * cannot block. Other branches of this canary still write telemetry; only the producer-blind path,
+ * which owns a better record, does not.
+ *
  * <p>Three boundaries of that record are worth knowing before reading one. {@code started_at} is
  * CLAMPED to today's session open — a feed already dead at 09:15 anchors on yesterday's last bar
  * otherwise, and would report the whole night as blindness. {@code ended_at} is the newest receipt
@@ -135,12 +146,6 @@ public class SubscriberHealthCanary {
   // `strategies-idle` close followed by a re-enable DURING the same outage cannot backdate the new
   // window over the interval that was already accounted for.
   private volatile Instant lastWindowClosedAt = Instant.EPOCH;
-  // Telemetry OWED but not yet written, because the durable write it describes has not landed. The
-  // log line always fires immediately (it cannot block); only the subscriber_health_events INSERT
-  // waits. Without this, a fast register failure followed by a telemetry stall would spend the sweep
-  // thread on the forensic write and never retry the one that matters.
-  private volatile String owedOpenDetail;
-  private volatile String owedCloseReason;
   private long lastResubscribeAtMs;
 
   /** One producer-blind episode. Immutable; every transition replaces it. */
@@ -201,8 +206,13 @@ public class SubscriberHealthCanary {
         // registry went idle. Say which, so a reader never reads a still-dead feed as healed. This
         // is also the LAST retry: an episode that still cannot be written is dropped with an ERROR
         // rather than carried into the next session, where its start would be a lie.
-        requestClose(clock.instant(), inSession ? "strategies-idle" : "session-ended");
-        dropUnflushedEpisode();
+        // ⚠️ Only drop when the close was actually ATTEMPTED. A backward clock step can make a
+        // live session look closed, and requestClose then REFUSES the transition — dropping a
+        // pending open there would destroy the episode for an outage that is still running, and if
+        // bars recovered while the clock stayed warped no row would ever be created at all.
+        if (requestClose(clock.instant(), inSession ? "strategies-idle" : "session-ended")) {
+          dropUnflushedEpisode();
+        }
         return; // out of session, or genuinely idle by registry intent
       }
       long nowMs = clock.millis();
@@ -341,7 +351,6 @@ public class SubscriberHealthCanary {
         Long recovered = blindWindows.open(current.key(), current.startedAt(), current.detail());
         if (recovered != null) {
           episode = current.withId(recovered);
-          writeOwedOpen(); // the row landed on a retry — only now is the forensic write safe
         }
       }
       return; // already blind; one row per episode
@@ -355,21 +364,11 @@ public class SubscriberHealthCanary {
             + "s old — the PRODUCER is blind, so remediation stays market-data's; recording the "
             + "window because the reconnect backfill repairs the CANDLES but never the fact that the "
             + "engine did not see them live";
-    // ⚠️ THE DURABLE TRANSITION GOES FIRST, and the order is load-bearing rather than stylistic.
-    // `telemetry.record` writes to a DIFFERENT table; with it first, a stall on
-    // subscriber_health_events would stop blind_windows from ever being ATTEMPTED, even while
-    // blind_windows itself was perfectly writable — losing the artifact this whole feature exists to
-    // produce, to a failure in a table nothing here depends on.
-    //
     // One key per episode, generated ONCE here: every later retry of this INSERT reuses it, so an
     // ambiguous commit resolves to the SAME row instead of a second, permanently-open one.
     String key = UUID.randomUUID().toString();
     episode = new Episode(key, startedAt, detail, blindWindows.open(key, startedAt, detail), null, null);
-    log.error("subscriber watchdog: engine BLIND — {}", detail); // never blocks; always immediate
-    owedOpenDetail = detail;
-    if (episode.id() != null) {
-      writeOwedOpen(); // the row landed on the first attempt
-    }
+    log.error("subscriber watchdog: engine BLIND — {}", detail);
   }
 
   /**
@@ -381,10 +380,10 @@ public class SubscriberHealthCanary {
    * the in-memory episode and leaves the row open forever, which is exactly the corruption the
    * episode key was added to prevent, arriving by a different route.
    */
-  private void requestClose(Instant endedAt, String reason) {
+  private boolean requestClose(Instant endedAt, String reason) {
     Episode current = episode;
     if (current == null) {
-      return;
+      return true; // nothing to close is not a refusal
     }
     if (endedAt.isBefore(current.startedAt())) {
       // A window cannot end before it began. This is the backward-clock guard's second half, and the
@@ -404,45 +403,15 @@ public class SubscriberHealthCanary {
               + "the clock stepped backwards. Window HELD.",
           endedAt,
           current.startedAt());
-      return;
+      return false; // REFUSED — the caller must not treat this as a boundary it can clean up after
     }
     if (current.endedAt() == null) {
       episode = current.closing(endedAt, reason);
       lastWindowClosedAt = endedAt; // the next window can never start before this
-      log.info("subscriber watchdog: engine blind window closed — {}", reason); // never blocks
-      owedCloseReason = reason;
+      log.info("subscriber watchdog: engine blind window closed — {}", reason);
     }
     flush();
-  }
-
-  /**
-   * Discharges the owed {@code feed-blind} row, at the exact instant the INSERT is known to have
-   * landed -- never inferred afterwards from whatever episode happens to be installed.
-   *
-   * <p>⚠️ The inferring version was wrong and the review caught it. If an open failed and bars
-   * recovered before the next blind sweep, ONE {@code flush()} could open AND close the row together
-   * and clear the episode -- after which "is there a durable episode?" was false and the OPENING
-   * event was silently dropped, leaving a recovery-only timeline that reads as if the engine had
-   * never been blind. Durability belongs to the transition that achieved it, not to a field read
-   * later.
-   */
-  private void writeOwedOpen() {
-    String detail = owedOpenDetail;
-    if (detail == null) {
-      return;
-    }
-    owedOpenDetail = null;
-    telemetry.record("feed-blind", detail);
-  }
-
-  /** Discharges the owed {@code recovery} row, at the instant the close itself became durable. */
-  private void writeOwedClose() {
-    String reason = owedCloseReason;
-    if (reason == null) {
-      return;
-    }
-    owedCloseReason = null;
-    telemetry.record("recovery", "engine blind window closed — " + reason);
+    return true;
   }
 
   /**
@@ -462,7 +431,6 @@ public class SubscriberHealthCanary {
       }
       current = current.withId(id);
       episode = current;
-      writeOwedOpen(); // durable HERE, before any later transition can clear the episode
     }
     if (current.endedAt() == null) {
       return false; // durable, but the outage is still running
@@ -471,7 +439,6 @@ public class SubscriberHealthCanary {
       return false;
     }
     episode = null;
-    writeOwedClose(); // durable at this exact point, not "whenever nothing is pending"
     return true;
   }
 
@@ -493,8 +460,6 @@ public class SubscriberHealthCanary {
       return; // nothing pending, or pending a CLOSE on a real row — keep retrying that one
     }
     episode = null;
-    owedOpenDetail = null; // the row it described never existed; do not report it later
-    owedCloseReason = null;
     log.error(
         "subscriber watchdog: blind window insert never landed before the session boundary — "
             + "dropping it (started {}, reason {})",

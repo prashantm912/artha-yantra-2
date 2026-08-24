@@ -152,7 +152,7 @@ public class EquityDigestService {
     this.concentrationTopN = concentrationTopN;
   }
 
-  /** The equity digest for {@code date} (null ⇒ the latest EQ bhavcopy session). */
+  /** The equity digest for {@code date} (null ⇒ the latest EQ+BE cash bhavcopy session). */
   public EquityDigest digest(LocalDate date) {
     LocalDate session = date != null ? date : repo.latestSession();
     if (session == null) {

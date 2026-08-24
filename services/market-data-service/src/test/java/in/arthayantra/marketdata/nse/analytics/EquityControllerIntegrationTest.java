@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.nse.analytics;
 
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -30,6 +31,26 @@ class EquityControllerIntegrationTest extends MarketDataIntegrationTestBase {
   /** Synthetic and unique to this class — safe to purge whole-series. */
   private static final String SYM = "DLVTSYM";
 
+  /** Synthetic pure-BE symbol (H24) — the series that used to 422 despite having rows. */
+  private static final String BE_SYM = "DLVTBESYM";
+
+  /** Synthetic symbol that migrated EQ→BE mid-history, the real NSE surveillance shape. */
+  private static final String MIGRATED_SYM = "DLVTMIGSYM";
+
+  /**
+   * The two H24 symbols seed in the FAR PAST, and the year is load-bearing rather than arbitrary.
+   * A fixture inside the live clock window detonates in unrelated classes (ledger H19), but the
+   * usual escape — the year-2198 pattern at {@code DataQualityReportIntegrationTest:43-44} — is
+   * the WRONG direction for this table: a future date becomes the global {@code max(trade_date)},
+   * which is exactly what the as-of-latest queries in this very file key on
+   * ({@code EquityReturnsService:141}, {@code EquitySectorService:197},
+   * {@code EquityIndexContributionService:250}, all EQ-only, plus the EQ+BE
+   * {@code TrendTemplateService:81} / {@code ManasScreenService:84}). A far-PAST date can never
+   * win a {@code max()}, so it is inert for every one of them; the delivery endpoint itself has no
+   * date bound at all (it takes the newest N for one symbol), so history that old still serves.
+   */
+  private static final int H24_YEAR = 1998;
+
   /**
    * REAL, sector-mapped tickers: this class needs them because its queries rank mapped symbols, so
    * they are NOT exclusively ours. {@code BreadthControllerIntegrationTest:52-56} seeds RELIANCE /
@@ -49,6 +70,8 @@ class EquityControllerIntegrationTest extends MarketDataIntegrationTestBase {
   @AfterEach
   void clean() {
     jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE symbol = ?", SYM);
+    jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE symbol = ?", BE_SYM);
+    jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE symbol = ?", MIGRATED_SYM);
     Date floor = Date.valueOf(LocalDate.now(Ist.ZONE).minusDays(OWN_SEED_FLOOR_DAYS));
     for (String symbol : OWN_REAL_SYMBOLS) {
       jdbc.update(
@@ -66,6 +89,21 @@ class EquityControllerIntegrationTest extends MarketDataIntegrationTestBase {
       String delivPer,
       long delivQty,
       long ttq) {
+    insertBhavEq(SYM, d, prevClose, open, high, low, close, delivPer, delivQty, ttq);
+  }
+
+  /** A deliverable EQ row: both delivery columns populated. */
+  private void insertBhavEq(
+      String symbol,
+      LocalDate d,
+      String prevClose,
+      String open,
+      String high,
+      String low,
+      String close,
+      String delivPer,
+      long delivQty,
+      long ttq) {
     jdbc.update(
         "INSERT INTO nse_eod_bhavcopy "
             + "(trade_date, symbol, series, prev_close, open_price, high_price, low_price, "
@@ -73,7 +111,7 @@ class EquityControllerIntegrationTest extends MarketDataIntegrationTestBase {
             + "VALUES (?,?,?,?::numeric,?::numeric,?::numeric,?::numeric,?::numeric,?::numeric,?,?) "
             + "ON CONFLICT DO NOTHING",
         java.sql.Date.valueOf(d),
-        SYM,
+        symbol,
         "EQ",
         prevClose,
         open,
@@ -83,6 +121,90 @@ class EquityControllerIntegrationTest extends MarketDataIntegrationTestBase {
         delivPer,
         delivQty,
         ttq);
+  }
+
+  /**
+   * A BE row. NSE publishes NO delivery figures for the BE series, so both delivery columns are
+   * ABSENT rather than zero — measured 2026-08-17 against the live table: 0 of 54,384 BE rows carry
+   * either {@code deliv_per} or {@code deliv_qty}, across the table's whole 2025-06-20..2026-08-14
+   * span (V014:18-19 documents both as "null for non-deliverable rows"). Omitting the columns
+   * reproduces that shape exactly; writing 0 would fabricate a delivery claim the feed never made.
+   */
+  private void insertBhavBe(
+      String symbol,
+      LocalDate d,
+      String prevClose,
+      String open,
+      String high,
+      String low,
+      String close,
+      long ttq) {
+    jdbc.update(
+        "INSERT INTO nse_eod_bhavcopy "
+            + "(trade_date, symbol, series, prev_close, open_price, high_price, low_price, "
+            + " close_price, ttl_trd_qnty) "
+            + "VALUES (?,?,?,?::numeric,?::numeric,?::numeric,?::numeric,?::numeric,?) "
+            + "ON CONFLICT DO NOTHING",
+        java.sql.Date.valueOf(d),
+        symbol,
+        "BE",
+        prevClose,
+        open,
+        high,
+        low,
+        close,
+        ttq);
+  }
+
+  @Test
+  void deliveryReturnsRowsForBeSeriesSymbol() throws Exception {
+    // H24: this endpoint filtered `series = 'EQ'`, so a BE symbol threw a hard 422 DATA_GAP despite
+    // having rows — an owner-visible outage on the BE names the swing books hold.
+    insertBhavBe(BE_SYM, LocalDate.of(H24_YEAR, 3, 10), "95", "96", "101", "94", "100", 9000);
+    insertBhavBe(BE_SYM, LocalDate.of(H24_YEAR, 3, 11), "100", "101", "106", "99", "104", 9500);
+
+    mockMvc
+        .perform(get("/api/v1/market/equity/delivery").param("symbol", BE_SYM).param("days", "15"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.symbol").value(BE_SYM))
+        .andExpect(jsonPath("$.items.length()").value(2))
+        .andExpect(jsonPath("$.items[0].date").value(H24_YEAR + "-03-11")) // newest first
+        // Every OHLC-derived field still computes for a BE row — the series carries real prices.
+        .andExpect(jsonPath("$.items[0].ltpChangePct").value("4.00")) // (104-100)/100*100
+        .andExpect(jsonPath("$.items[0].close").value("104.0000"))
+        // ...but the two delivery cells are ABSENT, not zero. Serving 0 would assert that nothing
+        // went to delivery; the truth is that NSE published no figure for this series at all. The
+        // UI renders the null as an em-dash (DeliveryDataPage.tsx:65).
+        .andExpect(jsonPath("$.items[0].deliveryPct").value(nullValue()))
+        .andExpect(jsonPath("$.items[0].deliveryQty").value(nullValue()))
+        // ttl_trd_qnty IS published for BE, so it must NOT be collateral damage of the above.
+        .andExpect(jsonPath("$.items[0].totalTradedQty").value(9500));
+  }
+
+  @Test
+  void deliveryMergesHistoryAcrossEqToBeMigration() throws Exception {
+    // The real NSE surveillance shape: a name trades EQ, is moved to BE, and keeps printing. It is
+    // ONE continuous instrument, so the page must show ONE unbroken series rather than truncating
+    // at the migration. The PK is (trade_date, symbol, series), so the two halves coexist happily.
+    insertBhavEq(
+        MIGRATED_SYM, LocalDate.of(H24_YEAR, 4, 6), "95", "96", "101", "94", "100", "50.00", 4000, 9000);
+    insertBhavEq(
+        MIGRATED_SYM, LocalDate.of(H24_YEAR, 4, 7), "100", "101", "106", "99", "104", "52.00", 4500, 9500);
+    insertBhavBe(MIGRATED_SYM, LocalDate.of(H24_YEAR, 4, 8), "104", "105", "110", "103", "108", 10000);
+    insertBhavBe(MIGRATED_SYM, LocalDate.of(H24_YEAR, 4, 9), "108", "109", "112", "107", "111", 10500);
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/equity/delivery").param("symbol", MIGRATED_SYM).param("days", "15"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(4)) // spans BOTH series, not just one
+        .andExpect(jsonPath("$.items[0].date").value(H24_YEAR + "-04-09")) // newest first...
+        .andExpect(jsonPath("$.items[3].date").value(H24_YEAR + "-04-06")) // ...oldest last
+        // Each half keeps its own delivery semantics across the seam — proof the merge is a real
+        // union rather than one series' values being carried over the other's rows.
+        .andExpect(jsonPath("$.items[0].deliveryPct").value(nullValue())) // BE half
+        .andExpect(jsonPath("$.items[3].deliveryPct").value("50.00")) // EQ half
+        .andExpect(jsonPath("$.items[3].deliveryQty").value(4000));
   }
 
   @Test

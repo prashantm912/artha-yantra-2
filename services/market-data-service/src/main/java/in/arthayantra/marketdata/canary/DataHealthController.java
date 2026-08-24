@@ -32,7 +32,12 @@ public class DataHealthController {
 
   /**
    * Bhavcopy-close vs Kite-1d-close divergence (audit §8 V8). {@code date} defaults to the latest
-   * bhavcopy trade date; 422 DATA_GAP semantics are avoided — an empty compared set reads GREEN/0.
+   * bhavcopy trade date; 422 DATA_GAP semantics are still avoided — a thin or empty comparison set
+   * answers 200 with a YELLOW report rather than an error.
+   *
+   * <p>⚠️ An empty compared set used to read GREEN/0. It now reads YELLOW against
+   * {@code minCompared}: "nothing to compare" is not "the feeds agree", and reporting it as a clean
+   * run is what let a collapse from ~165 comparable symbols to 14 pass unnoticed for two sessions.
    */
   @GetMapping("/bhavcopy-close")
   public BhavcopyCloseCanary.BhavcopyCloseReport bhavcopyClose(

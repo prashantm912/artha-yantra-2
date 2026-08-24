@@ -11647,6 +11647,10 @@
             "type" : "integer",
             "format" : "int32"
           },
+          "minCompared" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
           "thresholdPct" : {
             "type" : "string"
           },
@@ -11657,7 +11661,7 @@
             }
           }
         },
-        "required" : [ "compared", "divergent", "offenders", "status", "thresholdPct", "tradeDate" ]
+        "required" : [ "compared", "divergent", "minCompared", "offenders", "status", "thresholdPct", "tradeDate" ]
       },
       "CloseMismatch" : {
         "type" : "object",

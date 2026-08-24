@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.swing;
 
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategysignal.signals.FlagSnapshotService;
 import in.arthayantra.strategysignal.signals.SwingBatchAlert;
 import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
@@ -32,6 +33,9 @@ public class SwingBatchRecorder {
 
   private static final Logger log = LoggerFactory.getLogger(SwingBatchRecorder.class);
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
+
+  /** Field, not injected — the same shape SwingBatchCatchUp uses for its own session window. */
+  private static final MarketCalendar CALENDAR = MarketCalendar.nse();
 
   /**
    * When the {@code swing_batch_runs} completeness marker is stamped. The scheduled / on-demand path
@@ -176,6 +180,64 @@ public class SwingBatchRecorder {
     }
   }
 
+  /**
+   * The session this settle must price off — the PIN that stops a stop being evaluated against a
+   * bar that is not this session's (ledger H27).
+   *
+   * <p>⚠️ This used to be {@code null}, which means "settle off whatever the newest bar happens to
+   * be". That reads as harmless and is not: most cash equities have no intraday 1d bar at all, so
+   * before the settle moved past the 18:45 bhavcopy ingest the newest bar was routinely the
+   * PREVIOUS session's. Measured 2026-08-18 across the whole table's lifetime — 69 of 417 minervini
+   * and 17 of 169 manas-arora persisted rows were computed on an earlier session's bar, and on
+   * 08-14/08-17/08-18 it was 14 of 15 every day. Nothing counted it: {@code exitSkipped} covers an
+   * EMPTY series and an out-of-window entry bar, not a series that ends on the wrong day, so the
+   * batch logged "0 exits, 0 exit-skipped" over stale input.
+   *
+   * <p>With the pin, {@code truncateToSession} drops a series that has no bar for this session, the
+   * exit pass retries once, and a still-missing bar becomes {@code exitSkipped} + a
+   * STOP-NOT-EVALUATED error — which keeps the session retryable by the 08:35 catch-up rather than
+   * silently settled. Skipping is the SAFE direction here: the catch-up settles off the session's
+   * own bar, whereas a stale evaluation is wrong in a direction nobody can see.
+   *
+   * <p>⚠️ <b>Holidays: EMPTY, not the previous session.</b> The crons are MON-FRI, which includes
+   * NSE holidays. The first cut of this change resolved a holiday BACK to the previous trading day
+   * on the reasoning that re-evaluating it is the same no-op the batch already performed. That is
+   * true of the exit evaluation and FALSE of everything written alongside it, which is what makes it
+   * a trap rather than a harmless nicety (cross-vendor review of this PR, 2026-08-20):
+   *
+   * <ul>
+   *   <li>The run marker is keyed {@code (batch, run_date)} and its upsert REPLACES the counters
+   *       ({@code SwingBatchRunRepository:56-70}) — so a holiday run would overwrite the previous
+   *       session's real {@code entries}/{@code exits}/{@code exit_skipped}/admission probe with a
+   *       no-op run's. The evidence for the session that actually traded is destroyed.
+   *   <li>The scheduler records its intent under TODAY ({@code MinerviniSwingScheduler:115}), so the
+   *       holiday would hold an intent row with no marker of its own. {@link SwingBatchCanary}
+   *       sweeps exactly that shape and pages "DID NOT RUN" — and its own comment notes a past
+   *       session "can never acquire a run marker", so the page repeats to its ceiling. A false
+   *       alarm promising a catch-up that only ever traverses TRADING sessions.
+   * </ul>
+   *
+   * <p>There is no new close on a holiday, the previous session was settled on its own evening, and
+   * a genuinely missed session is what the 08:35 catch-up exists for. So the honest answer is that a
+   * holiday is not a settle session at all. Callers skip; {@link #runScheduled} pins today so a
+   * MANUAL run on a holiday still behaves as it did pre-fix (no bar, {@code exitSkipped}, visible).
+   *
+   * <p>Fail-open to today past the bundled calendar's horizon: refusing to settle would be a far
+   * worse failure than settling off the newest bar, which is exactly the pre-fix behaviour.
+   */
+  public Optional<LocalDate> scheduledSettleSession() {
+    LocalDate today = LocalDate.now(clock.withZone(IST));
+    try {
+      return CALENDAR.isTradingDay(today) ? Optional.of(today) : Optional.empty();
+    } catch (RuntimeException e) {
+      log.warn(
+          "swing settle: NSE calendar does not cover {} — pinning today unresolved (calendar-cliff):"
+              + " {}",
+          today, e.getMessage());
+      return Optional.of(today);
+    }
+  }
+
   private RunOutcome runLocked(
       SwingDoctrine doctrine,
       LocalDate sessionDate,
@@ -262,7 +324,17 @@ public class SwingBatchRecorder {
                 doctrine.batchName(),
                 doctrine.alertLabel() + ": " + result.exitSkipped() + " exit(s) NOT evaluated",
                 summary + " — see the STOP NOT EVALUATED TODAY errors in the service log.")
-            : new SwingBatchAlert(doctrine.batchName(), doctrine.alertLabel() + " batch done", summary));
+            // ⚠️ "batch done" only when the batch actually did BOTH passes. An entries-disabled run
+            // completed its EXITS and nothing more — the 16:00 settle, or a catch-up whose funnel is
+            // not the session's screen. Announcing that as done contradicted the coordinator, which
+            // moments later publishes EXITS ONLY and leaves the session retryable precisely because
+            // it is not done. Two alerts, opposite claims, same run; the operator believes the first.
+            // Cross-vendor review Major, invisible to the coordinator's unit tests because they mock
+            // this recorder.
+            : new SwingBatchAlert(
+                doctrine.batchName(),
+                doctrine.alertLabel() + (entriesEnabled ? " batch done" : " exits pass complete"),
+                summary));
     return new RunOutcome(result, markerRecorded);
   }
 
@@ -276,7 +348,7 @@ public class SwingBatchRecorder {
   }
 
   /**
-   * The scheduler path with an explicit entry arming — the 16:00 IST settle passes {@code false}.
+   * The scheduler path with an explicit entry arming — the evening settle passes {@code false}.
    *
    * <p>Added rather than reusing one of the snapshot-carrying {@link #runAndRecord} overloads
    * because those hardcode {@code executionArmed = true} for the catch-up's benefit (a historical
@@ -289,7 +361,14 @@ public class SwingBatchRecorder {
   public SwingBatchEngine.SwingRun runScheduled(SwingDoctrine doctrine, boolean entriesEnabled) {
     try {
       SwingBatchEngine.SwingRun result =
-          runAndRecord(doctrine, null, entriesEnabled, MarkerPolicy.ALWAYS).run();
+          runAndRecord(
+                  doctrine,
+                  // A MANUAL run on a holiday pins TODAY rather than reaching back: the marker then
+                  // lands on the day it ran, which is what keeps it from overwriting a real session.
+                  scheduledSettleSession().orElseGet(() -> LocalDate.now(clock.withZone(IST))),
+                  entriesEnabled,
+                  MarkerPolicy.ALWAYS)
+              .run();
       log.info(
           "{} swing batch done: {} strategies, {} candidates, {} entries, {} exits, {} exit-skipped",
           doctrine.batchName(), result.strategies(), result.candidates(), result.entries(),

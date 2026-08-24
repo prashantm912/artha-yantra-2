@@ -3,9 +3,11 @@ package in.arthayantra.marketdata.candles;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import in.arthayantra.marketdata.bhavcopy.BhavcopyCandles;
 import in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase;
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -168,6 +170,76 @@ class CandleCaggIntegrationTest extends MarketDataIntegrationTestBase {
         repository.range("NSE", symbol, "1m", ist("2026-06-10T10:00:00"), ist("2026-06-10T11:00:00"));
     assertThat(rows.get(0).high()).isEqualByComparingTo("101.00"); // spike corrected outright
     assertThat(rows.get(0).source()).isEqualTo("KITE");
+  }
+
+  /**
+   * ⚠️ The one thing that makes a bhavcopy-FIRST 1d write safe for {@code BhavcopyCloseCanary}'s
+   * non-{@code BHAVCOPY} comparison population — and it is ACCIDENTAL, which is why it is pinned
+   * rather than trusted.
+   *
+   * <p>The provenance {@code CASE} exercised above keeps the existing source only when the incoming
+   * bar matches on every field INCLUDING {@code oi}, and the two 1d producers encode "this
+   * instrument has no open interest" differently: {@link BhavcopyCandles} emits {@code oi = null},
+   * while the Kite historical gateway requests {@code oi=1} and cash equities come back with a
+   * literal {@code 0}. {@code NULL IS NOT DISTINCT FROM 0} is FALSE, so a Kite write over a
+   * bhavcopy bar takes {@code source='KITE'} even when open/high/low/close/volume agree exactly.
+   *
+   * <p><b>⚠️ Scope: this pins the WRITE half only.</b> The Kite side below is hand-seeded as {@code
+   * oi = 0L}, so this test ASSUMES rather than measures that a Kite 1d cash-equity bar actually
+   * arrives with a zero. The decode half is pinned separately by {@code
+   * LiveHistoricalCandleGatewayTest#cashEquityDailyBarKeepsAZeroOpenInterestRatherThanNulling},
+   * which drives a canned seven-position wire response through the real gateway; and what NEITHER
+   * pins — Kite's own choice to SEND that seventh element — is written up there as a residual gap.
+   *
+   * <p>That single difference is load-bearing elsewhere. If either side ever changes it — the
+   * bhavcopy projection writing {@code oi = 0} for equities, or the Kite path normalising a zero to
+   * null — an OHLCV-identical Kite bar would silently KEEP {@code source='BHAVCOPY'}, and the
+   * canary would start losing precisely the bars that agree perfectly: a sample biased against
+   * agreement, judging agreement. It would surface as nothing louder than a slightly short {@code
+   * compared} count, and it would make the boot ordering in {@code BhavcopyStartupCatchup} — which
+   * deliberately does not exist, on the strength of this pair of tests — load-bearing again.
+   */
+  @Test
+  void kiteOverBhavcopyTakesTheKiteSourceBecauseOnlyOneSideEncodesNoOiAsZero() {
+    // ⚠️ Unique per RUN, not a literal. ITs share the singleton DB with no per-method cleanup, so a
+    // fixed symbol makes this a once-only test: run 2's insertIgnoreAll (ON CONFLICT DO NOTHING)
+    // no-ops against run 1's leftover KITE row and the BHAVCOPY seed assertion below fails INVERTED
+    // ("expecting 'KITE' to be equal to 'BHAVCOPY'"), which reads as the provenance rule being
+    // backwards rather than as stale state. CI reruns failures twice in the same JVM, so the
+    // misleading form is the one an operator would actually see.
+    String symbol = "PROVBHAV" + Long.toString(System.nanoTime(), 36).toUpperCase(java.util.Locale.ROOT);
+    // exactly what the EOD projection writes: BhavcopyCandles.of(...) through insertIgnoreAll
+    repository.insertIgnoreAll(
+        List.of(
+            BhavcopyCandles.of(
+                "NSE", symbol, LocalDate.of(2026, 6, 10),
+                new BigDecimal("100.00"), new BigDecimal("101.00"), new BigDecimal("99.00"),
+                new BigDecimal("100.50"), 500L)));
+
+    List<Candle> seeded =
+        repository.range("NSE", symbol, "1d", ist("2026-06-01T00:00:00"), ist("2026-07-01T00:00:00"));
+    assertThat(seeded).hasSize(1);
+    assertThat(seeded.get(0).source()).isEqualTo("BHAVCOPY");
+    assertThat(seeded.get(0).oi())
+        .as("the bhavcopy projection's 'no open interest' is NULL — half of why the flip happens")
+        .isNull();
+
+    // the same session's bar arriving from Kite: OHLCV identical to the last paisa, oi = 0 because
+    // the historical call asks for oi=1 and a cash equity answers 0 rather than omitting the field
+    repository.upsertAuthoritativeAll(
+        List.of(
+            new Candle(
+                "NSE", symbol, "1d", ist("2026-06-10T00:00:00"),
+                new BigDecimal("100.00"), new BigDecimal("101.00"), new BigDecimal("99.00"),
+                new BigDecimal("100.50"), 500, 0L, "KITE")));
+
+    List<Candle> rows =
+        repository.range("NSE", symbol, "1d", ist("2026-06-01T00:00:00"), ist("2026-07-01T00:00:00"));
+    assertThat(rows).hasSize(1);
+    assertThat(rows.get(0).source())
+        .as("NULL vs 0 IS a difference, so the keep-the-existing-source branch must NOT fire")
+        .isEqualTo("KITE");
+    assertThat(rows.get(0).oi()).isEqualTo(0L);
   }
 
   @Test

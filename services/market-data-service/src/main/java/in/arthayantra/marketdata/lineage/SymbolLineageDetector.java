@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.lineage;
 
+import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -156,7 +157,7 @@ public class SymbolLineageDetector {
       """
       WITH cal AS (
         SELECT trade_date, row_number() OVER (ORDER BY trade_date) AS dn
-        FROM (SELECT DISTINCT trade_date FROM nse_eod_bhavcopy WHERE series IN ('EQ','BE')) d
+        FROM (SELECT DISTINCT trade_date FROM nse_eod_bhavcopy WHERE %s) d
       ),
       bounds AS (
         SELECT GREATEST(min(trade_date), max(trade_date) - ?::int) AS floor_d,
@@ -167,7 +168,7 @@ public class SymbolLineageDetector {
         SELECT b.symbol, b.trade_date, b.prev_close, b.close_price, c.dn
         FROM nse_eod_bhavcopy b
         JOIN cal c USING (trade_date)
-        WHERE b.series IN ('EQ','BE')
+        WHERE %s
           AND b.trade_date >= (SELECT floor_d FROM bounds)
       ),
       firstrow AS (
@@ -220,7 +221,8 @@ public class SymbolLineageDetector {
       FROM uniq u
       WHERE u.succ_n = 1 AND u.pred_n = 1
       ORDER BY u.switch_date, u.successor
-      """;
+      """
+              .formatted(CashEquityUniverse.SERIES_PREDICATE, CashEquityUniverse.qualified("b"));
 
   private record Match(
       String predecessor,
@@ -310,7 +312,7 @@ public class SymbolLineageDetector {
     }
     LocalDate asOf =
         jdbc.queryForObject(
-            "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series IN ('EQ','BE')",
+            "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE " + CashEquityUniverse.SERIES_PREDICATE,
             LocalDate.class);
     DetectionResult result =
         new DetectionResult(

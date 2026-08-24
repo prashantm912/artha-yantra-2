@@ -21,9 +21,9 @@ import org.springframework.stereotype.Component;
  * Session-cadence external dead-man's-switch for the LIVE trading session — the reliability gap the
  * once-a-day {@link SwingBatchHeartbeat} cannot close.
  *
- * <p>{@code SwingBatchHeartbeat} pings its external monitor ONCE at 20:15 IST and proves only that the
+ * <p>{@code SwingBatchHeartbeat} pings its external monitor ONCE at 18:54 IST and proves only that the
  * evening swing BATCH ran. A stack that is dead across the whole live session (09:15–15:30 IST) but has
- * recovered by 20:15 pings that monitor happily — the entire intraday session was silently lost with no
+ * recovered by 18:54 pings that monitor happily — the entire intraday session was silently lost with no
  * external trace. This heartbeat makes "the session was alive" externally observable: every ~10 minutes
  * during session hours it pings a SEPARATE external monitor, but ONLY when candles are currently
  * arriving. When the engine is not receiving bars (feed/subscription dead, or the process/host is down)

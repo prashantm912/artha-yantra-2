@@ -74,7 +74,7 @@ public class BookHeatReader {
       }
       return out;
     } catch (RuntimeException e) {
-      log.debug("insight book-heat read unavailable — skipping risk sweep: {}", e.getMessage());
+      log.warn("insight book-heat read FAILED (skipping risk sweep): {}", e.getMessage());
       return List.of();
     }
   }

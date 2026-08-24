@@ -370,7 +370,8 @@ class SwingPaperExitCriticalsIntegrationTest extends StrategySignalIntegrationTe
             droppedEvents,
             catchupClock,
             true,
-            5);
+            5,
+            "0 35 8 * * MON-FRI");
     catchup.catchUp();
   }
 

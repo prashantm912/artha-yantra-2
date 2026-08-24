@@ -125,7 +125,7 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
 
     assertThat(report.status()).isEqualTo("GREEN");
     assertThat(report.sources())
-        .hasSize(8)
+        .hasSize(9) // +EQUITY_BREADTH, registered 2026-08-19 (chip task_1e319725)
         .allSatisfy(s -> assertThat(s.status()).isEqualTo("GREEN"));
   }
 
@@ -169,8 +169,11 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     clearWindow(target);
     seedBatchesHealthy(target);
     seedCapture(target, 5200L);
-    // minervini ran but wrote 0 rows — a data-starved skip, not a healthy screen.
+    // minervini ran but wrote 0 rows — a data-starved skip, not a healthy screen. Writing 0 rows
+    // means no OUTPUT landed either, which is the shape the artifact-first policy must still see as
+    // the SAME data-starved YELLOW, not as a missing day.
     deleteSource(target, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    deleteScreenRows(target, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
     seedBatch(target, IngestRunLedger.SOURCE_MINERVINI_SCREEN, "SUCCESS", 0L, true);
 
     IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
@@ -179,6 +182,171 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     SourceCoverage cov = find(report, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
     assertThat(cov.status()).isEqualTo("YELLOW");
     assertThat(cov.detail()).contains("data-starved");
+  }
+
+  /**
+   * The FALSE RED this policy change closes, in its exact production shape (measured 2026-08-13).
+   * Neither screen has its own cron — both are {@code @EventListener(BhavcopyBackfillCompleted)} off
+   * the 19:30 IST bhavcopy job, and the owner's machine shuts down at 19:00, so the whole chain
+   * routinely runs on the NEXT MORNING's boot. On 2026-08-12 that produced 1785 Minervini + 2270
+   * Manas rows for the trade date, complete, written by runs that STARTED 2026-08-13 08:04 IST —
+   * {@code ingest_runs} held no screen row stamped 08-12 at all, and the board reported RED with
+   * "no ingest run recorded for the trading day". So: NO run rows in the trade day's window, and
+   * output that exists but was computed the next morning.
+   */
+  @Test
+  void aScreenerIsGreenWhenTheNextMorningCatchUpDidTheWork() {
+    LocalDate target = LocalDate.of(2026, 1, 6);
+    clearWindow(target);
+    seedBatchesHealthy(target);
+    seedCapture(target, 5200L);
+    // the 19:30 chain never fired: no screen run row lands inside the trade day at all...
+    deleteSource(target, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    deleteSource(target, IngestRunLedger.SOURCE_MANAS_SCREEN);
+    // ...but the next morning's boot catch-up screened the day and stored its output.
+    seedScreenRows(target, target.plusDays(1).atTime(8, 4));
+
+    IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
+
+    assertThat(report.status())
+        .as("a screen that produced its rows must not read as a missing day just because catch-up did it")
+        .isEqualTo("GREEN");
+    for (String source :
+        List.of(IngestRunLedger.SOURCE_MINERVINI_SCREEN, IngestRunLedger.SOURCE_MANAS_SCREEN)) {
+      SourceCoverage cov = find(report, source);
+      assertThat(cov.status()).as(source).isEqualTo("GREEN");
+      assertThat(cov.detail()).contains("screen stored 1 rows for this trading day");
+      // Late-but-done must stay distinguishable from never-done, or the false RED has simply been
+      // traded for a blind GREEN. The lateness rides the detail, with its T+n.
+      assertThat(cov.detail()).contains("LATE, T+1 catch-up");
+      assertThat(cov.detail()).contains("computed " + target.plusDays(1) + " 08:04 IST");
+    }
+  }
+
+  /**
+   * Ledger/chip task_1e319725, and the reason EQUITY_BREADTH is NOT on {@code REQUIRE_SUCCESS}.
+   *
+   * <p>{@code EquityBreadthEodJob}'s dedup skip returns before {@code ledger.start}, so a no-op run
+   * records NOTHING, and a boot catch-up that materializes the missed day is stamped the FOLLOWING
+   * day. Measured on live data: 2026-08-12 has no EQUITY_BREADTH run row at all while 2026-08-13
+   * carries two. Under a run-row policy that day reds with its data sitting in the table.
+   */
+  @Test
+  void breadthIsGreenWhenTheRowLandedWithoutARunRowInTheDay() {
+    LocalDate target = LocalDate.of(2026, 1, 13);
+    clearWindow(target);
+    seedBatchesHealthy(target);
+    seedCapture(target, 5200L);
+    // the run row is gone — dedup-skipped, or written by the next day's catch-up...
+    deleteSource(target, IngestRunLedger.SOURCE_EQUITY_BREADTH);
+    // ...and the row was materialized by a boot pass the FOLLOWING morning, which is the exact
+    // production event this policy exists for: 2026-08-12 had no run row, and 2026-08-13 carried an
+    // off-cron 15:45 pass alongside its own 18:51 cron.
+    seedBreadthRow(target, target.plusDays(1).atTime(15, 45));
+
+    IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
+
+    SourceCoverage cov = find(report, IngestRunLedger.SOURCE_EQUITY_BREADTH);
+    assertThat(cov.status())
+        .as("breadth for this day EXISTS — a missing run row must not red it")
+        .isEqualTo("GREEN");
+    assertThat(cov.detail()).contains("materialized for this trading day");
+    // The lateness must reach the reader: late-but-done is not the same as same-day, and without
+    // this the when(...) rendering could be reverted with the whole suite still green.
+    assertThat(cov.detail()).contains("LATE, T+1 catch-up");
+    assertThat(report.status()).isEqualTo("GREEN");
+  }
+
+  /**
+   * The other direction: a SUCCESS run that covered a DIFFERENT day. The job computes
+   * {@code [latest..watermark]}, so a run stamped this day proves nothing about this day — if the
+   * watermark had not advanced it restated an older one. That must not green.
+   */
+  @Test
+  void breadthIsRedWhenARunSucceededButNothingLandedForTheDay() {
+    LocalDate target = LocalDate.of(2026, 1, 14);
+    clearWindow(target);
+    seedBatchesHealthy(target);
+    seedCapture(target, 5200L);
+    deleteBreadthRow(target); // the run wrote rows, but for another trade_date
+
+    IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
+
+    SourceCoverage cov = find(report, IngestRunLedger.SOURCE_EQUITY_BREADTH);
+    assertThat(cov.status())
+        .as("a SUCCESS run that covered another day is not evidence about this one")
+        .isEqualTo("RED");
+    assertThat(cov.detail()).contains("nothing materialized for");
+  }
+
+  /** The mirror: a screen computed on its own evening says so, and must NOT be labelled late. */
+  @Test
+  void aScreenerComputedTheSameEveningIsGreenAndNotLabelledLate() {
+    LocalDate target = LocalDate.of(2026, 1, 13);
+    clearWindow(target);
+    seedBatchesHealthy(target); // seeds the screen output at 19:01 on the trade date itself
+    seedCapture(target, 5200L);
+
+    IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
+
+    SourceCoverage cov = find(report, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    assertThat(cov.status()).isEqualTo("GREEN");
+    assertThat(cov.detail()).contains("computed " + target + " 19:01 IST (same day)");
+    assertThat(cov.detail()).doesNotContain("LATE");
+  }
+
+  /**
+   * The guard must still be able to fire (catalogue trap #14: a check whose operand can no longer be
+   * non-empty reports success forever). Genuinely-missing screen output for the trade date — no run
+   * row AND no stored rows — stays RED, and the detail now names the ABSENCE THAT MATTERS: the
+   * output's, not the run row's.
+   */
+  @Test
+  void aScreenerWithNoStoredOutputAndNoRunIsStillRed() {
+    LocalDate target = LocalDate.of(2026, 1, 20);
+    clearWindow(target);
+    seedBatchesHealthy(target);
+    seedCapture(target, 5200L);
+    deleteSource(target, IngestRunLedger.SOURCE_MANAS_SCREEN);
+    deleteScreenRows(target, IngestRunLedger.SOURCE_MANAS_SCREEN);
+
+    IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
+
+    assertThat(report.status()).isEqualTo("RED");
+    SourceCoverage cov = find(report, IngestRunLedger.SOURCE_MANAS_SCREEN);
+    assertThat(cov.status()).isEqualTo("RED");
+    assertThat(cov.detail()).contains("no screen output stored for the trading day");
+    // the sibling screen kept its output and must be unaffected — a real gap, not a blanket RED
+    assertThat(find(report, IngestRunLedger.SOURCE_MINERVINI_SCREEN).status()).isEqualTo("GREEN");
+  }
+
+  /**
+   * Newly reachable, and previously a SILENT GREEN: the run reports SUCCESS with a positive
+   * {@code rows_written}, but every row it wrote carries a DIFFERENT {@code screen_date} — the
+   * bhavcopy watermark never advanced, so the screen restated an older day. The old policy read the
+   * counter, and the counter was never about this date. Same family as the bhavcopy aggregate that
+   * greened over a dead NSE side.
+   */
+  @Test
+  void aScreenerThatRestatedAnotherDayIsRedDespiteAPositiveRowCount() {
+    LocalDate target = LocalDate.of(2026, 4, 14);
+    clearWindow(target);
+    seedBatchesHealthy(target);
+    seedCapture(target, 5200L);
+    // the run ran on the trade date and reports 1783 rows written, yet no row in the output table
+    // carries THIS screen_date — the screen restated whatever day the stalled watermark still named
+    deleteScreenRows(target, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    deleteSource(target, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    seedBatch(target, IngestRunLedger.SOURCE_MINERVINI_SCREEN, "SUCCESS", 1783L, true);
+
+    IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
+
+    SourceCoverage cov = find(report, IngestRunLedger.SOURCE_MINERVINI_SCREEN);
+    assertThat(cov.status())
+        .as("a positive rows_written must NOT rescue a trade date the screen never labelled")
+        .isEqualTo("RED");
+    assertThat(cov.detail()).contains("NONE carry screen_date=" + target);
+    assertThat(cov.detail()).contains("stale watermark");
   }
 
   /**
@@ -1026,6 +1194,72 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     seedBatch(day, IngestRunLedger.SOURCE_INSTRUMENT_SYNC, "SUCCESS", 90000L, true);
     seedBatch(day, IngestRunLedger.SOURCE_MINERVINI_SCREEN, "SUCCESS", 96L, true);
     seedBatch(day, IngestRunLedger.SOURCE_MANAS_SCREEN, "SUCCESS", 40L, true);
+    // EQUITY_BREADTH (chip task_1e319725). MATERIALIZED_DAY reads the ARTIFACT, so a healthy day
+    // must seed the breadth row as well as the run — same pairing as seedBhavRows and
+    // seedScreenRows above, and for the same reason: the run row does not identify the day it
+    // covered.
+    seedBatch(day, IngestRunLedger.SOURCE_EQUITY_BREADTH, "SUCCESS", 2L, true);
+    seedBreadthRow(day, day.atTime(18, 51));
+    // The SCREENER policy reads the OUTPUT tables, not the run rows — a healthy day must seed both
+    // (same reason seedBhavRows exists for the bhavcopy policy). Computed the same evening.
+    seedScreenRows(day, day.atTime(19, 1));
+  }
+
+  /**
+   * Seeds the DESTINATION tables the screener policy actually reads, at an explicit
+   * {@code computedAt} so a test can choose the same-evening or the next-morning catch-up shape.
+   * Minimal columns only — the policy counts rows and reads {@code max(computed_at)}, nothing else.
+   */
+  private void seedScreenRows(LocalDate day, java.time.LocalDateTime computedAtIst) {
+    OffsetDateTime computedAt = computedAtIst.atZone(Ist.ZONE).toOffsetDateTime();
+    jdbc.update(
+        "INSERT INTO minervini_screen_results (screen_date, symbol, close_price, gate1, gate2,"
+            + " gate3, gate4, gate5, gate6, gate7, gate8, gates_passed, passes_all, computed_at)"
+            + " VALUES (?, ?, 100, true, true, true, true, true, true, true, true, 8, true, ?)"
+            + " ON CONFLICT (screen_date, symbol) DO UPDATE SET computed_at = EXCLUDED.computed_at",
+        day,
+        "RELIANCE",
+        computedAt);
+    jdbc.update(
+        "INSERT INTO manas_arora_screen_results (screen_date, symbol, close_price, within_high,"
+            + " above_sma50, liquid_volume, liquid_depth, low_cap, gate1, gate2, gate3, gate4,"
+            + " gate5, gate6, gates_passed, passes_all, computed_at)"
+            + " VALUES (?, ?, 100, true, true, true, true, true, true, true, true, true, true,"
+            + " true, 6, true, ?)"
+            + " ON CONFLICT (screen_date, symbol) DO UPDATE SET computed_at = EXCLUDED.computed_at",
+        day,
+        "RELIANCE",
+        computedAt);
+  }
+
+  /** The materialized breadth row MATERIALIZED_DAY actually reads. Minimal columns only. */
+  /**
+   * ⚠️ {@code computedAt} is EXPLICIT, mirroring {@link #seedScreenRows}. The first cut omitted it
+   * and fell to the DDL default {@code now()}, which against a 2026-01-13 target rendered
+   * "LATE, T+218 catch-up" on every healthy fixture AND changed daily — a nondeterministic fixture
+   * that was harmless only because nothing asserted the string yet.
+   */
+  private void seedBreadthRow(LocalDate day, java.time.LocalDateTime computedAtIst) {
+    jdbc.update(
+        "INSERT INTO equity_breadth_daily (trade_date, advances, declines, unchanged, total,"
+            + " computed_at) VALUES (?, 1, 1, 0, 2, ?)"
+            + " ON CONFLICT (trade_date) DO UPDATE SET computed_at = EXCLUDED.computed_at",
+        day,
+        computedAtIst.atZone(Ist.ZONE).toOffsetDateTime());
+  }
+
+  /** Drops the materialized breadth row for {@code day} — the "breadth never landed" shape. */
+  private void deleteBreadthRow(LocalDate day) {
+    jdbc.update("DELETE FROM equity_breadth_daily WHERE trade_date = ?", day);
+  }
+
+  /** Drops one screener's stored output for {@code day} — the "the screen never ran" shape. */
+  private void deleteScreenRows(LocalDate day, String source) {
+    String table =
+        IngestRunLedger.SOURCE_MINERVINI_SCREEN.equals(source)
+            ? "minervini_screen_results"
+            : "manas_arora_screen_results";
+    jdbc.update("DELETE FROM " + table + " WHERE screen_date = ?", day);
   }
 
   private void seedBatch(LocalDate day, String source, String status, Long rows, boolean finished) {
@@ -1063,6 +1297,14 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
         end);
     jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE trade_date = ?", day);
     jdbc.update("DELETE FROM bse_eod_bhavcopy WHERE trade_date = ?", day);
+    jdbc.update("DELETE FROM minervini_screen_results WHERE screen_date = ?", day);
+    jdbc.update("DELETE FROM manas_arora_screen_results WHERE screen_date = ?", day);
+    // The breadth artifact belongs here for the same reason the four above do: MATERIALIZED_DAY
+    // reads it, seedBreadthRow is ON CONFLICT DO NOTHING, and the ITs share one DB with no
+    // per-method cleanup. Without this a row left by one method survives into every later method on
+    // that day AND across surefire reruns, so the next breadth-ABSENT test that forgets to delete
+    // explicitly gets a false GREEN — the direction that matters.
+    jdbc.update("DELETE FROM equity_breadth_daily WHERE trade_date = ?", day);
   }
 
   /**

@@ -52,8 +52,75 @@ docker exec ay-timescaledb psql -U artha -d artha -c "<SQL>"      # live (mock: 
 
 ## Logs + JVM
 
+### ⚠️ GATE — answer this BEFORE any log pull, every time
+
+**Do you already know the string you are looking for?**
+
+- **YES → `grep` it. Never a model.** Exact, complete, no fabrication risk. A targeted grep for
+  `kite` / `swing` / `effect` BEATS a digest and substituting one makes the result worse, not
+  cheaper. Most log pulls in this runbook are this case.
+- **NO — you are reading to find out what happened → PRE-FILTER, then digest.** Never paste a raw
+  `docker logs` pull.
+
+⚠️ **PRE-FILTERING IS MANDATORY, NOT AN OPTIMISATION — measured end-to-end 2026-08-17 on this box
+during a live session.** Feeding a raw 90-minute pull (56 k chars ≈ 14 k tokens) to the 9b **never
+finished: killed at 25+ minutes.** `num_ctx` auto-expands to 16384 and the model drops to 14 % CPU /
+86 % GPU. Strip to the message field and bound the window first, and the same job takes **191 s**:
+
 ```bash
-docker logs ay-strategy-signal-service --since 30m 2>&1 | grep -i <pattern>
+docker logs ay-<svc> --since 30m 2>&1 \
+  | grep -oE '"message":"[^"]{0,160}' | sed 's/^"message":"//' | tail -120 > $SP/log.txt   # 56k -> 19k chars
+python .claude/skills/local-model/scripts/run.py qwen3.5:9b $SP/prompt.txt $SP/out.txt 900 false
+```
+
+**Budget it at ~3 minutes, not "instant."** Measured 191 s / 9.7 tok/s — **not** the 43 tok/s in
+the `local-model` skill, because that figure was taken on an idle box and this one was
+running the live stack. Under load, expect a quarter of the documented throughput.
+
+⚠️ **OLLAMA SERIALISES PER MODEL, AND A QUEUED CALL IS INDISTINGUISHABLE FROM A SLOW ONE.** A second
+`run.py` launched while the first was still going sat behind it and timed out at 9 min having done
+nothing. That timeout nearly became a recorded "the digest lane is unusable" verdict — a confounded
+measurement, the same failure this repo keeps paying for. **Check `ollama ps` and `tasklist //FI
+"IMAGENAME eq python.exe"` before timing anything.**
+
+The prompt MUST name the six categories or the 9b drops the batch summary (measured 3/5 terse →
+5/5 structure-marked): *service lifecycle / load health / actions taken / risk refusals /
+warnings-aggregated / batch tally.* Read the `local-model` skill's `PROMPTING.md` before writing it.
+⚠️ It is a **Claude-tree-only** skill (`.claude/skills/local-model/`) — an agent running from
+`.agents/skills/` has the scripts on disk but not that guidance, so quote the rules rather than
+assuming the reader can open them.
+
+⚠️ **Then read the RAW lines the summary points at, and cite those. A summary is a POINTER, NEVER
+EVIDENCE** — never quote one in a ledger entry, a PR body, or a claim to the owner. **Measured the
+same run, and this is why:** the digest correctly surfaced a signal the operator had missed (`#203`,
+`24,354.00`, composite `0.9877` — all three verified exactly right against `strategy.signals`) and
+described it as **"successfully executed"** when its status was **`EXPIRED`**, i.e. never taken.
+Right id, right price, **wrong outcome.** It also duplicated a category heading and produced
+speculative operator advice under a prompt that said *"Do not speculate."* **That is the lane
+working as designed** — it points you at the row; you read the row.
+
+**Why this gate exists:** on 2026-08-17 a full live-diagnosis session ran ~8 `docker logs` pulls,
+merged three PRs, and made **zero** local-model calls while both models sat installed and idle. The
+first pull alone put ~40 full ECS JSON lines with repeated Java stack traces into context raw.
+Nothing at the point of use said to reach for the models, and a principle three files away loses to
+momentum every time.
+
+**Same gate applies to psql** — but the threshold bites far less often: bound the query and
+`select` named columns instead. A 1–20 row result is CHEAPER read raw than digested. The real waste
+is `select *` on a row carrying a fat JSON column (measured: `swing_batch_runs.dropped_by_cap`
+dumped hundreds of unused symbol/rank pairs). **Narrow the query first; digest only what is still
+wide after that.**
+
+⚠️ **Guessing a column name costs a round-trip and a local model cannot save you** — it does not
+know the schema either. Six queries failed this way in one session. Query
+`information_schema.columns` FIRST:
+
+```bash
+docker exec ay-timescaledb psql -U artha -d artha -t -c "select string_agg(column_name,', ' order by ordinal_position) from information_schema.columns where table_schema='strategy' and table_name='<t>';"
+```
+
+```bash
+docker logs ay-strategy-signal-service --since 30m 2>&1 | grep -i <pattern>   # known string: grep, don't digest
 docker exec ay-<svc> sh -c 'kill -3 1'    # thread dump → lands in docker logs (no jstack in slim image)
 ```
 A "stalled" service that is RUNNABLE on a PG socket read with queries turning over is
@@ -64,9 +131,60 @@ I/O contention (often the nightly pg_dump), not a hang — don't restart it.
 - `NIFTY-FUT-CONT` max bar = backfill end — the continuous future is replay-only by
   design; LIVE signals ride the dated front contract (re-resolved ~08:40 IST).
 - Kite token expires 06:00 IST → "Ticker: DISCONNECTED" pre-open until owner re-logins.
+  ⚠️ **BUT DISTINGUISH THAT ROUTINE EXPIRY FROM A DEAD APP — measured 2026-08-17, and they look
+  identical from inside the stack.** Both give `TOKEN_EXPIRED`, 403 `Incorrect api_key or
+  access_token`, and a ticker that will not connect. The difference is that the owner's re-login
+  **also fails**, and nothing in our logs says why — because the failure is at Zerodha. **The
+  one-command discriminator, run it BEFORE touching anything:**
+  ```bash
+  curl -s "$(docker exec ay-market-data-service sh -c 'wget -qO- http://127.0.0.1:8081/api/v1/auth/kite/login-url' | sed -E 's/.*"url":"([^"]+)".*/\1/')"
+  ```
+  A healthy app returns the Zerodha login page. A dead one returns
+  `{"status":"error","message":"Invalid \`api_key\`.","error_type":"InputException"}` — **byte-identical
+  to what a garbage 16-char key returns**, which is the control test that proves the key itself is
+  unrecognised rather than merely unauthorised. (Omitting the key gives a *different* error,
+  `Missing or empty field`, so the endpoint is parsing fine.) **Cause is almost always the Kite
+  Connect monthly subscription lapsing** (₹500/mo — the app is disabled on non-payment); fix is in
+  the owner's developer console at https://developers.kite.trade/apps, not in this repo. Verify our
+  side is innocent by hashing the key across all three sources — `deploy/secrets/kite_api_key`, the
+  container's served `login-url`, and `.env` — before blaming Zerodha.
+  ⚠️ **AND THE SECOND-ORDER SYMPTOM, because it is what you will actually notice first:** a dead
+  token at boot makes `FuturesUniverseResolver` return `503 DATA_STALE` for **every** universe, so
+  `engine_reloads` sits at `loaded=0 / unresolved=38` for as long as the credential is dead.
+  Measured: 585 s on 2026-08-17 against a 71–132 s band across the seven prior boots, resolving 37 s
+  after the login succeeded. **A long 0-loaded transient is a CREDENTIAL signal, not an engine
+  signal — check the Kite session before investigating the engine.**
 - Market-data 404s outside market hours for quote/chain endpoints.
 - Swing paper positions don't tick intraday — funnel equities aren't in the live feed;
   they settle on the daily batch's close.
+
+## ⚠️ BEFORE ANY RECREATE ON A SESSION DAY — snapshot to the CONVENTIONAL path
+
+A `docker compose up -d --force-recreate` takes `docker logs` with it. The owner's standing rule
+is to snapshot market-data + strategy-signal **first**. **Write them HERE, and nowhere else:**
+
+```bash
+D="/c/Trading/ArthaYantra/log-snapshots/$(date +%F)"; mkdir -p "$D"
+docker logs ay-market-data-service     > "$D/market-data.log" 2>&1
+docker logs ay-strategy-signal-service > "$D/strategy-signal.log" 2>&1
+```
+
+`<repo-parent>/log-snapshots/<YYYY-MM-DD>/<service>.log` — outside the repo, so it is not a git
+concern, and **stable, so a LATER session or scheduled routine can find it.** `session-analysis`
+reads this path.
+
+⚠️ **MEASURED 2026-08-17, and the failure is subtler than skipping the snapshot: a deploying
+session DID snapshot both services, to its own session-private scratchpad. The 15:55 scheduled
+`session-analysis` then found `docker logs` empty, correctly concluded the session logs were
+destroyed, applied a caveat to EVERY market-data log-derived check, and fell back to degraded
+evidence — while the file sat on disk the whole time.** Re-run against the recovered snapshot, the
+session was clean (898 lines, 0 ERROR) and contained one event nobody had seen: a 13:21:29 kite
+ticker disconnect that self-healed within the same second, with both tick gaps backfilled.
+**A rule that says "save it" but not WHERE produces evidence that exists and cannot be found —
+which is operationally identical to evidence that was never saved.**
+
+Snapshot even when you believe the deploy is post-close: the scheduled analyst runs at ~15:55 and
+cannot know what you did at 15:36.
 
 ## Deploy verification (the stale-jar trap)
 

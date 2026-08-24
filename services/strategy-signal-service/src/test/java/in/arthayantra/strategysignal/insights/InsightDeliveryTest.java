@@ -30,8 +30,14 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 
 /** Unit coverage for the fail-closed I4 delivery seam. */
 class InsightDeliveryTest {
+  /** Fixed so the CONTEXT_SHIFT phone budget has a deterministic IST day. */
+  private static final Clock CLOCK =
+      Clock.fixed(Instant.parse("2026-08-20T06:00:00Z"), ZoneOffset.UTC);
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
+
+  /** Per-test (JUnit builds a fresh instance per method), so counter assertions cannot leak. */
+  private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
   private static final OffsetDateTime NOW = OffsetDateTime.parse("2026-07-26T09:00:00+05:30");
 
   @Test
@@ -41,7 +47,8 @@ class InsightDeliveryTest {
     InsightProperties properties = new InsightProperties(null, null, null, null, null, null, null, null, null, null);
     InsightPublisher publisher =
         new InsightPublisher(
-            mock(StringRedisTemplate.class), MAPPER, events, repository, properties);
+            mock(StringRedisTemplate.class), MAPPER, events, repository, properties, CLOCK,
+            new SimpleMeterRegistry());
 
     assertThat(publisher.publish(insight(Severity.NOTICE, "market"))).isFalse();
     assertThat(properties.delivery().ws()).isFalse();
@@ -56,7 +63,7 @@ class InsightDeliveryTest {
   void noticeWarnAndCriticalDeliverButInfoNeverDoes() {
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     InsightRepository repository = mock(InsightRepository.class);
-    InsightPublisher publisher = publisher(new InsightProperties.Delivery(false, true, false, Severity.NOTICE), events, repository);
+    InsightPublisher publisher = publisher(new InsightProperties.Delivery(false, true, false, Severity.NOTICE, 6), events, repository);
 
     assertThat(publisher.publish(insight(Severity.INFO, "info"))).isFalse();
     verify(events, never()).publishEvent(any());
@@ -72,7 +79,7 @@ class InsightDeliveryTest {
   void suppressedInsightDoesNotDeliver() {
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     InsightRepository repository = mock(InsightRepository.class);
-    InsightPublisher publisher = publisher(new InsightProperties.Delivery(true, true, true, Severity.NOTICE), events, repository);
+    InsightPublisher publisher = publisher(new InsightProperties.Delivery(true, true, true, Severity.NOTICE, 6), events, repository);
 
     assertThat(publisher.publish(insight(Severity.CRITICAL, "suppressed", true))).isFalse();
 
@@ -86,7 +93,7 @@ class InsightDeliveryTest {
     InsightRepository repository = mock(InsightRepository.class);
     when(repository.isMuted(eq("DATA_TRUST"), eq("strategy:muted"))).thenReturn(true);
     when(repository.isMuted(eq("DATA_TRUST"), eq("strategy:unmuted"))).thenReturn(false);
-    InsightPublisher publisher = publisher(new InsightProperties.Delivery(false, true, false, Severity.NOTICE), events, repository);
+    InsightPublisher publisher = publisher(new InsightProperties.Delivery(false, true, false, Severity.NOTICE, 6), events, repository);
 
     Insight muted = insight("DATA_TRUST", Severity.WARN, "strategy:muted");
     Insight unmuted = insight("DATA_TRUST", Severity.WARN, "strategy:unmuted");
@@ -127,7 +134,7 @@ class InsightDeliveryTest {
         .thenAnswer(
             invocation -> new InsightRepository.Upsert(invocation.getArgument(0), true));
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
-    InsightPublisher publisher = publisher(new InsightProperties.Delivery(false, true, false, Severity.NOTICE), events, repository);
+    InsightPublisher publisher = publisher(new InsightProperties.Delivery(false, true, false, Severity.NOTICE, 6), events, repository);
     TrustService trustService = mock(TrustService.class);
 
     InsightEngine engine =
@@ -196,12 +203,106 @@ class InsightDeliveryTest {
     verify(repository, times(1)).recordInsight(any(), any(), anyString(), anyString(), anyInt(), any());
   }
 
-  private static InsightPublisher publisher(
+  /**
+   * ⚠️ These four pin a cap that CANNOT be observed on today's live stack, and that is the whole
+   * reason it was built now rather than later. Every options digest currently reads {@code
+   * dataTrust: DEGRADED} ("ATM IV rank over 38 sessions (< 60-session floor)", measured live
+   * 2026-08-20), and {@code ContextShiftGenerator:133} maps DEGRADED to {@code Severity.INFO},
+   * which is below the NOTICE phone floor — so no option-metric CONTEXT_SHIFT has ever reached a
+   * phone. At 60 IV sessions the digest flips to OK on its own, severity becomes NOTICE, and the
+   * uncapped volume (nine dedupe keys x ~8 re-fires under the 45-minute cooldown) arrives with no
+   * deploy and no config change. A test is the only thing that can exercise the post-cliff world
+   * before the cliff.
+   */
+  @Test
+  void theContextShiftPhoneBudgetBoundsHowManyReachAPhone() {
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    InsightRepository repository = mock(InsightRepository.class);
+    InsightPublisher publisher =
+        publisher(
+            new InsightProperties.Delivery(false, true, false, Severity.NOTICE, 2),
+            events,
+            repository);
+
+    for (int i = 0; i < 5; i++) {
+      publisher.publish(insight("CONTEXT_SHIFT", Severity.NOTICE, "NSE:NIFTY 50"));
+    }
+
+    verify(events, times(2)).publishEvent(any(InsightDeliveryAlert.class));
+    assertThat(meters.find("ay_insight_context_shift_phone_suppressed_total").counter().count())
+        .as("the DROP path must be counted — a cap that suppresses silently hides its own"
+            + " misconfiguration, and this count is what sizes the cap")
+        .isEqualTo(3.0);
+  }
+
+  @Test
+  void theBudgetIsSpentOnlyByContextShift() {
+    // A cap on ONE type must not become a cap on the notifier. SELL_DECISION and RISK_HEAT are the
+    // insights that actually move money; if a noisy context morning could starve them, the cap
+    // would be a worse defect than the volume it prevents.
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    InsightPublisher publisher =
+        publisher(
+            new InsightProperties.Delivery(false, true, false, Severity.NOTICE, 1),
+            events,
+            mock(InsightRepository.class));
+
+    publisher.publish(insight("CONTEXT_SHIFT", Severity.NOTICE, "market"));
+    publisher.publish(insight("CONTEXT_SHIFT", Severity.NOTICE, "market"));
+    publisher.publish(insight("SELL_DECISION", Severity.NOTICE, "book:minervini"));
+    publisher.publish(insight("RISK_HEAT", Severity.NOTICE, "book:minervini"));
+
+    // 1 CONTEXT_SHIFT (budget 1, second refused) + both unbudgeted types.
+    verify(events, times(3)).publishEvent(any(InsightDeliveryAlert.class));
+  }
+
+  @Test
+  void aMutedInsightDoesNotSpendTheBudget() {
+    // The budget claim sits AFTER the mute check on purpose. If it did not, a single muted scope
+    // could burn the whole day's phone budget on insights that were never going to be sent.
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    InsightRepository repository = mock(InsightRepository.class);
+    when(repository.isMuted(eq("CONTEXT_SHIFT"), eq("NSE:MUTED"))).thenReturn(true);
+    InsightPublisher publisher =
+        publisher(
+            new InsightProperties.Delivery(false, true, false, Severity.NOTICE, 2),
+            events,
+            repository);
+
+    for (int i = 0; i < 4; i++) {
+      publisher.publish(insight("CONTEXT_SHIFT", Severity.NOTICE, "NSE:MUTED"));
+    }
+    publisher.publish(insight("CONTEXT_SHIFT", Severity.NOTICE, "NSE:NIFTY 50"));
+    publisher.publish(insight("CONTEXT_SHIFT", Severity.NOTICE, "NSE:NIFTY 50"));
+
+    // The four muted ones spend nothing, so both unmuted ones still fit the budget of 2.
+    verify(events, times(2)).publishEvent(any(InsightDeliveryAlert.class));
+  }
+
+  @Test
+  void aCapOfZeroIsUnbounded() {
+    // The escape hatch has to actually work — a cap you cannot turn off is a cap you cannot debug.
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    InsightPublisher publisher =
+        publisher(
+            new InsightProperties.Delivery(false, true, false, Severity.NOTICE, 0),
+            events,
+            mock(InsightRepository.class));
+
+    for (int i = 0; i < 5; i++) {
+      publisher.publish(insight("CONTEXT_SHIFT", Severity.NOTICE, "market"));
+    }
+
+    verify(events, times(5)).publishEvent(any(InsightDeliveryAlert.class));
+  }
+
+  private InsightPublisher publisher(
       InsightProperties.Delivery delivery,
       ApplicationEventPublisher events,
       InsightRepository repository) {
     return new InsightPublisher(mock(StringRedisTemplate.class), MAPPER, events, repository,
-        new InsightProperties(null, null, null, null, null, null, null, null, null, delivery));
+        new InsightProperties(null, null, null, null, null, null, null, null, null, delivery), CLOCK,
+        meters);
   }
 
   private static Insight insight(Severity severity, String scope) {

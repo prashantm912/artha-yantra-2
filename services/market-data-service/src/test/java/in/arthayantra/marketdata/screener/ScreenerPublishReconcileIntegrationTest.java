@@ -122,6 +122,9 @@ class ScreenerPublishReconcileIntegrationTest extends MarketDataIntegrationTestB
 
   private LocalDate tableMaxTradeDate() {
     return jdbc.queryForObject(
+        // ⚠️ Deliberately an INLINE literal, not CashEquityUniverse.SERIES_PREDICATE: a test that
+        // imports the constant it is checking cannot detect a change to that constant. This is an
+        // independent oracle on purpose -- do not "finish" the H24 adoption sweep here.
         "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series IN ('EQ','BE')", LocalDate.class);
   }
 

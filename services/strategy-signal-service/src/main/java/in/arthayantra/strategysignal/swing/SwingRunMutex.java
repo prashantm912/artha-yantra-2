@@ -28,4 +28,25 @@ public class SwingRunMutex {
   public ReentrantLock lockFor(String batch) {
     return locks.computeIfAbsent(batch, b -> new ReentrantLock());
   }
+
+  /**
+   * True while ANY family's run lock is held — a pure OBSERVATION, never an acquisition, so a caller
+   * can ask "is the book mid-change?" without ever queueing behind the run it is asking about.
+   *
+   * <p>Added for {@code PaperReconciliationScheduler}'s bounded pre-open wait. This is the SOUND
+   * boundary for that question and {@code swing_catchup_runs} is not: the durable ledger only carries
+   * a {@code RUNNING} row from {@code claim} to the terminal write, so between two claimed sessions —
+   * and during the pre-claim {@code repairPendingEffects}, which republishes paper-effect retries — a
+   * sweep is fully in flight with no RUNNING row anywhere. The lock, by contrast, is held across the
+   * WHOLE family sweep ({@code SwingBatchCatchUp.catchUp}) and across every {@link SwingBatchRecorder}
+   * run, so it also covers a manual {@code POST /run} landing on a Tomcat thread.
+   *
+   * <p>Deliberately a boolean and not a generation counter: a counter would have to be bumped at the
+   * ACQUISITION sites, which means changing the catch-up itself. So this can answer "is a run in
+   * flight NOW", not "did one run between these two instants" — see the scheduler for the residual
+   * that leaves.
+   */
+  public boolean anyRunInFlight() {
+    return locks.values().stream().anyMatch(ReentrantLock::isLocked);
+  }
 }

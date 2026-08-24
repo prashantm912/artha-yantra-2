@@ -1,7 +1,30 @@
 ---
 name: comprehensive-audit
-description: Use to run a full 360° platform + codebase audit of ArthaYantra — Fable orchestrates a tiered, sharded Codex-Sol convergence loop (read-only), validates every finding against code + runtime, red-teams the result, and writes ONE dual-signed audit to docs/audits/. Owner-triggered; review + plan only, never a code change.
+description: Use to run a full 360° platform + codebase audit of ArthaYantra — Fable orchestrates a tiered, sharded read-only analyst convergence loop (Opus subagents — Codex is rationed to tier-gated review), validates every finding against code + runtime, red-teams the result, and writes ONE dual-signed audit to docs/audits/. Owner-triggered; review + plan only, never a code change.
 ---
+
+> # ⚠️ THE ANALYST CHANGED — CODEX RATIONED 2026-08-15
+> This skill was designed around **Codex Sol** as the opposite-vendor, read-only analyst. Codex is now
+> RATIONED to tier-gated pre-merge review ($20/mo tier), and a 13-shard audit would consume the whole
+> monthly budget in one run — so **substitute an Opus subagent per shard** — `Agent` with
+> `model: "opus"`, a read-only agent type, one FRESH thread per shard, and the same date-stamped
+> labels and state files. Everything else in this skill stands: the 13 shards, the tiering, the
+> per-shard convergence loop, the runtime-evidence-up-front rule, and the final red-team pass (use a
+> fresh Opus thread there too).
+>
+> ⚠️ **What is genuinely lost, and do not paper over it in the audit doc:** the analyst is now the
+> SAME vendor as the orchestrator. The audit was "dual-signed" by two vendors; it can now only be
+> dual-*threaded*. Compensate by giving each shard a distinct lens and by keeping the red-team pass
+> mandatory — and say "same-vendor" in the doc's provenance line.
+>
+> ⚠️ Local models cannot fill this seat: seven scored 0/2 as reviewers. They may DIGEST evidence
+> (logs, psql dumps) before it reaches an analyst — see the `local-model` skill — never analyse.
+>
+> The `bash .claude/skills/codex/scripts/start.sh` invocations below **must not be run** — not because
+> they are broken, but because they would spend the entire month's review budget on an audit. Treat
+> them as the specification of what each shard prompt must contain. If the owner ever restores an
+> unrationed tier, they work as written.
+
 
 # comprehensive-audit
 
@@ -11,7 +34,7 @@ each shard; the Architect validates every finding against real code + real runti
 they iterate per shard until they agree; a fresh Sol thread red-teams the finished doc; the
 output is ONE dual-signed audit in `docs/audits/`.
 
-**This produces a PROPOSAL, not a gate.** `codex-ask`-class analysis is advisory (ROUTING.md) —
+**This produces a PROPOSAL, not a gate.** Advisory analysis is never gating (ROUTING.md) —
 every accepted item still ships through the normal pipeline (its own review + Architect audit +
 owner approval for money/arming/HOLD). The audit tells you *what* to consider, never *what to
 trade*.
@@ -220,7 +243,7 @@ bash .claude/skills/codex/scripts/resume.sh \
    For any **Deep money/parity Critical**, additionally run `adversarial-review` (Opus, lens-diverse,
    REFUTE-framed) on that finding before it reaches the owner-decision list — our proven routine,
    and a true cross-vendor attack on a Sol-co-authored claim.
-2. **Consistency stamp.** `codex-plan-review` on the finished doc for a formal `APPROVED` (confirms
+2. **Consistency stamp.** A fresh Opus subagent reviews the finished doc for a formal `APPROVED` (confirms
    the written doc matches what you converged on). That skill sets its OWN `STATE_DIR`; its plan
    template is deliberately repurposed here as a consistency stamp on a non-plan doc.
 

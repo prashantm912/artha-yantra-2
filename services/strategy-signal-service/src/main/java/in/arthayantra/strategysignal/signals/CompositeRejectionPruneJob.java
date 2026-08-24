@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
  * {@link RiskSuppressionPruneJob} shape, applied to a table whose row rate is HIGHER but still
  * small: ~192 rows/session at ~650 bytes of canonical ScoreBreakdown each, so ~141 KB/day, i.e.
  * ~25 MB/year. Retention is deliberately GENEROUS (180 days) — this is tuning history, not a space
- * emergency. Every day at 02:30 IST (off-market) a plain row-wise {@code DELETE} removes rows past
+ * emergency. Every day at 18:07 IST (post-close) a plain row-wise {@code DELETE} removes rows past
  * the horizon. This is a PLAIN OLTP table, NOT a hypertable, so it uses {@code DELETE} — never
  * TimescaleDB {@code drop_chunks} (the A10 {@code OptionsSnapshotPruneJob} drops chunks because
  * {@code options_chain_snapshots} is a ~1.12B-row compressed hypertable; here a row-wise delete is
@@ -82,7 +82,8 @@ public class CompositeRejectionPruneJob {
   }
 
   /**
-   * The daily retention tick (02:30 IST). Six-field Spring cron with the explicit Asia/Kolkata zone
+   * The daily retention tick (18:07 IST — The 02:30/03:30 slot was retired on 2026-08-12: the machine is shut down at 19:00 IST and started after 08:00, so an overnight tick never fired at all — the retention this job exists to enforce was simply not happening. Six-field Spring cron with the explicit
+   * Asia/Kolkata zone
    * (the sibling scheduler convention); runs every calendar day since retention has no trading-day
    * dependence. Cron is property-overridable like every sibling scheduler. Live-only.
    *
@@ -91,7 +92,7 @@ public class CompositeRejectionPruneJob {
    * back onto the shared default pool that carries paper stop-loss evaluation.
    */
   @Scheduled(
-      cron = "${artha.signals.composite-rejection-prune.cron:0 30 2 * * *}",
+      cron = "${artha.signals.composite-rejection-prune.cron:0 7 18 * * *}",
       zone = "Asia/Kolkata",
       scheduler = "maintenanceTaskScheduler")
   public void scheduledPrune() {

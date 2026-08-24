@@ -377,6 +377,67 @@ services:
       # way). Added so the owner's ticker flip is a one-line .env change. Default kite (no behaviour change).
       ARTHA_MD_SOURCE_TICKER: ${ARTHA_MD_SOURCE_TICKER:-kite}
       ARTHA_MD_SOURCE_FIIDII: ${ARTHA_MD_SOURCE_FIIDII:-nse}
+      # ---- Evening-chain cron passthroughs (added 2026-08-11) ----
+      # ⚠️ VALUES ARE THE CODE DEFAULTS, BYTE FOR BYTE. This block changes NOTHING about when these
+      # jobs run; it exists because they had no passthrough at all, so setting any of them in `.env`
+      # was silently swallowed and the YAML/code default won with no error (#653). "We set the env
+      # var" and "the job did not move" were both true at the same time.
+      #
+      # None of these ten property names appears in application.yml either — they reach Spring only
+      # through SystemEnvironmentPropertySource's relaxed dot/hyphen-to-underscore resolution
+      # (artha.bhavcopy-close.cron <- ARTHA_BHAVCOPY_CLOSE_CRON). That mechanism was unproven here:
+      # every pre-existing cron passthrough happened to carry a value identical to its code default,
+      # so live state could never have distinguished "the override works" from "the default wins".
+      # upstox contract canary
+      ARTHA_UPSTOX_CANARY_CRON: "${ARTHA_UPSTOX_CANARY_CRON:-0 20 18 * * MON-FRI}"
+      # The close canary fetching its OWN comparison population (NIFTY 200 1d bars from Kite).
+      # ⚠️ 16:05, not "a few minutes before ARTHA_BHAVCOPY_EOD_CRON", because the pass has NO upper
+      # bound on its runtime: ~202 SEQUENTIAL Kite fetches, ~71 s nominal at the 3 req/s historical
+      # limiter, but each fetch retries up to 4× over a 60 s read timeout, so a Kite brown-out
+      # stretches it arbitrarily. The bars must be in `candles` before the 18:58 sweep reads them,
+      # and 16:05 leaves 2h53m of slack for a pass that normally needs 71 s. It fails QUIETLY if
+      # this is set too late — an unfinished pass looks exactly like an eroded index (coverage
+      # YELLOW). Not a write-ordering knob: bhavcopy-first is safe, because the keep-the-source
+      # branch of upsertAuthoritativeAll also compares `oi` and only Kite encodes "no open
+      # interest" as 0. The 16:00 Kite daily bar is already final (measured byte-identical on
+      # re-fetch at 17:43 IST, 2026-08-13). Retuning this moves BOTH triggers: a boot after this
+      # time replays the missed pass (alongside the bhavcopy pull, never in front of it — see
+      # BhavcopyStartupCatchup).
+      ARTHA_BHAVCOPY_CLOSE_PREFETCH_CRON: "${ARTHA_BHAVCOPY_CLOSE_PREFETCH_CRON:-0 5 16 * * MON-FRI}"
+      # the bhavcopy fetch the chain waits on
+      ARTHA_BHAVCOPY_EOD_CRON: "${ARTHA_BHAVCOPY_EOD_CRON:-0 45 18 * * MON-FRI}"
+      # NSE FII / participant / DII feeds
+      ARTHA_NSE_EOD_CRON: "${ARTHA_NSE_EOD_CRON:-0 46 18 * * MON-FRI}"
+      # minervini screen
+      ARTHA_MINERVINI_CRON: "${ARTHA_MINERVINI_CRON:-0 47 18 * * MON-FRI}"
+      # manas screen
+      ARTHA_MANAS_ARORA_CRON: "${ARTHA_MANAS_ARORA_CRON:-0 48 18 * * MON-FRI}"
+      # market context
+      ARTHA_CONTEXT_EOD_CRON: "${ARTHA_CONTEXT_EOD_CRON:-0 49 18 * * MON-FRI}"
+      # data-quality sweep
+      ARTHA_DATA_QUALITY_EOD_CRON: "${ARTHA_DATA_QUALITY_EOD_CRON:-0 50 18 * * MON-FRI}"
+      # equity breadth fold
+      ARTHA_BREADTH_MATERIALIZE_CRON: "${ARTHA_BREADTH_MATERIALIZE_CRON:-0 51 18 * * MON-FRI}"
+      # VALUE IS THE CODE DEFAULT, BYTE FOR BYTE - this line changes nothing about live behaviour,
+      # it only makes the knob reachable from .env (#653). Added with V058 (H24 PR-6), which
+      # TRUNCATEs equity_breadth_daily and lets the boot pass refill it bounded by this number:
+      # if it turns out wrong on deploy night, correcting it must not require a Maven build while
+      # the table sits empty.
+      ARTHA_BREADTH_BACKFILL_DAYS: "${ARTHA_BREADTH_BACKFILL_DAYS:-240}"
+      # bhavcopy-vs-Kite close reconciliation
+      ARTHA_BHAVCOPY_CLOSE_CRON: "${ARTHA_BHAVCOPY_CLOSE_CRON:-0 58 18 * * MON-FRI}"
+      # Coverage floor for that canary: below this many comparable symbols it never reports GREEN.
+      # VALUE IS THE CODE DEFAULT, BYTE FOR BYTE — this line changes nothing about live behaviour,
+      # it only makes the knob reachable from .env (#653). The canary CLAMPS it up to red-floor, so
+      # a low value cannot be used as an off-switch; use ARTHA_BHAVCOPY_CLOSE_ENABLED for that.
+      # ⚠️ The sibling knobs (enabled / alerts-enabled / threshold / red-floor / sample-limit) still
+      # have NO passthrough and are pinned to their @Value defaults — pre-existing, not introduced
+      # here, and deliberately left for a separate change rather than widened into this one.
+      ARTHA_BHAVCOPY_CLOSE_MIN_COMPARED: "${ARTHA_BHAVCOPY_CLOSE_MIN_COMPARED:-100}"
+      # buyable alerts (bean is @ConditionalOnProperty-disabled today, so inert)
+      # Moved 18:53 -> 18:59 to free 18:53 for the manas-arora swing settle (ledger H27). It only
+      # needs to follow its own screen (18:47); nothing downstream reads it.
+      ARTHA_MINERVINI_BUYABLE_ALERTS_CRON: "${ARTHA_MINERVINI_BUYABLE_ALERTS_CRON:-0 59 18 * * MON-FRI}"
       ARTHA_MD_SOURCE_OPTIONANALYTICS: ${ARTHA_MD_SOURCE_OPTIONANALYTICS:-native}
       # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.
       ARTHA_UPSTOX_ANALYTICS_ENABLED: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:-false}
@@ -397,6 +458,13 @@ services:
       # OptionsSnapshotPruneJob's 03:30-IST drop_chunks prune. Default 365; no-op until ~2027-06.
       # Name MUST byte-match application.yml's artha.market.snapshot-retention-days placeholder (#653).
       ARTHA_SNAPSHOT_RETENTION_DAYS: ${ARTHA_SNAPSHOT_RETENTION_DAYS:-365}
+      # H31: TTL (seconds) for the INDIA VIX spot quote. The kite-quote limiter is 1/s for the
+      # whole service, so this read QUEUES rather than being slow at Kite -- 1.530 s mean on
+      # 2026-08-21, and the same call inline put day-context at 1.920 s against a 2000 ms client
+      # budget. 0 disables. VALUE IS THE CODE DEFAULT, BYTE FOR BYTE -- this line changes nothing
+      # about live behaviour, it only makes the knob reachable from .env (#653).
+      ARTHA_VIX_QUOTE_CACHE_TTL_SECONDS: ${ARTHA_VIX_QUOTE_CACHE_TTL_SECONDS:-30}
+      ARTHA_CONTEXT_OPTIONS_NAME: ${ARTHA_CONTEXT_OPTIONS_NAME:-NIFTY 50}
       # Live option-premium 1m capture: nearest-expiry ATM +/- width, both CE and PE.
       ARTHA_OPTIONS_ATM_PINNER_UNDERLYINGS: ${ARTHA_OPTIONS_ATM_PINNER_UNDERLYINGS:-NIFTY 50,SENSEX}
       ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH: ${ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH:-5}
@@ -555,6 +623,7 @@ services:
       ARTHA_INSIGHTS_DELIVERY_NTFY_ENABLED: ${ARTHA_INSIGHTS_DELIVERY_NTFY_ENABLED:-false}
       ARTHA_INSIGHTS_DELIVERY_TELEGRAM_ENABLED: ${ARTHA_INSIGHTS_DELIVERY_TELEGRAM_ENABLED:-false}
       ARTHA_INSIGHTS_DELIVERY_SEVERITY_FLOOR: ${ARTHA_INSIGHTS_DELIVERY_SEVERITY_FLOOR:-NOTICE}
+      ARTHA_INSIGHTS_DELIVERY_CONTEXT_SHIFT_DAILY_PHONE_CAP: ${ARTHA_INSIGHTS_DELIVERY_CONTEXT_SHIFT_DAILY_PHONE_CAP:-6}
       # §18.4: app origin for the scalp alert's /orders deep link. Blank = no link (default); set to the
       # reachable app host (e.g. Tailscale) to arm it. Arm-able via .env without an image rebuild.
       ARTHA_NOTIFIER_APP_BASE_URL: ${ARTHA_NOTIFIER_APP_BASE_URL:-}
@@ -621,9 +690,24 @@ services:
       # advisory risk sizing (advised_lots = floor(pct% × equity ÷ stop-distance); advisory only)
       ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT: ${ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT:-1.0}
       # batch/evaluator crons (Asia/Kolkata) — quoted (the value has spaces)
-      ARTHA_GRADUATION_PROMOTION_CRON: "${ARTHA_GRADUATION_PROMOTION_CRON:-0 0 21 * * MON-FRI}"
-      ARTHA_MINERVINI_SWING_CRON: "${ARTHA_MINERVINI_SWING_CRON:-0 0 16 * * MON-FRI}"
-      ARTHA_MANAS_ARORA_SWING_CRON: "${ARTHA_MANAS_ARORA_SWING_CRON:-0 2 16 * * MON-FRI}"
+      ARTHA_GRADUATION_PROMOTION_CRON: "${ARTHA_GRADUATION_PROMOTION_CRON:-0 55 18 * * MON-FRI}"
+      # ⚠️ 18:52/18:53, NOT 16:00/16:02 (ledger H27). The settle must run AFTER the 18:45 bhavcopy
+      # EOD ingest: most cash equities have no intraday 1d bar, so at 16:00 the batch priced every
+      # held stop off the PREVIOUS session's close and reported a clean run doing it.
+      ARTHA_MINERVINI_SWING_CRON: "${ARTHA_MINERVINI_SWING_CRON:-0 52 18 * * MON-FRI}"
+      ARTHA_MANAS_ARORA_SWING_CRON: "${ARTHA_MANAS_ARORA_SWING_CRON:-0 53 18 * * MON-FRI}"
+      # ---- Paper reconciler cron passthroughs (added 2026-08-11) ----
+      # Same as the market-data block: values are the code defaults byte for byte, and the only
+      # change is that an .env override now reaches Spring instead of being swallowed (#653).
+      # paper nightly V5/V16 reconciliation
+      ARTHA_PAPER_RECONCILIATION_CRON: "${ARTHA_PAPER_RECONCILIATION_CRON:-0 50 8 * * MON-FRI}"
+      # past-expiry recovery
+      ARTHA_PAPER_PAST_EXPIRY_RECON_CRON: "${ARTHA_PAPER_PAST_EXPIRY_RECON_CRON:-0 52 8 * * MON-FRI}"
+      # Insight sweeps. Added 2026-08-12: these two were the ONLY window-relevant crons with no
+      # passthrough at all, so OperatingWindowTest's claim that CronPassthroughParityTest proves
+      # every copy of a schedule agrees was false for exactly them. Cross-vendor review caught it.
+      ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON: "${ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON:-0 56 18 * * MON-FRI}"
+      ARTHA_INSIGHTS_SELL_DECISION_CRON: "${ARTHA_INSIGHTS_SELL_DECISION_CRON:-0 57 18 * * MON-FRI}"
       ARTHA_SWING_CANARY_CRON: "${ARTHA_SWING_CANARY_CRON:-0 30 8 * * MON-FRI}"
       # Swing-batch CATCH-UP (2026-07-17 incident): re-runs a batch the stack was down for, pinned to
       # the missed session's daily bar. Runs in the post-close/pre-open window (08:35, after the 08:30
@@ -631,23 +715,33 @@ services:
       # SAME bar the on-time run would have. Default-OFF: it fires real entries + real paper exits.
       ARTHA_SWING_CATCHUP_ENABLED: ${ARTHA_SWING_CATCHUP_ENABLED:-false}
       ARTHA_SWING_CATCHUP_CRON: "${ARTHA_SWING_CATCHUP_CRON:-0 35 8 * * MON-FRI}"
+      # BOOT door for the same sweep (H18, 2026-08-14). Spring never replays a @Scheduled fire that
+      # ticked while the process was down, and this machine boots ~08:00 against that 08:35 cron — so
+      # a boot at 08:38 misses the ONLY pass that takes swing entries and forfeits them permanently.
+      # ⚠️ SEPARATE from ARTHA_SWING_CATCHUP_ENABLED on purpose: that one is `false` here but TRUE in
+      # .env (it arms the live 08:35 entry pass), so reusing it would have shipped the boot door armed
+      # on the first deploy, and shipping it inert would have meant disabling swing entries. BOTH must
+      # be true for the boot door to act; this one alone opens the door.
+      ARTHA_SWING_BOOT_CATCHUP_ENABLED: ${ARTHA_SWING_BOOT_CATCHUP_ENABLED:-false}
       # How many missed sessions the sweep will keep retrying before it abandons one (a held bar that
       # never lands). The scan window is this + 2 most-recent trading days, so a multi-day outage
       # catches up every session in range, oldest first.
       ARTHA_SWING_CATCHUP_MAX_ATTEMPTS: ${ARTHA_SWING_CATCHUP_MAX_ATTEMPTS:-5}
       # External dead-man's-switch for the swing batches (catches a whole-stack/host OUTAGE, which the
       # in-stack P0-4 canary can't). Blank = dormant; paste a healthchecks.io/UptimeRobot heartbeat URL
-      # to arm, and set the external check to expect a ping on 15 20 * * 1-5 (TZ Asia/Kolkata).
+      # to arm, and set the external check to expect a ping on 54 18 * * 1-5 (TZ Asia/Kolkata).
+      # ⚠️ That external check lives OUTSIDE this repo: moving the cron here does NOT move it, so
+      # reconfigure the monitor at the same deploy or it pages nightly for a ping now 81 min early.
       # The ping is EARNED, not unconditional: it is WITHHELD when an ARMED swing family recorded no
       # swing_batch_runs marker for the IST session, so a stack that is up but whose batch silently
-      # failed now alarms at 20:15 instead of at the 08:30 canary. An NSE holiday and a disarmed
+      # failed now alarms at 18:54 instead of at the 08:30 canary. An NSE holiday and a disarmed
       # family still ping (no false alarms). It ALSO withholds past the bundled holiday calendar's
       # covered years, where a session cannot be judged expected-or-not -- refresh libs/market-calendar
       # (CD-2) before the horizon canary reddens or expect nightly alarms from that date on.
       ARTHA_HEARTBEAT_URL: "${ARTHA_HEARTBEAT_URL:-}"
-      ARTHA_HEARTBEAT_SWING_CRON: "${ARTHA_HEARTBEAT_SWING_CRON:-0 15 20 * * MON-FRI}"
+      ARTHA_HEARTBEAT_SWING_CRON: "${ARTHA_HEARTBEAT_SWING_CRON:-0 54 18 * * MON-FRI}"
       # Session-cadence dead-man's-switch for the LIVE trading session (the swing ping above proves only
-      # the 20:15 batch ran — a stack dead 09:15-15:30 but recovered by 20:15 pings it happily). Pings
+      # the evening batch ran — a stack dead 09:15-15:30 but recovered by 18:54 pings it happily). Pings
       # every ~10 min while candles are flowing; the withheld ping is the alarm. Blank = dormant; paste a
       # SEPARATE healthchecks.io/UptimeRobot heartbeat URL to arm, and create a DISTINCT external check
       # expecting a ping every ~10 min within 09:30-15:20 IST (TZ Asia/Kolkata) with a grace window.

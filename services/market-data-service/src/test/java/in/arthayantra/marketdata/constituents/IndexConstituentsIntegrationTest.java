@@ -73,6 +73,19 @@ class IndexConstituentsIntegrationTest extends MarketDataIntegrationTestBase {
   @Test
   @Order(1)
   void twoSyncDatesAccrueTwoImmutableSnapshots() {
+    LocalDate windowFrom = LocalDate.parse("2026-06-10");
+    LocalDate windowTo = LocalDate.parse("2026-06-11");
+
+    // ⚠️ SEED THE CONTAMINANT DELIBERATELY, through the real accrual path. On the shared singleton
+    // IT DB (no per-method cleanup, the #405 rule) a sibling context accrues a snapshot for this
+    // same index at ITS clock's date, and a sibling clock can be in the PAST — this class's window
+    // is not special. Reproducing that here makes the isolation deterministic rather than dependent
+    // on which classes surefire happens to run first. Safe to persist: nothing else in the suite
+    // reads IndexConstituentsRepository#snapshotDates, and the accrual is append-only history, so a
+    // dated row below both sync dates cannot change "latest" or any ?asOf= assertion.
+    MutableClockConfig.NOW.set(Instant.parse("2026-03-02T03:30:00Z"));
+    accrualStep.afterStaging();
+
     MutableClockConfig.NOW.set(Instant.parse("2026-06-10T03:30:00Z"));
     accrualStep.afterStaging();
     accrualStep.afterStaging(); // same date again — append-only no-op
@@ -80,13 +93,15 @@ class IndexConstituentsIntegrationTest extends MarketDataIntegrationTestBase {
     MutableClockConfig.NOW.set(Instant.parse("2026-06-11T03:30:00Z"));
     accrualStep.afterStaging();
 
-    // Shared singleton IT DB (no per-method cleanup, the #405 rule): another IT's context boot can
-    // accrue a TODAY-dated snapshot for the same index, so exact-list equality over ALL dates is
-    // order-dependent. Pin exactness INSIDE this test's seeded window instead — still proves the
-    // same-date re-run was an append-only no-op (exactly two rows, not three).
+    // The filter is a WINDOW, bounded on BOTH sides. It used to bound only the upper edge, which
+    // defended against a sibling's TODAY-dated snapshot and nothing else — so CI saw
+    // [2026-03-02, 2026-06-10, 2026-06-11] and failed on a row this test never wrote. A one-sided
+    // guard against cross-test bleed is half a guard: contamination has no preferred direction.
+    // Inside the window, exactness still proves the same-date re-run was an append-only no-op
+    // (exactly two rows, not three).
     assertThat(repository.snapshotDates("NIFTY 100"))
-        .filteredOn(d -> !d.isAfter(LocalDate.parse("2026-06-11")))
-        .containsExactly(LocalDate.parse("2026-06-10"), LocalDate.parse("2026-06-11"));
+        .filteredOn(d -> !d.isBefore(windowFrom) && !d.isAfter(windowTo))
+        .containsExactly(windowFrom, windowTo);
     List<IndexConstituentsFetcher.Constituent> day1 =
         repository.membership("NIFTY 100", LocalDate.parse("2026-06-10"));
     List<IndexConstituentsFetcher.Constituent> day2 =

@@ -199,6 +199,59 @@ subset is CI-enforced).
 > (`revisit-scalper-budget-inr-2026-08-12`). **H2** (18 live `-pe` strategies, 0 signals since 07-21
 > against 69 non-PE) needs no new data — only someone to read the query it already has.
 
+> **CURRENCY UPDATE 2026-08-20 — the redirect below still stands; this is a dated marker, not a
+> summary.** Deliberately NOT a recap of the intervening period: I observed 2026-08-19/20 directly
+> and would be reconstructing the rest, which is exactly the failure the block below warns about.
+>
+> **Frontier now:** the ledger's **group H** (H1…H36 as of tonight) plus the four owner-held PRs
+> (#1283, #1354, #1368, #1376). Two operating changes a returning reader needs, both owner decisions:
+> **(1) Codex is RATIONED** ($20 tier, 2026-08-15) — a slot is spent only on money/parity/migration/
+> live-engine review, PRE-merge; everything else gets a same-vendor `claude-review` round, and the
+> verdict line must record the loss. First measurement 2026-08-20: **~16 min per round, and a slot
+> buys one ROUND, not one item** (two slots that day closed one item). **(2) The deploy floor moved
+> 15:30 → 16:30 IST** — 15:30 cleared the market close but not the 15:53 post-market routine, which
+> spends ~20 min reading `docker logs`; a 15:59 deploy recreated both services mid-run and survived
+> only on ordering luck.
+>
+> **Shipped + deployed 2026-08-20:** H27 (#1418) moved the swing settle 16:00/16:02 → 18:52/18:53 and
+> pinned the session — **live-verified the same evening: STALE bars 10 → 4 and a real stop fired at
+> 18:52:06, exit price equal to that day's close.** H29 (#1424) resolves BE-series NSE symbols through
+> their `-BE` twin. **Merged, deploys 08-21:** #1427 (CONTEXT_SHIFT phone cap) and #1432 (H35 —
+> day-context had asked for a non-canonical `NIFTY` for the whole life of the feature, persisting 26
+> rows of all-null options scalars under a success log line).
+>
+> ⚠️ **The one thing worth carrying forward is a method note, not a status:** every defect found on
+> 08-20 had been wrong for weeks behind a **success-shaped log line**, and both new ones surfaced
+> while tracing something else. `MarketContextEodJob` HAD a guard for a bad digest, ran nightly, and
+> structurally could not see the failure it was written for. **Ask of every guard: what failure can
+> it NOT see, and does that failure look like success?**
+
+> **CURRENCY UPDATE 2026-08-17 — READ THIS, THEN GO STRAIGHT TO THE LEDGER.** These currency blocks
+> had stopped at 2026-08-02, i.e. **15 days stale** — long enough for a reader to take a false
+> picture from them before reaching the redirect at the top of this section. **The one-hop
+> destination is the `📍 CURRENT STATE` block at the top of
+> `docs/superpowers/plans/2026-07-02-remaining-items.md` §0**: dated, says what is deployed live and
+> what is in flight, and carries an instruction to be updated at every session close. **Do not
+> reconstruct current state from the blocks above — they are an as-built log and they are ALLOWED to
+> age. That is the design, not a defect; the defect is only ever a missing redirect.**
+>
+> ⚠️ **Two claims in the 2026-08-02 block above are now FALSE. Corrected here rather than edited in
+> place, because a log keeps its original wording:** **(1) H2 is ANSWERED — the `-pe` scalpers DO
+> fire.** 26 signals across 4 slugs, first fire **2026-08-11 11:06 IST**, against the zero that block
+> records. #959 moves from UNFALSIFIED to VALIDATED, and the 2026-08-03 *"wait for a bearish 60m
+> regime, do not loosen"* call was right — the gate opened on its own within 8 sessions.
+> **(2) H1's session-liveness heartbeat is ARMED AND PROVEN**, observed pinging live at 18:53:58 IST
+> on 2026-08-17.
+>
+> **Frontier as of 2026-08-17:** the active build program is ledger row **H24** — a 30-site
+> `series='EQ'` sweep, 13 defects, **1 fixed + deployed + live-probed**, 12 planned as PR-2..6 with
+> the migration-bearing unit last. Five items are held for a rationed cross-vendor slot on
+> **2026-08-20**: **#1283 → #1376 → #1354 → H22 → H23**, and the owner ruled all five QUEUE rather
+> than relaxing to same-vendor. ⚠️ **H9 gained its first LIVE MONEY instance** on 2026-08-17 — a real
+> swing `STOP_LOSS` priced **1.32% off the official close** (₹232.70 on 65 shares) and **in the
+> book's favour**, so it OVERSTATES swing P&L: the direction that flatters an E1 reliability verdict
+> rather than alarming it.
+
 **Re-platformed 2026-06-19 to the OpenAlgo + React master plan.**
 `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` §16.1 is now the
 forward-work authority (Phases 0–6). The legacy **Stage A–G** system in the sections below is the

@@ -3,6 +3,17 @@ name: codex-code-review
 description: Iterative cross-vendor Codex review of an uncommitted diff against our invariant checklist, with a persistent thread that converges across rounds
 ---
 
+> # ⚠️ RATIONED — spend a slot only on the tiers that earn it
+> Owner moved to the **$20/month tier** on 2026-08-15. This skill is the **only genuine cross-vendor
+> gate left**, so it is reserved for **money · parity · exit doctrine · migrations · live engine**,
+> and always **PRE-merge** — a slot spent on merged code buys an audit, not a gate. Everything else
+> gets `claude-review` (Opus, fresh thread, distinct lens).
+>
+> Before running: confirm the tier, open the PR with `Cross-vendor review: PENDING (awaiting rationed
+> Codex slot)`, and afterwards **record what the run cost against the monthly allowance** in memory
+> topic `codex-builder-lane` — the budget is currently an assumption, not a measurement. Full rules:
+> `.claude/skills/codex/ROUTING.md`.
+
 # Codex Code Review
 
 Cross-vendor (GPT) review of uncommitted changes via Codex CLI, threaded so multi-round review

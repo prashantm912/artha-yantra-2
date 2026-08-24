@@ -28,8 +28,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /**
- * BEJ-01 (monitor-scheduler isolation): the pure liveness detectors ({@code SubscriberHealthCanary},
- * {@code PartialBucketCanary}, {@code DotHealthCanary} sweeps) run on
+ * BEJ-01 (monitor-scheduler isolation): the pure liveness detectors run on
  * a dedicated {@code monitorTaskScheduler}, isolated from the default single-thread pool that the
  * synchronous swing batch and every EOD job share, so a blocked sibling can never starve detection.
  */
@@ -71,7 +70,8 @@ class MonitorSchedulingConfigTest {
   void productionDetectorsTargetTheMonitorScheduler() throws NoSuchMethodException {
     // PartialBucketCanary is deliberately absent — it left this pool at G9, see
     // thePartialBucketCanaryOwnsItsOwnSchedulerBecauseItDoesExternalIo below.
-    assertBoundToMonitorScheduler(SubscriberHealthCanary.class, "sweep");
+    // SubscriberHealthCanary is deliberately absent — it left this pool in #1453, see
+    // theSubscriberWatchdogOwnsItsOwnPoolBecauseItWritesJdbc below.
     assertBoundToMonitorScheduler(DotHealthCanary.class, "sweep");
     assertBoundToMonitorScheduler(StrategyCoverageWatchdog.class, "sweep");
   }
@@ -160,6 +160,41 @@ class MonitorSchedulingConfigTest {
           assertThat(scheduler).isNotSameAs(context.getBean("evalOutcomeTaskScheduler"));
           assertThat(scheduler).isNotSameAs(context.getBean("maintenanceTaskScheduler"));
           assertThat(scheduler).isNotSameAs(context.getBean("telegramTaskScheduler"));
+        });
+  }
+
+  /**
+   * #1453: the subscriber watchdog writes JDBC from its sweep — {@code SubscriberHealthTelemetry}
+   * has for a long time, and the blind-window register now does too — so it cannot stay on a pool
+   * whose contract is "fast, bounded work" and whose rule is that any detector gaining a blocking
+   * call must leave. A statement timeout was not sufficient: it starts only after connection
+   * acquisition (Hikari's 30 s default here, unset in application.yml) and the telemetry insert is
+   * untimed regardless.
+   */
+  @Test
+  void theSubscriberWatchdogOwnsItsOwnPoolBecauseItWritesJdbc() throws NoSuchMethodException {
+    Scheduled scheduled =
+        SubscriberHealthCanary.class.getDeclaredMethod("sweep").getAnnotation(Scheduled.class);
+    assertThat(scheduled).as("SubscriberHealthCanary.sweep is @Scheduled").isNotNull();
+    assertThat(scheduled.scheduler())
+        .as("a JDBC-writing sweep must not share the fenced detector pool")
+        .isEqualTo("subscriberWatchdogTaskScheduler");
+  }
+
+  /** The bean it names must exist and be distinct from the pools it could regress onto. */
+  @Test
+  void theSubscriberWatchdogSchedulerBeanExistsAndIsIsolated() {
+    runner.run(
+        context -> {
+          ThreadPoolTaskScheduler scheduler =
+              context.getBean("subscriberWatchdogTaskScheduler", ThreadPoolTaskScheduler.class);
+          assertThat(scheduler).isNotNull();
+          assertThat(scheduler)
+              .as("a distinct pool from the fenced detector pool it left")
+              .isNotSameAs(context.getBean("monitorTaskScheduler"));
+          assertThat(scheduler)
+              .as("and from the default scheduling pool")
+              .isNotSameAs(context.getBean("taskScheduler"));
         });
   }
 
@@ -319,6 +354,17 @@ class MonitorSchedulingConfigTest {
           assertThat(scheduler)
               .as("a distinct pool from the fenced monitor detectors")
               .isNotSameAs(context.getBean("monitorTaskScheduler"));
+          // ⚠️ RATCHET (H18, 2026-08-14). Since SwingBatchBootCatchUp dispatches the BOOT sweep onto
+          // this same pool, a CORE size of 1 is what makes a boot landing in the same second as the
+          // 08:35 tick SERIALIZE with it instead of running concurrently. Raising it looks like a
+          // harmless perf change and would silently drop that guarantee back onto the durable claim.
+          //
+          // ⚠️ getCorePoolSize(), NOT getPoolSize(): the latter is the number of threads CURRENTLY
+          // alive, which is 0 until something is submitted — so the obvious spelling asserts 1 == 0
+          // and fails on a correctly configured pool. Measured here, not assumed.
+          assertThat(scheduler.getScheduledThreadPoolExecutor().getCorePoolSize())
+              .as("the boot door and the 08:35 cron share this pool and must not run concurrently")
+              .isEqualTo(1);
         });
   }
 

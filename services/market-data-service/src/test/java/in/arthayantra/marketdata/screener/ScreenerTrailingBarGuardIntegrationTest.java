@@ -143,6 +143,9 @@ class ScreenerTrailingBarGuardIntegrationTest extends MarketDataIntegrationTestB
   private int sessions(String symbol) {
     Integer n =
         jdbc.queryForObject(
+            // ⚠️ Deliberately an INLINE literal, not CashEquityUniverse.SERIES_PREDICATE: a test that
+            // imports the constant it is checking cannot detect a change to that constant. This is an
+            // independent oracle on purpose -- do not "finish" the H24 adoption sweep here.
             "SELECT count(*) FROM nse_eod_bhavcopy WHERE symbol=? AND series IN ('EQ','BE')"
                 + " AND trade_date <= ?::date AND trade_date > (?::date - 420)",
             Integer.class,

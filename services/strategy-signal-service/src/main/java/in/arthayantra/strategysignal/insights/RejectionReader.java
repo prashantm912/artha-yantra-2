@@ -74,7 +74,7 @@ public class RejectionReader {
       near.sort(Comparator.comparing(RejectionScan.NearMiss::closeness));
       return new RejectionScan(near, List.of());
     } catch (RuntimeException e) {
-      log.debug("insight near-miss read unavailable: {}", e.getMessage());
+      log.warn("insight near-miss read FAILED (returning empty): {}", e.getMessage());
       return new RejectionScan(List.of(), List.of());
     }
   }
@@ -147,7 +147,7 @@ public class RejectionReader {
       shares.sort(Comparator.comparing((RejectionScan.RailShare r) -> r.todayShare()).reversed());
       return new RejectionScan(List.of(), shares);
     } catch (RuntimeException e) {
-      log.debug("insight rail-trend read unavailable: {}", e.getMessage());
+      log.warn("insight rail-trend read FAILED (returning empty): {}", e.getMessage());
       return new RejectionScan(List.of(), List.of());
     }
   }

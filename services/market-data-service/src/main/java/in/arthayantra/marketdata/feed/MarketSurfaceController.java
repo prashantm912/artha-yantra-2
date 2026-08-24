@@ -7,6 +7,7 @@ import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.kite.GlobalQuoteSource;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
+import in.arthayantra.marketdata.kite.VixQuoteCache;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -34,7 +35,7 @@ public class MarketSurfaceController {
 
   private final LastTickStore lastTickStore;
   private final MarketCalendar calendar;
-  private final QuoteGateway quoteGateway;
+  private final VixQuoteCache vixQuotes;
   private final org.springframework.beans.factory.ObjectProvider<GlobalQuoteSource> dowSource;
   private final Clock clock;
 
@@ -42,12 +43,12 @@ public class MarketSurfaceController {
   public MarketSurfaceController(
       LastTickStore lastTickStore,
       MarketCalendar calendar,
-      QuoteGateway quoteGateway,
+      VixQuoteCache vixQuotes,
       org.springframework.beans.factory.ObjectProvider<GlobalQuoteSource> dowSource,
       Clock clock) {
     this.lastTickStore = lastTickStore;
     this.calendar = calendar;
-    this.quoteGateway = quoteGateway;
+    this.vixQuotes = vixQuotes;
     this.dowSource = dowSource;
     this.clock = clock;
   }
@@ -96,10 +97,12 @@ public class MarketSurfaceController {
   /** GET /vix: the INDIA VIX quote (the pinned index); 422 DATA_GAP when no quote (off-hours / mock). */
   @GetMapping("/vix")
   public VixQuote vix() {
-    QuoteGateway.Quote q = quoteGateway.quotes(List.of(VIX_KEY)).get(VIX_KEY);
-    if (q == null || q.lastPrice() == null) {
-      throw new ApiException(422, ErrorCodes.DATA_GAP, "no INDIA VIX quote");
-    }
+    // H31: served through the short-TTL cache, not a direct gateway call -- this endpoint used
+    // to spend ~1.5 s queueing behind the 1/s kite-quote limiter for a value that barely moves.
+    QuoteGateway.Quote q =
+        vixQuotes
+            .quote(VIX_KEY)
+            .orElseThrow(() -> new ApiException(422, ErrorCodes.DATA_GAP, "no INDIA VIX quote"));
     QuoteGateway.Quote.Ohlc o = q.ohlc();
     BigDecimal prevClose = o == null ? null : o.close();
     BigDecimal change = prevClose == null ? null : q.lastPrice().subtract(prevClose);

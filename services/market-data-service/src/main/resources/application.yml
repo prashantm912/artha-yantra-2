@@ -95,6 +95,28 @@ artha:
     # env name, so the ${...} placeholder MUST byte-match the compose passthrough
     # ARTHA_SNAPSHOT_RETENTION_DAYS (#653) for a .env override to reach the container.
     snapshot-retention-days: ${ARTHA_SNAPSHOT_RETENTION_DAYS:365}
+    # H31: TTL (seconds) for the INDIA VIX spot quote. LiveQuoteGateway routes every call
+    # through the kite-quote limiter, which is 1/s for the whole service, so a VIX read spends
+    # its time QUEUEING, not talking to Kite -- measured 2026-08-21: GET /market/vix 1.530 s
+    # mean over 31 calls, and the same inline call inside day-context put it at 1.920 s against
+    # the insight sweep's 2000 ms read timeout (6 of 8 responses discarded that morning).
+    # 0 disables the cache. Key MUST byte-match the compose passthrough
+    # ARTHA_VIX_QUOTE_CACHE_TTL_SECONDS (#653) or a .env override never reaches the container.
+    vix-quote-cache-ttl-seconds: ${ARTHA_VIX_QUOTE_CACHE_TTL_SECONDS:30}
+  # I1 day-context: the index whose options digest is bundled into GET /context/day-context and
+  # persisted as the market_context_days scalar baselines.
+  # ⚠️ MUST be a CANONICAL cash-index tradingsymbol. This defaulted to a bare `NIFTY` -- not a
+  # canonical key -- for the whole life of the feature, so OptionsDigestService answered "no option
+  # expiries for NIFTY", DayContextService fail-softed it into a note, and market_context_days
+  # persisted 26 rows spanning 2026-07-13..2026-08-19 with every options scalar NULL while the EOD
+  # job logged success on each of those nights. (NOT 26 CONSECUTIVE days -- the range holds 28;
+  # 2026-07-17 and 2026-08-12 have no row and no job run at all -- a SECOND hole the tidier phrasing
+  # concealed, traced 2026-08-20 to the pre-#1358 evening-chain schedule, which sat outside the
+  # 08:00-19:00 operating window and was already fixed on 08-17.)
+  # DayContextService now normalises through UnderlyingRef.canonical(), so an alias
+  # written here is repaired rather than silently swallowed -- but write the canonical name.
+  context:
+    options-name: ${ARTHA_CONTEXT_OPTIONS_NAME:NIFTY 50}
   # OpenAlgo broker-swap spine (plan §3/§4). Per-capability source selector — DEFAULT kite, so
   # Phase 0 changes NO routing (the live OpenAlgo gateways bind only when a capability is flipped to
   # openalgo). The production cutover + OI-coverage canary is Phase 1 (§4).
@@ -284,6 +306,9 @@ artha:
     base-url: https://www.nseindia.com
     archives-url: https://nsearchives.nseindia.com
     eod-cron: "${ARTHA_NSE_EOD_CRON:0 46 18 * * MON-FRI}"
+    # Intra-day retry for sources that FAILED earlier today (ledger: 2026-08-24 outage blinded
+    # the FII rail for a whole session). No-op for any source already SUCCESS today.
+    fii-retry-cron: "${ARTHA_NSE_FII_RETRY_CRON:0 50 9,11,14 * * MON-FRI}"
     bhavcopy:
       # NSE series projected into candles as 1d source=BHAVCOPY (cash equities). EQ = rolling
       # settlement, BE = trade-to-trade. Non-equity series (GS gilts, etc.) stay raw-only.

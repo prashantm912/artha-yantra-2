@@ -6,6 +6,7 @@ import in.arthayantra.marketdata.canary.DataHealthCanary;
 import in.arthayantra.marketdata.candles.CandlesConfig;
 import in.arthayantra.marketdata.feed.FeedWatchdog;
 import in.arthayantra.marketdata.kite.session.SessionHealthProbe;
+import in.arthayantra.marketdata.nse.NseEodScheduler;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -130,6 +131,78 @@ class MonitorSchedulingConfigTest {
         });
   }
 
+  /**
+   * The intra-day NSE retry owns its own pool. Found by the post-merge review of #1451: it fires at
+   * 09:50/11:50/14:50 IST, INSIDE market hours, and its worst case is long -- LiveParticipantOiFetcher
+   * walks back six days sequentially through an 8 s connect + 12 s read budget, so a blackholed
+   * network (connections that HANG rather than refuse -- the 2026-08-19/20 shape) holds the thread
+   * ~140 s. On the default pool that stalls all ~32 scheduled methods, including
+   * OptionsSnapshotService's ~70 s live OI capture every 2 minutes.
+   *
+   * <p>⚠️ Moving the cron minute was the cheaper alternative and is NOT what was done: it would dodge
+   * the two jobs that happen to share 09:50, but the hold stalls the pool from any minute at all.
+   */
+  @Test
+  void theNseRetryOwnsItsOwnPoolAndNeverTheDefaultOne() throws NoSuchMethodException {
+    Scheduled scheduled =
+        NseEodScheduler.class.getDeclaredMethod("retryFailedSources").getAnnotation(Scheduled.class);
+    assertThat(scheduled).as("NseEodScheduler.retryFailedSources is @Scheduled").isNotNull();
+    assertThat(scheduled.scheduler())
+        .as("an in-session external-HTTP job must never hold the shared single thread")
+        .isEqualTo("nseRetryTaskScheduler");
+  }
+
+  /** The bean it names must exist, on its own single daemon thread, distinct from every sibling. */
+  @Test
+  void theNseRetrySchedulerBeanExistsAndIsIsolated() {
+    runner.run(
+        context -> {
+          ThreadPoolTaskScheduler scheduler =
+              context.getBean("nseRetryTaskScheduler", ThreadPoolTaskScheduler.class);
+          assertThat(scheduler).isNotNull();
+          assertThat(scheduler)
+              .as("a distinct pool from the monitor detectors")
+              .isNotSameAs(context.getBean("monitorTaskScheduler"));
+          assertThat(scheduler)
+              .as("a distinct pool from the default scheduling pool")
+              .isNotSameAs(context.getBean("taskScheduler"));
+          assertThat(scheduler)
+              .as("and from the bar-flush pool")
+              .isNotSameAs(context.getBean("barFlushTaskScheduler"));
+        });
+  }
+
+  /**
+   * The guarantee that actually matters, stated the way the S1 test states it: the isolation must
+   * hold in BOTH directions. Here the retry is the SLOW job, so this proves the default pool keeps
+   * running while the retry's own thread is the wedged one -- the inverse of the bar-flush case.
+   */
+  @Test
+  void theDefaultPoolKeepsRunningWhileTheNseRetryPoolIsBlocked() {
+    runner.run(
+        context -> {
+          NseRetryBlockingJob blocker = context.getBean(NseRetryBlockingJob.class);
+          DefaultPoolProbeJob probe = context.getBean(DefaultPoolProbeJob.class);
+          // BlockingDefaultJob wedges the default pool in EVERY test in this class, so let it go
+          // first -- otherwise this test would prove only that a blocked pool stays blocked.
+          context.getBean(BlockingDefaultJob.class).release.countDown();
+          try {
+            assertThat(blocker.entered.await(3, TimeUnit.SECONDS))
+                .as("the retry-pool job started and is holding its only thread")
+                .isTrue();
+            assertThat(blocker.threadName)
+                .as("it ran on the dedicated retry pool")
+                .startsWith("nse-retry-sched-");
+            assertThat(probe.fired.await(3, TimeUnit.SECONDS))
+                .as("a default-pool job still fired while the retry pool was wedged")
+                .isTrue();
+            assertThat(probe.threadName).startsWith("scheduling-");
+          } finally {
+            blocker.release.countDown();
+          }
+        });
+  }
+
   private static void assertBoundToMonitorScheduler(Class<?> type, String method)
       throws NoSuchMethodException {
     Scheduled scheduled = type.getDeclaredMethod(method).getAnnotation(Scheduled.class);
@@ -156,6 +229,42 @@ class MonitorSchedulingConfigTest {
     @Bean
     BarFlushProbeJob barFlushProbeJob() {
       return new BarFlushProbeJob();
+    }
+
+    @Bean
+    NseRetryBlockingJob nseRetryBlockingJob() {
+      return new NseRetryBlockingJob();
+    }
+
+    @Bean
+    DefaultPoolProbeJob defaultPoolProbeJob() {
+      return new DefaultPoolProbeJob();
+    }
+  }
+
+  /** Stands in for a hung NSE fetch: occupies the retry pool's only thread. */
+  static class NseRetryBlockingJob {
+    final CountDownLatch entered = new CountDownLatch(1);
+    final CountDownLatch release = new CountDownLatch(1);
+    volatile String threadName;
+
+    @Scheduled(fixedDelay = 60_000, initialDelay = 0, scheduler = "nseRetryTaskScheduler")
+    public void run() throws InterruptedException {
+      threadName = Thread.currentThread().getName();
+      entered.countDown();
+      release.await(10, TimeUnit.SECONDS);
+    }
+  }
+
+  /** Fires on the DEFAULT pool - it must keep firing while the retry pool is wedged. */
+  static class DefaultPoolProbeJob {
+    final CountDownLatch fired = new CountDownLatch(1);
+    volatile String threadName;
+
+    @Scheduled(fixedDelay = 200, initialDelay = 50)
+    public void run() {
+      threadName = Thread.currentThread().getName();
+      fired.countDown();
     }
   }
 

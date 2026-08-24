@@ -3,6 +3,12 @@ name: codex-build
 description: Delegate a planned build to Codex CLI in an isolated worktree, with our receipt contract baked into the prompt and a persistent thread for multi-phase plans
 ---
 
+> # ⚠️ DO NOT SPEND A SLOT ON BUILDING (owner, 2026-08-15)
+> Under the **$20/month tier** the scarce Codex budget is reserved for **review**, where a second
+> vendor is irreplaceable. Building is not — an Opus subagent via `delegated-ship` builds to the same
+> receipt contract at no Codex cost. **Route builds there.** Full rules:
+> `.claude/skills/codex/ROUTING.md`.
+
 # Codex Build
 
 Delegate implementation of a plan/brief to Codex CLI — the skill-based replacement for hand-typing a

@@ -76,7 +76,7 @@ describe('DataQualityPage', () => {
 
     expect(screen.getByRole('heading', { name: 'Data Quality' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Chain capture' })).toBeInTheDocument();
-    for (const scope of ['Intraday 1m', 'Bhavcopy EQ']) {
+    for (const scope of ['Intraday 1m', 'Bhavcopy cash (EQ+BE)']) {
       expect(screen.getByRole('heading', { name: scope })).toBeInTheDocument();
     }
     const intradayTable = screen.getByRole('table', { name: 'Intraday 1m completeness' });
@@ -84,7 +84,7 @@ describe('DataQualityPage', () => {
     expect(within(failedRow).getByText('96.26%')).toBeInTheDocument();
     expect(within(failedRow).getByText('FAIL')).toBeInTheDocument();
     expect(within(failedRow).getByText('14 one-minute bars missing')).toBeInTheDocument();
-    expect(screen.getByText('180/187 EQ symbols')).toBeInTheDocument();
+    expect(screen.getByText('180/187 cash symbols')).toBeInTheDocument();
     expect(screen.queryByText('__SUMMARY__')).not.toBeInTheDocument();
   }, 15_000);
 

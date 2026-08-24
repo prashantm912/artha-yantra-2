@@ -15,6 +15,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -46,6 +48,16 @@ class MinerviniSwingSchedulerTest {
 
   // 2026-07-20T10:30Z is 16:00 IST — the settle's own wall clock.
   private final Clock settleTime = Clock.fixed(Instant.parse("2026-07-20T10:30:00Z"), ZoneOffset.UTC);
+
+  /**
+   * ⚠️ Required, not decoration. The recorder is a MOCK, so an unstubbed {@code Optional} return
+   * defaults to EMPTY — which is the holiday branch. Without this every test in the file would
+   * exercise the skip path while appearing to test the settle.
+   */
+  @BeforeEach
+  void theClockIsOnATradingDay() {
+    when(recorder.scheduledSettleSession()).thenReturn(Optional.of(SESSION));
+  }
 
   private void run() {
     new MinerviniSwingScheduler(recorder, doctrine, intents, settleTime).run();
@@ -110,4 +122,26 @@ class MinerviniSwingSchedulerTest {
 
     verify(recorder).runScheduled(doctrine, false);
   }
+
+  /**
+   * A weekday NSE holiday must leave NO trace: no intent row, no run, no marker.
+   *
+   * <p>⚠️ The guard sits BEFORE the intent write, and that ordering is the whole point. An intent
+   * row for a day the batch never marks is precisely the shape {@code SwingBatchCanary} pages
+   * "DID NOT RUN" for — and its own comment notes that a past session can never acquire a run
+   * marker, so the page repeats to its ceiling about a session that never traded. Found in
+   * cross-vendor review of this PR (2026-08-20); the first cut resolved the holiday back to the
+   * previous trading day instead, which additionally overwrote that session's real counters.
+   */
+  @Test
+  void aNonTradingDayLeavesNoIntentAndRunsNothing() {
+    when(recorder.scheduledSettleSession()).thenReturn(Optional.empty());
+
+    run();
+
+    verify(intents, never()).recordSettled(any(), any(), anyBoolean());
+    verify(recorder, never()).runScheduled(any(), anyBoolean());
+    verify(recorder, never()).runScheduled(any());
+  }
+
 }

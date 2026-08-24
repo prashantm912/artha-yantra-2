@@ -145,7 +145,15 @@ public record InsightProperties(
       @DefaultValue("45") int shiftCooldownMinutes,
       @DefaultValue("60") int structureCooldownMinutes) {
 
-    private static final List<String> DEFAULT_UNDERLYINGS = List.of("NIFTY", "SENSEX");
+    /**
+     * ⚠️ {@code NIFTY 50}, not {@code NIFTY} (chip task_ffefe53e). The canonical instrument key is
+     * the one {@code marketdata.instruments} is keyed by, and the options-digest endpoint 404s on
+     * anything else — measured live 2026-08-19: {@code name=NIFTY} → 404, {@code name=NIFTY 50} →
+     * 200. Because {@link ContextClient} fail-softs a 404 to an empty Optional, the bare name was a
+     * SILENT miss: {@code strategy.insights} holds four underlying-scoped CONTEXT_SHIFT rows in the
+     * entire history of the feature and every one is {@code BSE:SENSEX}.
+     */
+    private static final List<String> DEFAULT_UNDERLYINGS = List.of("NIFTY 50", "SENSEX");
 
     public Context {
       underlyings = underlyings == null || underlyings.isEmpty() ? DEFAULT_UNDERLYINGS : underlyings;
@@ -221,22 +229,52 @@ public record InsightProperties(
     }
   }
 
-  /** I4 delivery flags and the common severity floor for phone channels. */
+  /**
+   * I4 delivery flags, the common severity floor for phone channels, and the CONTEXT_SHIFT phone
+   * budget.
+   *
+   * <p>⚠️ <b>Why {@code contextShiftDailyPhoneCap} exists, and why it is armed BEFORE it is needed.</b>
+   * CONTEXT_SHIFT candidates are deduped per {@code (scope, metric)} on a 45-minute cooldown
+   * ({@code shiftCooldownMinutes}) and the sweep runs every 15 minutes across the session, so ONE key
+   * can legitimately fire ~9 times a day (the initial crossing plus ~8 re-fires: a key first
+   * crossing at 09:15 fires 09:15/10:00/.../15:15). There are nine keys today (four option metrics x
+   * two underlyings, plus {@code market:GAP_OPEN}), which bounds the uncapped worst case near
+   * <b>81</b> phone notifications in a session, and nearer 90 if the 09:00 sweep can fire.
+   *
+   * <p>None of that is visible right now, and that is the trap: every options digest currently reads
+   * {@code dataTrust: DEGRADED} ("ATM IV rank over 38 sessions (< 60-session floor)", measured live
+   * 2026-08-20), and {@code ContextShiftGenerator} maps DEGRADED to {@code Severity.INFO}, which sits
+   * below the NOTICE phone floor. So the option metrics have never once reached a phone. <b>At 60 IV
+   * sessions the digest flips to OK by itself, the severity becomes NOTICE, and the full volume
+   * arrives with no config change and no deploy</b> — roughly 22 trading sessions out from
+   * 2026-08-20. A cap decided after that fires is a cap decided during a notification flood.
+   *
+   * <p>The cap bounds PHONE delivery only. The insight row is still written and WS is untouched, so
+   * nothing disappears from the record or the UI — the cap decides what interrupts the owner, not
+   * what is known. {@code 0} disables it.
+   *
+   * <p>⚠️ Known, deliberate weakness: this is a first-N budget, so a genuine 14:30 regime shift can
+   * be dropped after a noisy morning has spent it. Bounding total phone volume is the thing that was
+   * asked for and first-N is the only shape that actually bounds it; ranking by severity would need
+   * a score CONTEXT_SHIFT does not currently carry. Raise the number rather than assume the shape.
+   */
   public record Delivery(
       @DefaultValue("false") boolean ws,
       @DefaultValue("false") boolean ntfyEnabled,
       @DefaultValue("false") boolean telegramEnabled,
-      @DefaultValue("NOTICE") Severity severityFloor) {
+      @DefaultValue("NOTICE") Severity severityFloor,
+      @DefaultValue("6") int contextShiftDailyPhoneCap) {
 
     public Delivery {
       severityFloor =
           severityFloor == null || severityFloor.compareTo(Severity.NOTICE) < 0
               ? Severity.NOTICE
               : severityFloor;
+      contextShiftDailyPhoneCap = Math.max(0, contextShiftDailyPhoneCap);
     }
 
     static Delivery defaults() {
-      return new Delivery(false, false, false, Severity.NOTICE);
+      return new Delivery(false, false, false, Severity.NOTICE, 6);
     }
   }
 }

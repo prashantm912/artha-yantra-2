@@ -290,6 +290,18 @@ Run in order; each answers one question. Canned SQL in §6.
     the 460,005 opening bucket, 11.9% of the 141,245 next one), so any pct that quiets the thick
     half leaves the thin half WARNing with no partner left to corroborate it — manufacturing the
     unpaired shape instead of removing it. Pinned by test; leave it at 0.
+    ⚠️ **AMENDED 2026-08-19 — a THIRD benign-adjacent class: RECONNECT INFLATION.** The boot-fresh
+    opening-bucket class has a mid-session sibling: after a ticker outage + reconnect, the tick-agg
+    baseline reset attributes the outage-gap's cumulative traded volume to the reconnect minute, so
+    the canary fires ONE unpaired WARN whose magnitude ≈ the volume traded during the gap. First
+    observed 2026-08-19: reconnect 13:27:51 IST after a ~25-min Kite outage → WARN on the 13:27
+    bucket, in-memory 1m sum 70,590 vs broker 3m bar 7,085 (shortfall −63,505, ~10×). Two
+    discriminators: (a) a `kite ticker connected` / feed-watchdog restart line within the WARN's
+    bucket, and (b) the DB 1m bars for the bucket sum EXACTLY to the canary's 3m value (the broker
+    side is correct — the inflation lives only in the in-memory 1m mirror, so the rails, which read
+    the broker-corrected 3m rollup, are untouched). An unpaired mid-session WARN with NO adjacent
+    reconnect remains the alarming shape (the same session's 14:54 −910 and 15:09 −8,970 are
+    unexplained and on watch as NEW-6).
 18. **Identify the SIGNAL CONTRACT from the data before running any ground-truth query** (added
     2026-07-27) — the live scalper signal series is the **dated front future**, and
     `FuturesUniverseResolver` rolls it at the ~08:40 IST re-resolve near monthly expiry. On 2026-07-27
@@ -488,6 +500,17 @@ Run in order; each answers one question. Canned SQL in §6.
     falsifier: 07-23 (BSE weekly day-of) saturated with 390. Read the fails as *the front weekly
     sitting outside the delta/premium band when freshly rolled or at expiry*, and expect them on
     the cluster days, not only the expiry date itself.
+    ⚠️ **AMENDED 2026-08-14 — the post-expiry-Friday third of the cluster shape is now 3-of-4.**
+    The fourth post-BSE-expiry Friday came in CLEAN: **14 `strike-pick` fails (7 SENSEX slugs)**
+    against 550 (07-24), 374 (07-31) and 350 (08-07), while the same session's SENSEX picks
+    resolved and funded (~₹767 premium legs). Two mechanism checks before crediting anything
+    else: the picker's premium band is the STATIC S24 table (`ScalperConfig` — SENSEX 300–800
+    under both tag states) and `budget_inr` never reaches `StrikePicker`, so #1075 (₹15k→₹25k,
+    first live this day) CANNOT explain it — the budget bounds LOTS, the band bounds PREMIUM.
+    The fresh 08-20 weekly simply priced its delta-band strikes ~700–775, inside the band, where
+    the three prior post-roll Fridays priced outside it. Read the fails as *whether the fresh
+    front weekly's delta-band strikes price inside the static premium band* — a chain-pricing
+    regime fact that the calendar only correlates with, not a calendar rule.
 28. **A dot at 0% (or 100%) on a LIVE, MOVING operand is a FOURTH state — "never crosses" — that neither
     the alive/dead nor the frozen probe can see; check the operand's own min/max against the dot's
     threshold before classifying** (added 2026-07-30) — `breadth` (w **1.0**, the canary's only required
@@ -781,7 +804,53 @@ Run in order; each answers one question. Canned SQL in §6.
     docker logs ay-strategy-signal-service --since <open-UTC> 2>&1 \
       | grep -E "risk cap .* tripped|ENTRY suppressed by scalper risk gate" | head -30
     ```
-37. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+37. **Log-dependent checks DIE with the container — inventory the DB fallbacks before reading a
+    recreated stack, and snapshot logs BEFORE any post-close recreate** (added 2026-08-13) — a
+    ROUTINE post-close deploy at 15:44 IST (14 minutes after close, before the EOD forensics run)
+    recreated both strategy-signal and market-data and permanently destroyed every log-derived
+    check for that session. The log-dependent set, with its DB substitute where one exists:
+    | check | log form | DB fallback |
+    |---|---|---|
+    | §3.10 boot line | `loaded N published` | `strategy.engine_reloads` (loaded/unresolved/load_errors — the honest signal `unresolved==0` survives) |
+    | §3.18 contract | `NFO:<contract>` rail lines | `strategy.signals.tradingsymbol` on any fired day; the §3.18 range test otherwise |
+    | §3.17 canary WARNs/straddles | `canary:`/`shortfall` grep | **NONE — unknowable for that session; report it as such, never as "0 WARNs"** |
+    | §3.34 heat-grep | `heat call failed|heat unassessable` | `paper_positions.margin_snapshot`/`margin_pct` populated on the funded rows = weak evaluability proxy (unpriced-path column semantics unverified) |
+    | §3.36 suppression lines | `ENTRY suppressed by scalper risk gate` | **NONE — the legs are unreconstructable; only the fired-vs-emitted COUNT survives** (`signal_eval_outcomes` vs `signals`) |
+    Process rule (proposal NEW-4, 2026-08-13): snapshot `docker logs` of both services to a file
+    BEFORE any post-close recreate — the standing incident rule (memory `live-mode-findings`)
+    extended to routine deploys — or hold the deploy until after ~19:00 when the post-market run
+    has grepped them. A findings file written after a log-loss must carry the caveat prominently:
+    absence of log evidence is not evidence of a quiet session.
+38. **The engine-reload path runs ON the signal-eval thread and blocks on market-data HTTP — a
+    market-data deploy or outage starves evaluation, and the subscriber watchdog's `eval-stall`
+    ERROR is the detector** (added 2026-08-17, first live measurement) — `SignalEngine.reload`
+    (reached from `drainReloadOnly` on the `signal-eval` thread — deliberate, so config swaps land
+    at bar boundaries) calls `FuturesUniverseResolver.resolve` → a synchronous RestClient call to
+    market-data. On 2026-08-17, three consecutive reloads each took ~70–80 s (normally sub-second
+    "unchanged") in exactly the window market-data was being recreated for a post-close deploy
+    (`engine_reloads` 15:26:58 / 15:28:16 / 15:29:23 IST vs the new container's `StartedAt`
+    15:36:22); the watchdog fired `eval-stall — bars arriving but not evaluated for 180s (receipt
+    19s old)` at 15:28:20 **with a thread-stack capture showing the WAITING HTTP frame**, and a
+    clean sub-second reload followed at 15:37:15 once market-data was healthy. Zero trading impact
+    (post-close; every scalper window shut by 15:21) — but the same sequence mid-session is an
+    evaluation outage for the deploy's duration, which is the measured mechanism behind the
+    standing "no mid-session deploys" proposal. Standing check on any session that overlaps a
+    deploy or a market-data restart:
+    ```sql
+    -- eval-stall forensics: a row here is strong FAIL evidence (absence proves nothing, §4.3)
+    SELECT occurred_at AT TIME ZONE 'Asia/Kolkata', kind, left(detail,140)
+    FROM strategy.subscriber_health_events WHERE occurred_at >= :d0 ORDER BY 1;
+    -- reload cadence: consecutive rows spaced ~60–90 s apart (instead of one-off) fingerprint a
+    -- slow resolve; compare against `docker inspect <mds> --format '{{.State.StartedAt}}'` (UTC)
+    SELECT reload_at AT TIME ZONE 'Asia/Kolkata', installed, loaded, unresolved, load_errors
+    FROM strategy.engine_reloads WHERE reload_at >= :d0 ORDER BY 1;
+    ```
+    The watchdog's ERROR log line carries the `signal-eval thread stack` — read it before
+    theorising; on 08-17 it named `FuturesUniverseResolver.resolve:102` directly. Note the boot
+    variant of the same dependency: a strategy-signal boot while market-data is unready installs
+    `0 loaded / 38 unresolved` and self-heals on a later reload (08-14: ~90 s; 08-17: ~10 min) —
+    judge on `unresolved == 0` reached before the open, and watch that transient's growth.
+39. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

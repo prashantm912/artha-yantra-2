@@ -1,0 +1,38 @@
+-- H24 PR-6. equity_breadth_daily is a MATERIALIZED fold over nse_eod_bhavcopy, and every row in it
+-- was computed with a `series = 'EQ'` population. PR-6 widens that fold to the EQ+BE cash universe,
+-- so the stored rows are now wrong -- not stale by a day, but computed over the wrong universe.
+--
+-- Truncating is what makes the series HOMOGENEOUS. Leaving the rows and letting the incremental job
+-- correct forward would produce a chart with a silent discontinuity at the deploy date: EQ-only to
+-- the left, EQ+BE to the right, no marker, and the jump would read as a market event rather than a
+-- units change. Measured on live 2026-08-18: the widening moves a session's total from 2,624 to
+-- 2,853 (+8.7%), which is exactly the size of step that looks like news.
+--
+-- EquityBreadthEodJob's boot pass refills it: with the table empty, latestDate() is null and the job
+-- backfills `artha.breadth.backfill-days` of history in one SMA-warmed scan (compute() derives its
+-- own warmup window from `from`, so the SMA-50/200 counts are correct from the first output day).
+--
+-- ⚠️ DO NOT DEPLOY THIS WITHOUT THE backfill-days RAISE IN THE SAME PR. That config was 180 while
+-- the table already spanned 217 days, so this TRUNCATE on its own SILENTLY DROPS ~37 days of
+-- history. EquityBreadthEodJob:54 raises the default to 240 here. The @Value default IS the
+-- deployed value: deploy/docker-compose.yml:420 passes through ARTHA_BREADTH_MATERIALIZE_CRON and
+-- nothing else under that prefix, and `docker inspect ay-market-data-service` confirms
+-- ARTHA_BREADTH_BACKFILL_DAYS is absent from the running container. Raising the default is
+-- therefore the whole of the fix -- but if a passthrough for the knob is ever added this comment
+-- goes stale, and the deployed value must be re-read rather than assumed from the source.
+--
+-- ⚠️ THE PAIRING HAS AN EXPIRY, AND IT IS 23 DAYS FROM WRITING. The cold-start floor is
+-- `watermark - 240` computed at REFILL time, while the table's own floor (2026-01-12) is fixed.
+-- 2026-08-17 - 240d = 2025-12-20, which clears it by 23 days. Apply this on or after ~2026-09-09
+-- and the TRUNCATE silently shortens the series again, with a shorter chart as the only tell.
+-- If this has not been applied by then, RE-MEASURE the span and re-derive the number; do not
+-- trust 240. (Raising it far higher is not free either: the fold can only emit SMA-200 counts
+-- where 200 sessions of history exist, so a much deeper floor just adds leading days with
+-- sma200_universe = 0.)
+--
+-- (This file briefly rode PR-5 by accident and was pulled back out before that PR merged. Had it
+-- landed there, the migration would have run WITHOUT the raise above -- which is the exact loss
+-- this comment exists to prevent.)
+--
+-- Plain table, not a hypertable (checked), so TRUNCATE needs no Timescale-specific handling.
+TRUNCATE TABLE equity_breadth_daily;

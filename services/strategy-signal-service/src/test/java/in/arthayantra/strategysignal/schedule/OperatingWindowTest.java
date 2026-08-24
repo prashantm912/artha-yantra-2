@@ -56,6 +56,15 @@ class OperatingWindowTest {
     JOBS.put("artha.upstox.canary-cron", MD + "upstox/canary/UpstoxContractCanary.java");
     JOBS.put("artha.bhavcopy.eod-cron", MD + "bhavcopy/BhavcopyBackfillService.java");
     JOBS.put("artha.nse.eod-cron", MD + "nse/NseEodScheduler.java");
+    // Intra-day retry for a FAILED NSE pull (2026-08-24). Three firings a day, so the collision
+    // check below expands it to 09:50/11:50/14:50. ⚠️ "Free" there means free of the jobs in THIS
+    // map, which is NOT the same as free: the review of #1451 found 09:50 already shared with
+    // OptionsSnapshotService (0 */2) and InstrumentSyncScheduler (:05,:20,:35,:50 at 9-10), neither
+    // catalogued — and the latter's cron is hardcoded, so a property-keyed map CANNOT hold it. The
+    // real containment is that the retry now owns nseRetryTaskScheduler, not that the minute is
+    // quiet. Registering it here is still right; believing the collision check proves more than the
+    // catalogue covers is what this comment used to do.
+    JOBS.put("artha.nse.fii-retry-cron", MD + "nse/NseEodScheduler.java");
     JOBS.put("artha.minervini.cron", MD + "screener/minervini/MinerviniScheduler.java");
     JOBS.put("artha.manas-arora.cron", MD + "screener/manas/ManasScheduler.java");
     JOBS.put("artha.context.eod-cron", MD + "context/MarketContextEodJob.java");
@@ -64,6 +73,14 @@ class OperatingWindowTest {
     JOBS.put("artha.bhavcopy-close.cron", MD + "canary/BhavcopyCloseCanary.java");
     JOBS.put(
         "artha.minervini.buyable-alerts.cron", MD + "screener/minervini/MinerviniBuyableProducer.java");
+    // The two swing SETTLES. Catalogued 2026-08-19 with ledger H27, which is also the reason they
+    // moved out of 16:00/16:02: they were the only evening jobs this map had never named, so the
+    // collision check could not see them and their hour was never asserted against the tail they
+    // now sit in. Ordering that matters: AFTER artha.bhavcopy.eod-cron (18:45), which writes the
+    // session bar they price off, and BEFORE artha.heartbeat.swing-cron (18:54), which reports
+    // whether they ran.
+    JOBS.put("artha.minervini.swing.cron", SS + "minervini/MinerviniSwingScheduler.java");
+    JOBS.put("artha.manas-arora.swing.cron", SS + "manas/ManasAroraSwingScheduler.java");
     JOBS.put("artha.heartbeat.swing-cron", SS + "signals/SwingBatchHeartbeat.java");
     JOBS.put("artha.graduation.promotion-cron", SS + "paper/GraduationPromotionScheduler.java");
     // ⚠️ No compose passthrough — application.yml only. The reason this test reads annotations.
@@ -75,7 +92,7 @@ class OperatingWindowTest {
     JOBS.put("artha.paper.past-expiry-recon.cron", SS + "paper/PaperScheduler.java");
   }
 
-  private static final int EXPECTED_JOB_COUNT = 16;
+  private static final int EXPECTED_JOB_COUNT = 19;
 
   @Test
   @DisplayName("the catalogue is not silently shrunk")
@@ -206,6 +223,51 @@ class OperatingWindowTest {
         .as("...and both must be triggered before the 09:15 open — whether they FINISH before it is"
             + " not something a cron minute can promise, and nothing here asserts that")
         .isLessThan(9 * 60 + 15);
+  }
+
+  @Test
+  @DisplayName("each swing settle is triggered after the data it prices off, and before the heartbeat")
+  void theSwingSettlesRunAfterTheBarTheyEvaluateAgainst() throws IOException {
+    // ⚠️ THIS IS THE ONLY TEST THAT PINS THE HOUR, and it exists because nothing else did.
+    // CronPassthroughParityTest proves code and compose AGREE; the window test proves the settle is
+    // inside 08:00-19:00; the collision test proves no two jobs share a minute. Restoring 16:00/16:02
+    // in BOTH copies satisfies all three — which is exactly the H27 defect, and it would have shipped
+    // back green. Cross-vendor review of this PR, 2026-08-20.
+    //
+    // The invariant is a DEPENDENCY, not a preference: most cash equities have no intraday 1d bar at
+    // all, so the session bar these stops are evaluated against is written by the 18:45 bhavcopy EOD
+    // ingest. A settle triggered before it prices every held stop off the PREVIOUS session's close.
+    //
+    // ⚠️ Same caveat as the reconciler ordering test above: these are CRON MINUTES, so this shows
+    // the intended order of TRIGGERS. That the 18:45 ingest has FINISHED by 18:52 is not something a
+    // cron minute can promise, and nothing here asserts it. What the pin buys is that a late or
+    // failed ingest becomes a counted exitSkipped rather than a silent stale-price exit.
+    int bhavcopy = onlyFiring("artha.bhavcopy.eod-cron", MD + "bhavcopy/BhavcopyBackfillService.java");
+    int minerviniScreen = onlyFiring("artha.minervini.cron", MD + "screener/minervini/MinerviniScheduler.java");
+    int manasScreen = onlyFiring("artha.manas-arora.cron", MD + "screener/manas/ManasScheduler.java");
+    int minerviniSettle =
+        onlyFiring("artha.minervini.swing.cron", SS + "minervini/MinerviniSwingScheduler.java");
+    int manasSettle =
+        onlyFiring("artha.manas-arora.swing.cron", SS + "manas/ManasAroraSwingScheduler.java");
+    int heartbeat = onlyFiring("artha.heartbeat.swing-cron", SS + "signals/SwingBatchHeartbeat.java");
+
+    assertThat(minerviniSettle)
+        .as("the minervini settle must follow the 18:45 bhavcopy EOD ingest that writes the session"
+            + " bar its stops are evaluated against — this is ledger H27")
+        .isGreaterThan(bhavcopy);
+    assertThat(manasSettle)
+        .as("and so must the manas settle, for the same bar")
+        .isGreaterThan(bhavcopy);
+    assertThat(minerviniSettle)
+        .as("each settle must also follow its OWN screen, which is what refreshes the funnel it reads")
+        .isGreaterThan(minerviniScreen);
+    assertThat(manasSettle).isGreaterThan(manasScreen);
+    assertThat(manasSettle)
+        .as("manas stays one behind its minervini twin, as 16:00/16:02 were — they share the mutex")
+        .isGreaterThan(minerviniSettle);
+    assertThat(heartbeat)
+        .as("the heartbeat reports whether the settles ran, so it cannot be triggered before them")
+        .isGreaterThan(manasSettle);
   }
 
   /** Minutes-since-midnight of a job's single firing; fails if it has more than one. */

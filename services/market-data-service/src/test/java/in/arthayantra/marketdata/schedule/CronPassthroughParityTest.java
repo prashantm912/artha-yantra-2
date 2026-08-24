@@ -51,8 +51,15 @@ class CronPassthroughParityTest {
    * ⚠️ RATCHET. Every assertion below iterates {@link #JOBS}, so emptying or trimming this list makes
    * the whole file execute zero assertions and pass — the guard-that-checks-nothing shape. Lowering
    * this number is a deliberate act that must be justified in the PR that does it.
+   *
+   * <p>⚠️ RAISED 12 -> 13 on 2026-08-25, and RE-DERIVED from the list rather than incremented: 13
+   * {@code new Job(} entries, 13 distinct property keys. Main added {@code artha.nse.fii-retry-cron}
+   * (#1454) while this branch was open. Both catalogues in this repo — this one and
+   * {@code OperatingWindowTest.JOBS} — moved on the same merge, and taking either side's number
+   * instead of counting leaves the size assertion GREEN while the other side's jobs silently drop
+   * out of the parity sweep.
    */
-  private static final int EXPECTED_JOB_COUNT = 12;
+  private static final int EXPECTED_JOB_COUNT = 13;
 
   private static final List<Job> JOBS =
       List.of(

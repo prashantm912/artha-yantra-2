@@ -84,12 +84,16 @@ class SwingCatchUpStateRepositoryIntegrationTest extends StrategySignalIntegrati
     jdbc.update(
         """
         INSERT INTO swing_batch_runs
-            (batch, run_date, ran_at, strategies, candidates, entries, exits, exit_skipped,
+            (batch, run_date, pass, ran_at, strategies, candidates, entries, exits, exit_skipped,
              entries_enabled)
-        VALUES (?, ?, now(), 1, 0, 0, 0, 0, ?)
+        VALUES (?, ?, ?, now(), 1, 0, 0, 0, 0, ?)
         """,
         batch,
         java.sql.Date.valueOf(session),
+        // V063 made `pass` NOT NULL and part of the key. Derived with the SAME rule as the
+        // migration's backfill — `entries_enabled IS FALSE` is SETTLE, and everything else INCLUDING
+        // NULL is ENTRIES, because a pre-V060 row was written by a batch that did both halves.
+        Boolean.FALSE.equals(entriesEnabled) ? "SETTLE" : "ENTRIES",
         entriesEnabled);
   }
 

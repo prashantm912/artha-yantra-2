@@ -64,9 +64,12 @@ class SwingBatchRunRepositoryIntegrationTest extends StrategySignalIntegrationTe
    * question the catch-up asks: does this session still owe its entries. Conflating the two would
    * make the catch-up skip every session and the book would never take another entry.
    *
-   * <p>Also pins the monotone upsert. The catch-up stamps the SAME (batch, run_date) with entries
-   * enabled; a later exits-only re-run — a manual settle, a restart — must not take the row back to
-   * false, or the catch-up would re-open a session it has already entered and double the names.
+   * <p>⚠️ The last assertion used to pin a MONOTONE UPSERT and now pins something stronger. Before
+   * V063 both passes shared one row, so a later exits-only re-run could take {@code entries_enabled}
+   * back to false and re-open a session the catch-up had already entered — the OR in the upsert was
+   * what stopped it. Since V063 the passes hold SEPARATE rows, so the ENTRIES row cannot be written
+   * by an exits-only run at all and there is nothing to downgrade. Same assertion, and it must keep
+   * passing; the mechanism underneath it changed and the OR is deleted.
    */
   @Test
   void entriesEnabledSeparatesAnExitsOnlySettleFromASessionThatOwesNoEntries() {
@@ -91,6 +94,14 @@ class SwingBatchRunRepositoryIntegrationTest extends StrategySignalIntegrationTe
    * A pre-V060 row carries {@code entries_enabled} NULL and must read as entries-ran. Every
    * historical row was written by a full batch, so resolving NULL the other way would hand the
    * catch-up every past session at once on the deploy that adds the column.
+   *
+   * <p>⚠️ <b>Where that rule now lives changed, and this test would otherwise pass without
+   * checking it.</b> Since V063 {@code hasRunWithEntries} reads {@code pass}, not
+   * {@code entries_enabled}, so nulling the flag proves nothing on its own — the rule moved into
+   * V063's backfill ({@code entries_enabled IS FALSE -> 'SETTLE'}, everything else including NULL
+   * {@code -> 'ENTRIES'}). The second half below is what makes this test still mean something: it
+   * pins that the query IGNORES the flag in BOTH directions, so a SETTLE row reads false even with
+   * the flag nulled to the legacy value that used to force true.
    */
   @Test
   void aLegacyRowWithNoEntriesEnabledFlagIsReadAsHavingRunItsEntries() {
@@ -104,9 +115,70 @@ class SwingBatchRunRepositoryIntegrationTest extends StrategySignalIntegrationTe
 
     assertThat(repo.hasRunWithEntries(batch, session)).isTrue();
 
-    // …and an exits-only re-stamp over that legacy row still must not drop it to false.
+    // …and an exits-only re-stamp still must not drop it to false (now a separate SETTLE row).
     repo.record(batch, session, 4, 0, 0, 1, 0, 5, 0, 0, 0, false, List.of(), false);
     assertThat(repo.hasRunWithEntries(batch, session)).isTrue();
+
+    // The other direction: a SETTLE row whose flag is nulled to the legacy value must still read
+    // false. If hasRunWithEntries still consulted entries_enabled, COALESCE(NULL, true) would make
+    // this TRUE and the catch-up would skip a session that never took its entries.
+    String settleOnly = "it-legacy-settle-" + java.util.UUID.randomUUID();
+    repo.record(settleOnly, session, 4, 0, 0, 2, 0, 6, 0, 0, 0, false, List.of(), false);
+    jdbc.update(
+        "UPDATE swing_batch_runs SET entries_enabled = NULL WHERE batch = ? AND run_date = ?",
+        settleOnly, java.sql.Date.valueOf(session));
+    assertThat(repo.hasRunWithEntries(settleOnly, session)).isFalse();
+  }
+
+  /**
+   * ⚠️ LEDGER H23, and this is the regression test for a defect that had already destroyed real
+   * data by the time it was found.
+   *
+   * <p>The evening exits-only SETTLE and the next morning's ENTRIES catch-up write the same
+   * {@code (batch, run_date)}. Under V025's key that was ONE row and the second write won, so the
+   * settle's exit count was replaced by the catch-up's — measured 2026-08-25, every row for
+   * {@code run_date} 2026-08-17..2026-08-21 carried a {@code ran_at} from the next morning.
+   *
+   * <p>What must hold: both rows survive, each keeps its OWN counters, and neither can be reached
+   * by the other's upsert. The exits assertion is the one that fails against the old key.
+   */
+  @Test
+  void theSettleAndTheCatchUpKeepSeparateRowsForTheSameSession() {
+    String batch = "it-h23-" + java.util.UUID.randomUUID();
+    LocalDate session = LocalDate.of(2026, 8, 24);
+
+    // 18:52 settle: two stops fired, no entries.
+    repo.record(batch, session, 2, 0, 0, 2, 0, 8, 0, 0, 0, false, List.of(), false);
+    // 08:35 next morning: the catch-up takes entries and sees no exit of its own.
+    repo.record(batch, session, 2, 118, 3, 0, 0, 8, 5, 3, 0, false, List.of(), true);
+
+    Integer rows =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM swing_batch_runs WHERE batch = ? AND run_date = ?",
+            Integer.class, batch, java.sql.Date.valueOf(session));
+    assertThat(rows).as("one row per PASS, not one per session").isEqualTo(2);
+
+    Integer settleExits =
+        jdbc.queryForObject(
+            "SELECT exits FROM swing_batch_runs WHERE batch = ? AND run_date = ? AND pass = 'SETTLE'",
+            Integer.class, batch, java.sql.Date.valueOf(session));
+    assertThat(settleExits)
+        .as("the settle's exit count must survive the catch-up — this is the H23 defect")
+        .isEqualTo(2);
+
+    Integer entriesTaken =
+        jdbc.queryForObject(
+            "SELECT entries FROM swing_batch_runs WHERE batch = ? AND run_date = ? AND pass = 'ENTRIES'",
+            Integer.class, batch, java.sql.Date.valueOf(session));
+    assertThat(entriesTaken).isEqualTo(3);
+
+    // Both questions the two consumers ask are still answered correctly.
+    assertThat(repo.hasRun(batch, session)).isTrue();
+    assertThat(repo.hasRunWithEntries(batch, session)).isTrue();
+
+    // …and the probe endpoint sees the ENTRIES row only, never a settle row padded with zeros.
+    assertThat(repo.recentProbes(batch, 10)).hasSize(1);
+    assertThat(repo.recentProbes(batch, 10).get(0).entries()).isEqualTo(3);
   }
 
   @Test

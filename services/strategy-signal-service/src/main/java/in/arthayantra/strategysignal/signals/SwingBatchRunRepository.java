@@ -13,8 +13,24 @@ import org.springframework.stereotype.Repository;
 
 /**
  * The {@code swing_batch_runs} dead-man marker (V025, audit P0-4/H10): each swing batch records
- * one row per IST run date; {@code SwingBatchCanary} checks the exact historical session next
- * morning and alerts when a schedule-time armed batch has no matching row.
+ * one row per IST run date PER PASS; {@code SwingBatchCanary} checks the exact historical session
+ * next morning and alerts when a schedule-time armed batch has no matching row.
+ *
+ * <p>⚠️ <b>"Per pass" is V063 and it fixed a real loss of data (ledger H23).</b> V025 keyed this
+ * table {@code (batch, run_date)} on the assumption that a session has one batch run. The
+ * 16:00/08:35 split (#1333) broke that without changing the key: the evening exits-only SETTLE
+ * writes the row, and the next morning's ENTRIES catch-up upserts the SAME key for the SAME
+ * {@code run_date}, so the second write wins and the first is gone. Measured 2026-08-25 — every row
+ * for {@code run_date} 2026-08-17..2026-08-21 carries a {@code ran_at} from the NEXT MORNING, so
+ * five sessions' settle records no longer exist.
+ *
+ * <p>No merge rule could have fixed it, which is why the key changed instead: BOTH passes
+ * legitimately compute every column. The settle counts the exits it fired at 18:52; the catch-up
+ * counts the exits IT saw at 08:36 the next morning against different prices. Neither number is
+ * wrong and neither is the other's, so a GREATEST or a COALESCE would just pick one and destroy the
+ * attribution. No money was ever at risk — {@code paper_positions}, {@code swing_paper_effects} and
+ * the P&L are correct and complete; what was destroyed is the batch-run AUDIT TRAIL, which is the
+ * surface a forward-paper reliability verdict reads.
  *
  * <p>Since V034 (ledger F3) the same row also carries the batch's admission PROBE — the slot-cap
  * exceedance + the RS-ordered names the cap dropped ({@link #recentProbes}); the probe columns are
@@ -49,32 +65,41 @@ public class SwingBatchRunRepository {
         jdbc.update(
             """
             INSERT INTO swing_batch_runs
-                (batch, run_date, ran_at, strategies, candidates, entries, exits, exit_skipped,
+                (batch, run_date, pass, ran_at, strategies, candidates, entries, exits, exit_skipped,
                  open_at_start, would_enter, admitted, cap_exceedance, cap_bound, dropped_by_cap,
                  entries_enabled)
-            VALUES (?, ?, now(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
-            ON CONFLICT (batch, run_date) DO UPDATE SET
+            VALUES (?, ?, ?, now(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
+            ON CONFLICT (batch, run_date, pass) DO UPDATE SET
                 ran_at = now(), strategies = EXCLUDED.strategies, candidates = EXCLUDED.candidates,
                 entries = EXCLUDED.entries, exits = EXCLUDED.exits,
                 exit_skipped = EXCLUDED.exit_skipped, open_at_start = EXCLUDED.open_at_start,
                 would_enter = EXCLUDED.would_enter, admitted = EXCLUDED.admitted,
                 cap_exceedance = EXCLUDED.cap_exceedance, cap_bound = EXCLUDED.cap_bound,
                 dropped_by_cap = EXCLUDED.dropped_by_cap,
-                -- ⚠️ The upsert must never DOWNGRADE an entries-enabled session back to exits-only.
-                -- The 16:00 exits pass writes false; the 08:35 catch-up then writes true for the SAME
-                -- (batch, run_date). If a later exits-only re-run (a manual settle, a restart) took
-                -- the row back to false, the catch-up would re-open that session and re-enter names
-                -- it has already entered. OR is the monotone direction: once entries have run for a
-                -- session, they have run. COALESCE(..., true) because a pre-V060 row is NULL and is
-                -- read as entries-ran everywhere else -- resolving it to false here would hand the
-                -- catch-up every historical session at once.
-                entries_enabled = COALESCE(swing_batch_runs.entries_enabled, true)
-                                  OR EXCLUDED.entries_enabled
+                -- ⚠️ A PLAIN assignment, and the monotone OR that used to be here is DELETED on
+                -- purpose (V063 / ledger H23). That OR existed because the two passes shared one row:
+                -- the exits pass wrote entries_enabled=false, the catch-up wrote true for the SAME
+                -- key, and a later exits-only re-run could take the row back to false and re-open a
+                -- session whose entries had already run. With `pass` in the primary key the two
+                -- passes no longer share a row at all, so an ENTRIES row's flag is always true and a
+                -- SETTLE row's always false. Keeping the OR here would be dead logic that reads as
+                -- if the collision were still possible.
+                entries_enabled = EXCLUDED.entries_enabled
             """,
-            batch, java.sql.Date.valueOf(runDate), strategies, candidates, entries, exits, exitSkipped,
-            openAtStart, wouldEnter, admitted, capExceedance, capBound, writeDropped(droppedByCap),
-            entriesEnabled);
+            batch, java.sql.Date.valueOf(runDate), pass(entriesEnabled), strategies, candidates,
+            entries, exits, exitSkipped, openAtStart, wouldEnter, admitted, capExceedance, capBound,
+            writeDropped(droppedByCap), entriesEnabled);
     return rows > 0;
+  }
+
+  /**
+   * Which pass a run belongs to — the discriminator V063 added to the primary key (ledger H23).
+   *
+   * <p>Derived from {@code entriesEnabled} rather than passed in, so there is exactly ONE place that
+   * decides it and a caller cannot label a run's pass inconsistently with what it actually did.
+   */
+  private static String pass(boolean entriesEnabled) {
+    return entriesEnabled ? "ENTRIES" : "SETTLE";
   }
 
   /** The latest recorded run date for a batch — empty when the batch has never recorded. */
@@ -117,7 +142,7 @@ public class SwingBatchRunRepository {
             """
             SELECT EXISTS(
                 SELECT 1 FROM swing_batch_runs
-                WHERE batch = ? AND run_date = ? AND COALESCE(entries_enabled, true))
+                WHERE batch = ? AND run_date = ? AND pass = 'ENTRIES')
             """,
             Boolean.class, batch, java.sql.Date.valueOf(sessionDate)));
   }
@@ -132,7 +157,12 @@ public class SwingBatchRunRepository {
         SELECT batch, run_date, ran_at, candidates, entries, open_at_start, would_enter, admitted,
                cap_exceedance, cap_bound, dropped_by_cap
         FROM swing_batch_runs
-        WHERE batch = ? AND would_enter IS NOT NULL
+        -- ⚠️ pass = 'ENTRIES' is REQUIRED since V063, not a refinement. The admission probe is a
+        -- property of the entry pass; the exits-only settle writes would_enter = 0 (not null), so
+        -- before the key split it was indistinguishable here, and after the split BOTH rows exist
+        -- for the same date — without this predicate a LIMIT n would silently return roughly half
+        -- as many probed sessions as it used to, padded with settle rows carrying zeros.
+        WHERE batch = ? AND pass = 'ENTRIES' AND would_enter IS NOT NULL
         ORDER BY run_date DESC
         LIMIT ?
         """,

@@ -111,6 +111,37 @@ public class IngestRunLedger {
   }
 
   /**
+   * True when {@code source} already has a SUCCESS row for TODAY (IST).
+   *
+   * <p>Exists for the intra-day retry: a source that already landed must not be re-fetched, both
+   * because it is pointless and because NSE's anti-bot behaviour makes needless requests a real cost
+   * (this scheduler's class javadoc calls that out).
+   *
+   * <p>⚠️ The date comparison is IST on BOTH sides, deliberately. In-container {@code now()} is UTC,
+   * so a bare {@code started_at::date} would roll the "today" boundary at 05:30 IST and make an
+   * early-morning run look like yesterday's. Same trap the repo records for candle buckets.
+   *
+   * <p>Fail-soft: any query error returns {@code false}, i.e. "not known to have succeeded", so the
+   * retry runs. That direction is deliberate — a wasted fetch is cheaper than a rail silently dark
+   * for a session, which is the defect this supports.
+   */
+  public boolean succeededToday(String source) {
+    try {
+      Boolean found =
+          jdbc.queryForObject(
+              "SELECT EXISTS (SELECT 1 FROM ingest_runs WHERE source = ? AND status = 'SUCCESS'"
+                  + " AND (started_at AT TIME ZONE 'Asia/Kolkata')::date"
+                  + "   = (now() AT TIME ZONE 'Asia/Kolkata')::date)",
+              Boolean.class,
+              source);
+      return Boolean.TRUE.equals(found);
+    } catch (RuntimeException e) {
+      log.warn("ingest_runs succeededToday check failed for {} — assuming NOT: {}", source, e.getMessage());
+      return false;
+    }
+  }
+
+  /**
    * Record a start/finish run around {@code job}: {@code RUNNING} → {@code SUCCESS}(rows) on return,
    * or {@code FAILURE}(message) then RETHROW on exception. The rethrow preserves the caller's existing
    * exception handling — this records the outcome, it does not consume it.

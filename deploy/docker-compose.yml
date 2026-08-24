@@ -408,6 +408,7 @@ services:
       ARTHA_BHAVCOPY_EOD_CRON: "${ARTHA_BHAVCOPY_EOD_CRON:-0 45 18 * * MON-FRI}"
       # NSE FII / participant / DII feeds
       ARTHA_NSE_EOD_CRON: "${ARTHA_NSE_EOD_CRON:-0 46 18 * * MON-FRI}"
+      ARTHA_NSE_FII_RETRY_CRON: "${ARTHA_NSE_FII_RETRY_CRON:-0 50 9,11,14 * * MON-FRI}"
       # minervini screen
       ARTHA_MINERVINI_CRON: "${ARTHA_MINERVINI_CRON:-0 47 18 * * MON-FRI}"
       # manas screen

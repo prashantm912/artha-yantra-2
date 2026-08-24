@@ -55,8 +55,11 @@ import org.springframework.stereotype.Component;
  * never has to know that sub-step exists — when there IS a ledger row it already means "this leg is
  * fully done", not "the screen write happened".
  *
- * <p><b>⚠️ Every leg but two is judged by its {@code ingest_runs} row; the two SCREENERS cannot
- * be, and an earlier version of this class judging them that way was a Critical.</b> That javadoc
+ * <p><b>⚠️ FOUR legs return before {@code ledger.start}, not two, and only two of them are carved
+ * out here.</b> This javadoc said "every leg but two" until 2026-08-25 and it was wrong — see the
+ * KNOWN FALSE-PENDING note below the screener discussion. The two SCREENERS cannot be judged by
+ * their {@code ingest_runs} row, and an earlier version of this class judging them that way was a
+ * Critical. That javadoc
  * used to claim they were "verified against each job's ledger call site", and they were not:
  * {@code MinerviniScheduler:116-125} and {@code ManasScheduler:79-83} both RETURN on the dedup skip
  * (screen already current with the bhavcopy watermark) BEFORE {@code ledger.start} is ever reached —
@@ -240,6 +243,14 @@ public class EveningChainCanary {
    * ManasScheduler:60}), fired by the 18:45 bhavcopy backfill and therefore able to land before their
    * own 18:47/18:48 crons. So the screeners declare the BHAVCOPY cron — an exact boundary drawn from
    * the schedule that actually drives them, rather than a guessed slack.
+   *
+   * <p>⚠️ <b>CORRECTION 2026-08-25: "exactly one" non-cron trigger is no longer true.</b> Main added
+   * {@code artha.nse.fii-retry-cron} (09:50/11:50/14:50, {@code NseEodScheduler:86-92}), which writes
+   * {@code NSE_*} rows through {@code ledger.record} long before the 18:46 boundary. Harmless in
+   * effect — the 18:46 {@code pullAll} is unconditional and writes its own row, so the boundary still
+   * finds tonight's run — but the invariant as stated above is false and a reader should not build on
+   * it. The boundary now also carries a 60-second clock-skew allowance; see
+   * {@code expectedNotBefore}.
    */
   record ExpectedLeg(String source, String cronProperty, String cronDefault) {}
 
@@ -542,8 +553,38 @@ public class EveningChainCanary {
 
   /**
    * The earliest instant TODAY at which a row may count as {@code leg}'s tonight run: the next fire
-   * of the leg's own trigger cron after IST midnight. See {@link ExpectedLeg} for why this exists,
-   * why it is per-source, and why it is the exact cron time rather than the cron minus a tolerance.
+   * of the leg's own trigger cron after IST midnight, MINUS a one-minute clock-skew allowance. See
+   * {@link ExpectedLeg} for why this exists and why it is per-source.
+   *
+   * <p>⚠️ <b>The allowance is not padding — without it this canary reports 5-6 legs PENDING every
+   * healthy night, forever.</b> {@code ingest_runs.started_at} is stamped by POSTGRES
+   * ({@code IngestRunLedger} lets the column default to {@code now()}), while the instant below comes
+   * from a Spring {@code CronExpression} evaluated on the JVM clock. Those are different clocks in
+   * different containers, and on this stack they disagree by 1-3 seconds in the direction that
+   * matters: the row lands just BEFORE its own cron instant. Measured 2026-08-25 over 45 days of
+   * live rows in the 18:40-18:55 window, counting rows whose IST second is >= 57 (i.e. stamped in
+   * the minute before their cron):
+   *
+   * <pre>
+   *   BHAVCOPY            8 of 10      NSE_FII_DII         8 of 10
+   *   DATA_QUALITY        7 of  8      EQUITY_BREADTH      7 of  8
+   *   MARKET_CONTEXT_DAY  7 of  8      NSE_PARTICIPANT_OI  5 of 10
+   * </pre>
+   *
+   * With a zero-tolerance boundary every one of those rows is dropped and the 18:59 push announces
+   * that six legs never ran, on an evening where all of them did — the never-resolving alert this
+   * class's own javadoc calls a Critical, arriving by the opposite route from the one it guarded.
+   *
+   * <p>⚠️ Sixty seconds is chosen to be far larger than the measured 1-3 s skew and far smaller than
+   * the gap to any boot window: the boot rows this boundary exists to reject were stamped 02:39 and
+   * 08:17 IST, hours away. The only rows it newly admits are boot-catch-up runs landing inside the
+   * minute before a cron -- and every one of those does the leg's real work
+   * ({@code NseEodScheduler.pullAll}, {@code BhavcopyStartupCatchup.runIfFree},
+   * {@code DataQualityEodJob}, {@code EquityBreadthEodJob}), so DONE is the correct verdict for them.
+   *
+   * <p>⚠️ The whole suite missed this because EVERY fixture seeds {@code day.atTime(hour, minute)} --
+   * seconds always zero -- so no test ever produced the only shape production actually emits.
+   * {@code aRowThreeSecondsBeforeItsOwnCronStillCounts} is the fixture that now does.
    *
    * <p>Read live from {@link Environment} on the producer's own property key, so compose's
    * passthrough moves the boundary with the job. {@code cronDefault} covers the case where nothing is
@@ -557,12 +598,14 @@ public class EveningChainCanary {
    * not fire on such a day; the page would show the honest answer, which on a muhurat Saturday is
    * that none of the weekday evening jobs ran and none will.
    */
+  private static final long CLOCK_SKEW_ALLOWANCE_SECONDS = 60;
+
   private Instant expectedNotBefore(ExpectedLeg leg, LocalDate today, Instant dayEnd) {
     String cron = environment.getProperty(leg.cronProperty(), leg.cronDefault());
     try {
       ZonedDateTime fire = CronExpression.parse(cron).next(today.atStartOfDay(Ist.ZONE));
       if (fire != null && fire.toLocalDate().equals(today)) {
-        return fire.toInstant();
+        return fire.toInstant().minusSeconds(CLOCK_SKEW_ALLOWANCE_SECONDS);
       }
       log.warn(
           "evening-chain: {}'s trigger cron ({}={}) does not fire on {} - leaving it outstanding",
@@ -622,6 +665,36 @@ public class EveningChainCanary {
    *   <li>A screen genuinely in flight right now (fresh RUNNING) is not waved through on a watermark
    *       an earlier same-evening run already satisfied.
    * </ul>
+   */
+  /**
+   * ⚠️ <b>KNOWN FALSE-PENDING, measured and deliberately NOT fixed here (2026-08-25).</b>
+   *
+   * <p>{@link #withScreenerArtifact} covers the two screeners. TWO MORE legs have the identical
+   * "returns before {@code ledger.start}" shape and are NOT covered:
+   *
+   * <ul>
+   *   <li>{@code EquityBreadthEodJob:98-101} — skips when {@code latestDate() >= } the cash bhavcopy
+   *       watermark, opening its run row only at {@code :104}.
+   *   <li>{@code DataQualityEodJob:129-131} — skips when {@code repository.hasRowsFor(day)}, opening
+   *       its run row only at {@code :133}.
+   * </ul>
+   *
+   * <p>Both skip on any evening the bhavcopy watermark has not advanced by 18:50/18:51, so both read
+   * PENDING at 18:59 with nothing coming. {@code computed} 2026-08-25 over the last 45 days: on
+   * <b>7 of the 30 days</b> that BHAVCOPY wrote a row, DATA_QUALITY and EQUITY_BREADTH each wrote
+   * NONE — they go quiet together, because they share the watermark dependency. That is roughly
+   * every fourth evening, which is a cry-wolf rate, not a rarity.
+   *
+   * <p><b>Why it is not fixed in this PR.</b> The fix moves a verdict from PENDING to DONE — the
+   * DANGEROUS direction for this class, whose DONE means "safe to shut the machine down". Getting it
+   * right requires mirroring each producer's watermark derivation EXACTLY, the way
+   * {@link #screenHasConsumedTheWatermark} mirrors the screeners' {@code equals} rather than
+   * inventing a {@code >=} of its own — and {@code DataQualityEodJob}'s day derivation carries a
+   * documented mixed-watermark subtlety (cash vs any-series) that deserves its own PR and its own
+   * review round. A guessed mirror here buys a quieter push at the cost of a wrong shutdown.
+   *
+   * <p>Until then this class over-reports rather than under-reports, which is the correct way round.
+   * Ledger row and follow-up chip filed 2026-08-25.
    */
   private SourceProgress withScreenerArtifact(SourceProgress progress) {
     if (progress.state() != SourceState.PENDING

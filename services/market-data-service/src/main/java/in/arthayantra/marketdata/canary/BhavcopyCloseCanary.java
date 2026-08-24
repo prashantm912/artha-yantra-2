@@ -562,7 +562,19 @@ public class BhavcopyCloseCanary {
     // a row claiming otherwise would be the same lie in a different place — with the gate closed the
     // source simply stays outstanding, which is what a disabled leg before shutdown honestly is.
     Long runId = ledger.start(IngestRunLedger.SOURCE_BHAVCOPY_CLOSE);
-    LocalDate latest = latestTradeDate();
+    // ⚠️ INSIDE the try, because this read sits AFTER the row is opened. It was outside, so a
+    // DataAccessException here left the row RUNNING forever and rethrew out of the @Scheduled
+    // sweep — a leg stuck PENDING at the 18:59 shutdown check with no owner, which is the exact
+    // never-resolving alert this class's javadoc warns about. IngestRunReaper would eventually
+    // close it at the next boot, but "eventually, on a restart" is not terminal tonight.
+    LocalDate latest;
+    try {
+      latest = latestTradeDate();
+    } catch (RuntimeException e) {
+      log.warn("bhavcopy-close canary could not read the latest trade date: {}", e.getMessage());
+      ledger.fail(runId, e.getMessage());
+      return;
+    }
     if (latest == null) {
       ledger.skip(runId, "nse_eod_bhavcopy is empty — there is nothing to compare");
       return;
@@ -590,6 +602,13 @@ public class BhavcopyCloseCanary {
       return;
     }
     publish(report);
+    // ⚠️ `compared()` is a COMPARISON count, not rows stored — a third meaning for this column after
+    // #1452 established it counts rows SUBMITTED to an upsert rather than stored. Inert today:
+    // IngestRunLedger.succeededToday (the only reader that gates on rows_written > 0, added #1454)
+    // has exactly two call sites, both NseEodScheduler.retryIfFailed for the three NSE sources, and
+    // IngestHealthBoard pivots IngestCoverageCanary.EXPECTED, which excludes BHAVCOPY_CLOSE. Said
+    // out loud because a zero-comparison evening WOULD read as "never succeeded" the day anything
+    // starts gating on this source, and the next reader should not have to re-derive that.
     ledger.succeed(runId, report.compared());
   }
 

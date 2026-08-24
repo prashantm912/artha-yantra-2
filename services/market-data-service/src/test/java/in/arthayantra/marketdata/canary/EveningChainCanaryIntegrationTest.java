@@ -804,6 +804,47 @@ class EveningChainCanaryIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   /**
+   * ⚠️ THE SHAPE PRODUCTION ACTUALLY EMITS, and the reason this whole class nearly shipped an alert
+   * that would have been wrong every night.
+   *
+   * <p>{@code ingest_runs.started_at} is stamped by POSTGRES {@code now()}; the boundary instant
+   * comes from a Spring cron on the JVM clock. Different containers, different clocks — and on this
+   * stack the row lands 1-3 SECONDS BEFORE its own cron instant. Measured 2026-08-25 across 45 days
+   * of live evening rows: BHAVCOPY 8 of 10, NSE_FII_DII 8 of 10, DATA_QUALITY 7 of 8,
+   * EQUITY_BREADTH 7 of 8, MARKET_CONTEXT_DAY 7 of 8.
+   *
+   * <p>Every other fixture in this file seeds through {@code seedRunRange}, which takes hour and
+   * minute and therefore always writes second = 0. So the suite could not express the failing case
+   * at all, and {@link #aRowAtItsOwnTriggerCronStillCounts} above — seeding at EXACTLY the cron —
+   * passed while the only real-world shape was rejected. That is the same "the fixture excludes the
+   * failing case on exactly the axis that decides it" trap this class was already bitten by once.
+   * This test seeds seconds explicitly, on purpose.
+   */
+  @Test
+  void aRowThreeSecondsBeforeItsOwnCronStillCounts() {
+    LocalDate day = dayBefore(2);
+    clearWindow(day);
+    LocalTime fires = firesAt(legFor(IngestRunLedger.SOURCE_NSE_FII_DII), day);
+    OffsetDateTime justBefore =
+        day.atTime(fires).atZone(Ist.ZONE).toOffsetDateTime().minusSeconds(3);
+    jdbc.update(
+        "INSERT INTO ingest_runs (source, status, rows_written, started_at, finished_at)"
+            + " VALUES (?, 'SUCCESS', 10, ?, ?)",
+        IngestRunLedger.SOURCE_NSE_FII_DII,
+        justBefore,
+        justBefore.plusSeconds(30));
+
+    SourceProgress s =
+        find(canary(fixedAt(day, 18, 59), true).report(), IngestRunLedger.SOURCE_NSE_FII_DII);
+
+    assertThat(s.state())
+        .as("a row stamped 3s before its own cron is TONIGHT's run — Postgres now() and the JVM"
+            + " cron are different clocks, and this is what the live rows look like")
+        .isEqualTo(SourceState.DONE);
+    assertThat(s.startedAt()).isEqualTo(justBefore.toInstant());
+  }
+
+  /**
    * The boundary is only as good as the cron it is drawn from. Each leg's {@code cronDefault} is a
    * SECOND copy of a default that lives on the producer's own {@code @Scheduled} annotation, and the
    * two could drift in silence — a producer moved to 17:00 with the canary still refusing anything

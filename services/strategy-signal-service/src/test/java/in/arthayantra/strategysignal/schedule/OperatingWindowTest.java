@@ -112,7 +112,11 @@ class OperatingWindowTest {
    *
    * <p>⚠️ This is a DECLARED EXCEPTION, not a relaxation. The default remains "one job per minute",
    * and every entry here has to name both sides — so a THIRD job landing on 18:59, or either of
-   * these two moving onto some other job's minute, still fails.
+   * these two moving onto some other job's minute, still fails. ⚠️ With the SAME qualification this
+   * file already makes for {@code fii-retry} forty lines up: "a third job" means a third job IN THIS
+   * MAP. A scheduled site nobody catalogued here is invisible to this check, exactly as it is to the
+   * containment check. (Verified 2026-08-25: {@code 0 59 18} appears in exactly two source files, so
+   * the declared pair is complete today.)
    *
    * <p>⚠️ Why 18:59 is shared. The evening tail runs one job per minute from 18:45 to 18:59 and the
    * machine shuts down at 19:00, so there is no free minute left for the pre-shutdown check to move

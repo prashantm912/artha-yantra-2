@@ -15,6 +15,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -44,11 +45,13 @@ class SubscriberHealthCanaryTest {
   private final ValueOperations<String, String> valueOps = mock(ValueOperations.class);
   private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
   private final SubscriberHealthTelemetry telemetry = mock(SubscriberHealthTelemetry.class);
+  private final BlindWindowRegister blindWindows = mock(BlindWindowRegister.class);
 
   private SubscriberHealthCanary canary(boolean enabled) {
     when(registry.countEnabledPublished()).thenReturn(1L);
     return new SubscriberHealthCanary(
-        engine, registry, redis, events, telemetry, CLOCK, enabled, BAR_GAP, FEED_FRESH);
+        engine, registry, redis, events, telemetry, blindWindows, CLOCK, enabled, BAR_GAP,
+        FEED_FRESH);
   }
 
   /** Eval keeps pace with receipt (evalLag ~0) — so the eval-stall branch never trips these tests. */
@@ -79,8 +82,13 @@ class SubscriberHealthCanaryTest {
     verify(telemetry, times(1)).record(eq("resubscribe"), anyString());
   }
 
+  /**
+   * Producer-blind: REMEDIATION stays market-data's (no re-subscribe, and no second ntfy push on top
+   * of the FeedWatchdog's) but the window is now RECORDED (V062) — before that this branch wrote
+   * nothing at all, which is why the 2026-08-19 outage left zero durable trace on the engine side.
+   */
   @Test
-  void feedActuallyStale_remainsQuietForSubscriberOwnership() {
+  void feedActuallyStale_doesNotRemediateButRegistersTheBlindWindow() {
     when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
     evalKeepingUp(NOW_MS - 200_000);
     feedAgeMs(200_000); // feed itself is stale — market-data's canary owns this, not us
@@ -89,6 +97,10 @@ class SubscriberHealthCanaryTest {
 
     verify(engine, never()).forceResubscribe(anyString());
     verify(events, never()).publishEvent(any());
+    // anchored at the RECEIPT of the last bar, not at detection time 200s later
+    verify(blindWindows, times(1))
+        .open(eq(Instant.ofEpochMilli(NOW_MS - 200_000)), anyString());
+    verify(telemetry, times(1)).record(eq("feed-blind"), anyString());
   }
 
   @Test
@@ -163,7 +175,8 @@ class SubscriberHealthCanaryTest {
 
     SubscriberHealthCanary c =
         new SubscriberHealthCanary(
-            engine, registry, redis, events, telemetry, advancing, true, BAR_GAP, FEED_FRESH);
+            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
+            FEED_FRESH);
     c.sweep(); // first detection: re-subscribe #1 + page #1
     advancing.advanceMs(BAR_GAP); // a full window later, still no bar
     c.sweep(); // retry: re-subscribe #2, NO repeat page
@@ -206,6 +219,93 @@ class SubscriberHealthCanaryTest {
     verify(engine, never()).forceResubscribe(anyString());
     verify(events, never()).publishEvent(any());
     verify(telemetry, never()).record(eq("eval-stall"), anyString());
+  }
+
+  /** One row per episode: the latch holds across sweeps so a multi-hour outage is ONE window. */
+  @Test
+  void producerBlindAcrossSweeps_opensExactlyOneWindow() {
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    evalKeepingUp(NOW_MS - 200_000);
+    feedAgeMs(200_000);
+    when(blindWindows.open(any(Instant.class), anyString())).thenReturn(7L);
+
+    SubscriberHealthCanary c = canary(true);
+    c.sweep();
+    c.sweep();
+    c.sweep();
+
+    verify(blindWindows, times(1)).open(any(Instant.class), anyString());
+  }
+
+  /**
+   * A failed register INSERT must not defeat the latch — otherwise a down database turns one outage
+   * into an ERROR line every 60 s. The id stays null and the close is a no-op the register absorbs.
+   */
+  @Test
+  void registerInsertFailed_stillLatchesTheEpisode() {
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    evalKeepingUp(NOW_MS - 200_000);
+    feedAgeMs(200_000);
+    when(blindWindows.open(any(Instant.class), anyString())).thenReturn(null); // fail-soft write
+
+    SubscriberHealthCanary c = canary(true);
+    c.sweep();
+    c.sweep();
+
+    verify(blindWindows, times(1)).open(any(Instant.class), anyString());
+  }
+
+  /** Recovery closes the window at the receipt of the FIRST bar back, not at sweep time. */
+  @Test
+  void barsResume_closesTheWindowAtTheFirstGoodBar() {
+    MutableClock advancing = new MutableClock(IN_SESSION);
+    AtomicLong received = new AtomicLong(NOW_MS - 200_000);
+    when(registry.countEnabledPublished()).thenReturn(1L);
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    when(engine.lastBarReceivedAtMs()).thenAnswer(inv -> received.get());
+    when(engine.lastBarEvaluatedAtMs()).thenAnswer(inv -> received.get());
+    when(redis.opsForValue()).thenReturn(valueOps);
+    when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000)); // stale producer
+    when(blindWindows.open(any(Instant.class), anyString())).thenReturn(7L);
+
+    SubscriberHealthCanary c =
+        new SubscriberHealthCanary(
+            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
+            FEED_FRESH);
+    c.sweep(); // producer blind — window opens
+    advancing.advanceMs(60_000);
+    long firstBarBack = advancing.millis() - 5_000;
+    received.set(firstBarBack);
+    c.sweep(); // bars flowing again
+
+    verify(blindWindows, times(1))
+        .close(eq(7L), eq(Instant.ofEpochMilli(firstBarBack)), eq("bars-resumed"));
+  }
+
+  /**
+   * An outage that outlasts the session is NOT a recovery. Closing it as {@code bars-resumed} would
+   * report a still-dead feed as healed, so the session-end close names itself.
+   */
+  @Test
+  void outageOutlastsTheSession_closesAsSessionEnded() {
+    MutableClock advancing = new MutableClock(IN_SESSION);
+    when(registry.countEnabledPublished()).thenReturn(1L);
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    when(engine.lastBarReceivedAtMs()).thenReturn(NOW_MS - 200_000);
+    when(engine.lastBarEvaluatedAtMs()).thenReturn(NOW_MS - 200_000);
+    when(redis.opsForValue()).thenReturn(valueOps);
+    when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000));
+    when(blindWindows.open(any(Instant.class), anyString())).thenReturn(7L);
+
+    SubscriberHealthCanary c =
+        new SubscriberHealthCanary(
+            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
+            FEED_FRESH);
+    c.sweep(); // 10:00 IST — window opens
+    advancing.advanceMs(19_860_000L); // 15:31 IST — past SESSION_END, still blind
+    c.sweep();
+
+    verify(blindWindows, times(1)).close(eq(7L), any(Instant.class), eq("session-ended"));
   }
 
   /** A test clock whose instant can be advanced, to drive the multi-sweep throttle path. */

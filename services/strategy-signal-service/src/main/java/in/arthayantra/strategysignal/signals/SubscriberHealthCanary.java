@@ -4,6 +4,7 @@ import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.util.Map;
@@ -50,6 +51,18 @@ import org.springframework.stereotype.Component;
  * re-subscribe — it logs a distinct ERROR, captures the {@code signal-eval} stack trace (the forensic
  * evidence the wiped 15:57 logs cost us), pages with a distinct title, and latches once per episode.
  *
+ * <p><b>The producer-blind branch RECORDS but still does not remediate (V062, 2026-08-24):</b> when
+ * the receive gap coincides with a STALE feed heartbeat this stays out of the way — restarting a dead
+ * producer is market-data's job — but until V062 it also wrote nothing at all, so a genuine outage
+ * left ZERO durable trace on the engine side. Measured on 2026-08-19: the reconnect gap-backfill
+ * repaired the candles (NIFTY 50 finished the session 373/375 bars, 51 of them {@code BACKFILL}) while
+ * {@code subscriber_health_events} stayed empty for the day, so a later reader cannot separate "no
+ * signal because no setup" from "no signal because the engine was blind". That branch now opens a
+ * {@code blind_windows} row and closes it on recovery. It is a RECORD, never a replay trigger: a bar
+ * the engine did not see live is not a decision it gets to make later (owner ruling 2026-08-24 —
+ * backfill the data, never re-decide the bars). It still does NOT page, because market-data's
+ * {@code FeedWatchdog} already pages for the same outage and a second push is pure noise.
+ *
  * <p><b>Why one global heartbeat is sufficient (not per-channel):</b> {@link SignalEngine} subscribes
  * every candle channel through a SINGLE {@code RedisMessageListenerContainer} on one connection
  * ({@code resubscribe()} builds one container + N listeners on one {@code connectionFactory}), so
@@ -89,6 +102,7 @@ public class SubscriberHealthCanary {
   private final StringRedisTemplate redis;
   private final ApplicationEventPublisher events;
   private final SubscriberHealthTelemetry telemetry;
+  private final BlindWindowRegister blindWindows;
   private final Clock clock;
   private final MarketCalendar calendar = MarketCalendar.nse();
   private final boolean enabled;
@@ -98,6 +112,10 @@ public class SubscriberHealthCanary {
   // Single-writer (the @Scheduled thread never overlaps under fixedDelay); volatile for test/read.
   private volatile boolean stalled; // receive-side latch (subscription drop)
   private volatile boolean evalStalled; // eval-side latch (bars arriving, not processed)
+  private volatile boolean feedBlind; // producer-blind latch (feed outage)
+  // The open blind_windows row, or null when the insert itself failed. Kept SEPARATE from the latch
+  // above so a fail-soft register write can never defeat the latch and re-log every sweep.
+  private volatile Long blindWindowId;
   private long lastResubscribeAtMs;
 
   /** Wires the engine, the shared Redis, the event bus, telemetry, and the (tunable) thresholds. */
@@ -107,6 +125,7 @@ public class SubscriberHealthCanary {
       StringRedisTemplate redis,
       ApplicationEventPublisher events,
       SubscriberHealthTelemetry telemetry,
+      BlindWindowRegister blindWindows,
       Clock clock,
       @Value("${artha.signals.subscriber-watchdog.enabled:true}") boolean enabled,
       @Value("${artha.signals.subscriber-watchdog.bar-gap-ms:180000}") long barGapMs,
@@ -116,6 +135,7 @@ public class SubscriberHealthCanary {
     this.redis = redis;
     this.events = events;
     this.telemetry = telemetry;
+    this.blindWindows = blindWindows;
     this.clock = clock;
     this.enabled = enabled;
     this.barGapMs = barGapMs;
@@ -135,7 +155,11 @@ public class SubscriberHealthCanary {
         return;
       }
       ZonedDateTime now = clock.instant().atZone(Ist.ZONE);
-      if (!inSession(now) || registry.countEnabledPublished() == 0) {
+      boolean inSession = inSession(now);
+      if (!inSession || registry.countEnabledPublished() == 0) {
+        // A window still open here did NOT recover — the outage outlasted the session, or the
+        // registry went idle. Say which, so a reader never reads a still-dead feed as healed.
+        closeBlindWindow(clock.instant(), inSession ? "strategies-idle" : "session-ended");
         return; // out of session, or genuinely idle by registry intent
       }
       long nowMs = clock.millis();
@@ -173,6 +197,7 @@ public class SubscriberHealthCanary {
 
       // (2) RECEIVE GAP (the 2026-07-07 path) — the container silently dropped its subscription.
       if (receiveGap < barGapMs) {
+        closeBlindWindow(Instant.ofEpochMilli(received), "bars-resumed");
         if (stalled) {
           stalled = false;
           log.info(
@@ -183,7 +208,8 @@ public class SubscriberHealthCanary {
       }
       long feedAge = feedAgeMs(nowMs);
       if (feedAge != Long.MAX_VALUE && feedAge > feedFreshMs) {
-        return; // a known stale producer is market-data's ownership
+        openBlindWindow(received, receiveGap, feedAge);
+        return; // remediating a known stale producer is market-data's ownership; the RECORD is ours
       }
       // Feed is fresh, or its heartbeat is unavailable; this consumer received no bar for receiveGap.
       String detail =
@@ -216,6 +242,42 @@ public class SubscriberHealthCanary {
     } catch (RuntimeException e) {
       log.warn("subscriber watchdog sweep failed: {}", e.toString());
     }
+  }
+
+  /**
+   * Latches the producer-blind episode and registers its window, anchored at the receipt time of the
+   * last bar — the last moment the engine is known to have had data. No ntfy push: market-data's
+   * {@code FeedWatchdog} already pages for this outage.
+   */
+  private void openBlindWindow(long receivedAtMs, long receiveGapMs, long feedAgeMs) {
+    if (feedBlind) {
+      return; // one row per episode
+    }
+    feedBlind = true;
+    String detail =
+        "no candle received for "
+            + (receiveGapMs / 1000)
+            + "s and the feed heartbeat is "
+            + (feedAgeMs / 1000)
+            + "s old — the PRODUCER is blind, so remediation stays market-data's; recording the "
+            + "window because the reconnect backfill repairs the CANDLES but never the fact that the "
+            + "engine did not see them live";
+    log.error("subscriber watchdog: engine BLIND — {}", detail);
+    telemetry.record("feed-blind", detail);
+    blindWindowId = blindWindows.open(Instant.ofEpochMilli(receivedAtMs), detail);
+  }
+
+  /** Closes an open blind window, if any, naming how it ended. No-op when nothing is open. */
+  private void closeBlindWindow(Instant endedAt, String reason) {
+    if (!feedBlind) {
+      return;
+    }
+    feedBlind = false;
+    Long id = blindWindowId;
+    blindWindowId = null;
+    log.info("subscriber watchdog: engine blind window closed — {}", reason);
+    telemetry.record("recovery", "engine blind window closed — " + reason);
+    blindWindows.close(id, endedAt, reason);
   }
 
   private void publish(String title, String message) {

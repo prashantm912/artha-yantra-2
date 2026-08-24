@@ -57,7 +57,7 @@ import org.springframework.stereotype.Component;
  *
  * <p><b>⚠️ FOUR legs return before {@code ledger.start}, not two, and only two of them are carved
  * out here.</b> This javadoc said "every leg but two" until 2026-08-25 and it was wrong — see the
- * KNOWN FALSE-PENDING note below the screener discussion. The two SCREENERS cannot be judged by
+ * KNOWN FALSE-PENDING block below. The two SCREENERS cannot be judged by
  * their {@code ingest_runs} row, and an earlier version of this class judging them that way was a
  * Critical. That javadoc
  * used to claim they were "verified against each job's ledger call site", and they were not:
@@ -69,6 +69,35 @@ import org.springframework.stereotype.Component;
  * nothing is coming. An alert that can never resolve is one nobody reads on the night it matters —
  * the same lesson {@link IngestCoverageCanary.Policy#SCREENER} learned from the other direction
  * (#1366). Measured: {@code ingest_runs} carried NO screen row for 2026-08-12 at all.
+ *
+ * <p>⚠️ <b>KNOWN FALSE-PENDING, measured and deliberately NOT fixed here (2026-08-25).</b>
+ *
+ * <p>{@link #withScreenerArtifact} covers the two screeners. TWO MORE legs have the identical
+ * "returns before {@code ledger.start}" shape and are NOT covered:
+ *
+ * <ul>
+ *   <li>{@code EquityBreadthEodJob:98-101} — skips when {@code latestDate() >= } the cash bhavcopy
+ *       watermark, opening its run row only at {@code :104}.
+ *   <li>{@code DataQualityEodJob:129-131} — skips when {@code repository.hasRowsFor(day)}, opening
+ *       its run row only at {@code :133}.
+ * </ul>
+ *
+ * <p>Both skip on any evening the bhavcopy watermark has not advanced by 18:50/18:51, so both read
+ * PENDING at 18:59 with nothing coming. {@code computed} 2026-08-25 over the last 45 days: on
+ * <b>7 of the 30 days</b> that BHAVCOPY wrote a row, DATA_QUALITY and EQUITY_BREADTH each wrote
+ * NONE — they go quiet together, because they share the watermark dependency. That is roughly
+ * every fourth evening, which is a cry-wolf rate, not a rarity.
+ *
+ * <p><b>Why it is not fixed in this PR.</b> The fix moves a verdict from PENDING to DONE — the
+ * DANGEROUS direction for this class, whose DONE means "safe to shut the machine down". Getting it
+ * right requires mirroring each producer's watermark derivation EXACTLY, the way
+ * {@link #screenHasConsumedTheWatermark} mirrors the screeners' {@code equals} rather than
+ * inventing a {@code >=} of its own — and {@code DataQualityEodJob}'s day derivation carries a
+ * documented mixed-watermark subtlety (cash vs any-series) that deserves its own PR and its own
+ * review round. A guessed mirror here buys a quieter push at the cost of a wrong shutdown.
+ *
+ * <p>Until then this class over-reports rather than under-reports, which is the correct way round.
+ * Ledger row and follow-up chip filed 2026-08-25.
  *
  * <p>So the two screeners are judged by their ARTIFACT — see {@link #screenHasConsumedTheWatermark}.
  * Note the artifact question here is NOT #1366's: that canary runs the morning after and asks "did
@@ -551,6 +580,9 @@ public class EveningChainCanary {
         leg.source(), SourceState.DONE, latest.status(), latest.startedAt(), latest.finishedAt());
   }
 
+  /** Clock-skew allowance for the boundary below — see that javadoc for the measurement. */
+  private static final long CLOCK_SKEW_ALLOWANCE_SECONDS = 60;
+
   /**
    * The earliest instant TODAY at which a row may count as {@code leg}'s tonight run: the next fire
    * of the leg's own trigger cron after IST midnight, MINUS a one-minute clock-skew allowance. See
@@ -598,8 +630,6 @@ public class EveningChainCanary {
    * not fire on such a day; the page would show the honest answer, which on a muhurat Saturday is
    * that none of the weekday evening jobs ran and none will.
    */
-  private static final long CLOCK_SKEW_ALLOWANCE_SECONDS = 60;
-
   private Instant expectedNotBefore(ExpectedLeg leg, LocalDate today, Instant dayEnd) {
     String cron = environment.getProperty(leg.cronProperty(), leg.cronDefault());
     try {
@@ -665,36 +695,6 @@ public class EveningChainCanary {
    *   <li>A screen genuinely in flight right now (fresh RUNNING) is not waved through on a watermark
    *       an earlier same-evening run already satisfied.
    * </ul>
-   */
-  /**
-   * ⚠️ <b>KNOWN FALSE-PENDING, measured and deliberately NOT fixed here (2026-08-25).</b>
-   *
-   * <p>{@link #withScreenerArtifact} covers the two screeners. TWO MORE legs have the identical
-   * "returns before {@code ledger.start}" shape and are NOT covered:
-   *
-   * <ul>
-   *   <li>{@code EquityBreadthEodJob:98-101} — skips when {@code latestDate() >= } the cash bhavcopy
-   *       watermark, opening its run row only at {@code :104}.
-   *   <li>{@code DataQualityEodJob:129-131} — skips when {@code repository.hasRowsFor(day)}, opening
-   *       its run row only at {@code :133}.
-   * </ul>
-   *
-   * <p>Both skip on any evening the bhavcopy watermark has not advanced by 18:50/18:51, so both read
-   * PENDING at 18:59 with nothing coming. {@code computed} 2026-08-25 over the last 45 days: on
-   * <b>7 of the 30 days</b> that BHAVCOPY wrote a row, DATA_QUALITY and EQUITY_BREADTH each wrote
-   * NONE — they go quiet together, because they share the watermark dependency. That is roughly
-   * every fourth evening, which is a cry-wolf rate, not a rarity.
-   *
-   * <p><b>Why it is not fixed in this PR.</b> The fix moves a verdict from PENDING to DONE — the
-   * DANGEROUS direction for this class, whose DONE means "safe to shut the machine down". Getting it
-   * right requires mirroring each producer's watermark derivation EXACTLY, the way
-   * {@link #screenHasConsumedTheWatermark} mirrors the screeners' {@code equals} rather than
-   * inventing a {@code >=} of its own — and {@code DataQualityEodJob}'s day derivation carries a
-   * documented mixed-watermark subtlety (cash vs any-series) that deserves its own PR and its own
-   * review round. A guessed mirror here buys a quieter push at the cost of a wrong shutdown.
-   *
-   * <p>Until then this class over-reports rather than under-reports, which is the correct way round.
-   * Ledger row and follow-up chip filed 2026-08-25.
    */
   private SourceProgress withScreenerArtifact(SourceProgress progress) {
     if (progress.state() != SourceState.PENDING

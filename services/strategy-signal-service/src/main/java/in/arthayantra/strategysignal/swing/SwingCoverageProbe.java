@@ -475,63 +475,96 @@ public final class SwingCoverageProbe {
   }
 
   /**
-   * How many trailing bars the EXIT pass must READ for {@code definition} — the declared warm-up plus,
-   * only when an exit operand is actually anchored at the ENTRY bar, the held span and the recursive
-   * ATR prefix. Feed the result to {@link #probeExit} as {@code footprintBars}.
+   * How many trailing bars the EXIT pass must READ for {@code definition} — the UNION of the
+   * current-anchored window and every entry-anchored operand's reach. Feed the result to {@link
+   * #probeExit} as {@code footprintBars}.
    *
-   * <h2>Why this is operand-aware and not a blanket widening (cross-vendor review, 2026-08-24)</h2>
+   * <h2>Union, not sum (cross-vendor review, 2026-08-24 round 2)</h2>
    *
-   * The first cut of this fix added the held span for EVERY strategy. That is wrong in the noisy
-   * direction: {@code minervini}'s exits are an entry-PRICE stop and a {@code basis: indicator} trail
-   * on {@code sma50}, and {@code ExitEvaluator}'s indicator branch DISCARDS the peak-since-entry it
-   * computes ({@code ExitEvaluator:569,659-670}). No Minervini exit operand reads the held span, so
-   * widening there turns a hole in irrelevant history into a per-position ARMED page claiming the
-   * stop/trail may be stretched. Under ARMED those pages are the ones carrying real money risk; a
-   * false one buries a true one. The review also caught the first cut's consumer test PINNING that
-   * false page as required behaviour.
+   * These windows OVERLAP — both end at the current bar — so adding them double-counts. The first
+   * cut returned {@code declared + heldBars + prefix}; on live Manas that is {@code 50 + heldBars +
+   * 39 = heldBars + 89} where the real requirement is {@code max(50, heldBars + 59)}. It probed 30
+   * bars no exit operand reads, which is the SAME false-page defect this class removes for Minervini,
+   * reintroduced along a different axis.
    *
-   * @param heldBars {@code lastIndex - entryIndex}; ignored unless an exit operand reads from entry
+   * <h2>Operand-aware, because most exits do not read the hold at all</h2>
+   *
+   * {@code minervini}'s exits are an entry-PRICE stop and a {@code basis: indicator} trail on {@code
+   * sma50}, and {@code ExitEvaluator}'s indicator branch DISCARDS the peak-since-entry {@code
+   * trailing()} computes ({@code ExitEvaluator:569,659-670}). Nothing there reads the held span, so
+   * widening would turn a hole in irrelevant history into a per-position ARMED page claiming the
+   * stop/trail may be stretched — and under ARMED those pages are the ones carrying real money risk.
+   *
+   * @param heldBars {@code lastIndex - entryIndex}; contributes only via entry-anchored operands
    */
   public static int exitFootprintBars(
       StrategyDefinition definition, IndicatorBank bank, int heldBars) {
-    int declared = exitLookbackBars(definition, bank);
-    if (!readsFromEntryBar(definition)) {
-      return declared;
+    int footprint = exitLookbackBars(definition, bank); // current-anchored window
+    int held = Math.max(0, heldBars);
+    if (definition == null || definition.exitRules() == null) {
+      return footprint;
     }
-    return declared + Math.max(0, heldBars) + recursiveAtrPrefixBars(definition);
+    for (StrategyDefinition.ExitRuleSpec rule : definition.exitRules()) {
+      int reach = entryReachBars(rule);
+      if (reach >= 0) {
+        // held span, the entry bar itself, then however far this operand reaches BEFORE entry
+        footprint = Math.max(footprint, held + 1 + reach);
+      }
+    }
+    return footprint;
   }
 
   /**
-   * True when ANY exit rule reads bars anchored at {@code entryIndex} rather than at the current bar.
-   * Traced against {@code ExitEvaluator} on 2026-08-24; exactly two shapes qualify:
+   * Bars this exit rule reads BEFORE the entry bar, or {@code -1} when it is not anchored at entry at
+   * all. Traced against {@code ExitEvaluator} on 2026-08-24.
    *
    * <ul>
-   *   <li>a {@code trailing_stop} whose {@code basis} is anything OTHER than {@code indicator} —
-   *       {@code premium_pct}, {@code atr_multiple} and {@code index_points} all resolve against
-   *       {@code favorableExtreme}, the peak scanned from {@code entryIndex}. The {@code indicator}
-   *       branch is the one exception and it is the Minervini shape.
-   *   <li>any rule with {@code basis: atr_multiple}, which reads {@code atrAtEntry} — the ATR AT the
-   *       entry bar. All four {@code atrAtEntry} call sites sit under that basis.
+   *   <li>{@code basis: atr_multiple} → {@link #atrDecayLength}. It resolves {@code atrAtEntry}, the
+   *       RECURSIVE Wilder ATR evaluated AT the entry bar, so its history precedes entry. All four
+   *       {@code atrAtEntry} call sites sit under this basis.
+   *   <li>a {@code trailing_stop} whose {@code basis} is anything other than {@code indicator} → 0.
+   *       {@code premium_pct} and {@code index_points} resolve against {@code favorableExtreme},
+   *       which scans {@code entryIndex..index} and reads NO pre-entry bar.
+   *   <li>{@code time_stop} → 0. Both forms depend on the hold span: {@code max_bars} counts {@code
+   *       index - entryIndex} (a hole changes the count, delaying the exit) and {@code
+   *       max_holding_days} explicitly scans {@code entryIndex + 1..index} reading each candle
+   *       ({@code ExitEvaluator:692-705}). ⚠️ Missed in the first cut because {@code time_stop} has
+   *       no {@code basis} param and the {@code max_bars} branch looks like pure index arithmetic.
    * </ul>
    *
-   * <p>Everything else is current-bar anchored and needs no widening: {@code stop_loss basis: percent}
-   * (entry PRICE, no series read), {@code square_off} ({@code primaryIndex - fast_bars}, SMA at
-   * {@code primaryIndex}), {@code signal_exit} (bank at the current index) and {@code time_stop}
-   * (index arithmetic only).
+   * <p>Everything else is current-bar anchored: {@code stop_loss basis: percent} (entry PRICE, no
+   * series read), {@code square_off} ({@code primaryIndex - fast_bars}, SMA at {@code primaryIndex}),
+   * {@code signal_exit} (bank at the current index), {@code scaled_exit} (entry price only).
    */
+  static int entryReachBars(StrategyDefinition.ExitRuleSpec rule) {
+    if (rule == null) {
+      return -1;
+    }
+    if ("time_stop".equals(rule.type())) {
+      return 0;
+    }
+    if (rule.params() == null) {
+      return -1;
+    }
+    String basis = String.valueOf(rule.params().get("basis"));
+    if ("atr_multiple".equals(basis)) {
+      Object period = rule.params().get("atr_period");
+      int n = period instanceof Number num ? num.intValue() : 14;
+      return atrDecayLength(n);
+    }
+    if ("trailing_stop".equals(rule.type()) && !"indicator".equals(basis)) {
+      return 0;
+    }
+    return -1;
+  }
+
+  /** True when ANY exit rule reads bars anchored at {@code entryIndex} rather than the current bar. */
   static boolean readsFromEntryBar(StrategyDefinition definition) {
     if (definition == null || definition.exitRules() == null) {
       return false;
     }
     for (StrategyDefinition.ExitRuleSpec rule : definition.exitRules()) {
-      if (rule == null || rule.params() == null) {
-        continue;
-      }
-      String basis = String.valueOf(rule.params().get("basis"));
-      if ("atr_multiple".equals(basis)) {
-        return true;
-      }
-      if ("trailing_stop".equals(rule.type()) && !"indicator".equals(basis)) {
+      if (entryReachBars(rule) >= 0) {
         return true;
       }
     }
@@ -539,52 +572,35 @@ public final class SwingCoverageProbe {
   }
 
   /**
-   * Extra prefix an ENTRY-PINNED ATR needs beyond its nominal period, because Wilder's ATR is
-   * RECURSIVE, not a finite window.
+   * How far back an entry-pinned Wilder ATR of period {@code n} is still worth probing.
    *
-   * <p>The engine's ATR is ta4j's {@code ATRIndicator} ({@code Ta4jIndicators#atr}), an MMA — each
+   * <p>The engine's ATR is ta4j's {@code ATRIndicator} ({@code Ta4jIndicators#atr}), an MMA: each
    * value folds in the previous one, so influence DECAYS geometrically rather than ending at {@code
-   * atr_period}. The repo already measured this: "Wilder retains ~12% of seed influence after 42
-   * bars" ({@code docs/signal-analysis/2026-08-02-manas-exit-stop-doctrine.md}). Treating {@code
-   * atr_period} as the warm-up — which {@code unstableBars()} reports and the first cut of this fix
-   * believed — under-bounds the real dependency by design, and that was the review's Critical.
+   * n}. Treating {@code atr_period} as the warm-up — which {@code unstableBars()} reports — under-
+   * bounds the real dependency, and that was a review Critical. Decay after {@code k} bars is {@code
+   * (1 - 1/n)^k}; this returns the first {@code k} below {@link #ATR_RESIDUAL_INFLUENCE}. At {@code
+   * n=20} that is 59, and {@code 0.95^42 = 0.117} reproduces the figure the repo already recorded.
    *
-   * <p>Decay for period {@code n} after {@code k} bars is {@code (1 - 1/n)^k}. This returns the
-   * {@code k} at which residual influence falls below {@link #ATR_RESIDUAL_INFLUENCE}, which
-   * reproduces the recorded figure as a check: at {@code n=20}, {@code 0.95^42 = 0.117}.
-   *
-   * <p>⚠️ A threshold, not a bound. A recursive indicator has NO finite exact dependency, so this is
-   * a deliberate cut-off — the honest framing is "holes closer than this can move the level enough to
-   * matter", not "holes beyond this cannot move it".
+   * <p>⚠️ A THRESHOLD, not a bound. A recursive indicator has no finite exact dependency, so the
+   * honest reading is "holes closer than this can move the level enough to matter" — never "holes
+   * beyond this cannot move it".
    */
-  static int recursiveAtrPrefixBars(StrategyDefinition definition) {
-    int deepest = 0;
-    if (definition == null || definition.exitRules() == null) {
+  static int atrDecayLength(int n) {
+    if (n <= 1) {
       return 0;
     }
-    for (StrategyDefinition.ExitRuleSpec rule : definition.exitRules()) {
-      if (rule == null || rule.params() == null) {
-        continue;
-      }
-      if (!"atr_multiple".equals(String.valueOf(rule.params().get("basis")))) {
-        continue;
-      }
-      Object period = rule.params().get("atr_period");
-      int n = period instanceof Number num ? num.intValue() : 14;
-      if (n <= 1) {
-        continue;
-      }
-      double retain = 1.0 - (1.0 / n);
-      int k = (int) Math.ceil(Math.log(ATR_RESIDUAL_INFLUENCE) / Math.log(retain));
-      deepest = Math.max(deepest, Math.max(0, k - n)); // n is already in the declared depth
-    }
-    return deepest;
+    return (int) Math.ceil(Math.log(ATR_RESIDUAL_INFLUENCE) / Math.log(1.0 - (1.0 / n)));
   }
 
   /**
    * Residual seed influence at which an entry-pinned ATR's history stops being probed — see {@link
-   * #recursiveAtrPrefixBars}. At {@code atr_period 20} (both live {@code manas-arora} slugs) this
-   * yields a 59-bar decay length, i.e. 39 bars BEYOND the declared period.
+   * #atrDecayLength}. At {@code atr_period 20} (both live {@code manas-arora} slugs) this yields 59
+   * bars.
+   *
+   * <p>⚠️ OWNER-SETTABLE ALERT POLICY, not a correctness constant, and flagged as such by review. The
+   * recorded measurement establishes 12% residual after 42 bars and up to ±0.78% stop variance from a
+   * differing series start — it does NOT establish that 5% residual is immaterial. Tighter means more
+   * true detections and more ARMED pages on a live money path; looser means fewer of both.
    */
   static final double ATR_RESIDUAL_INFLUENCE = 0.05;
 

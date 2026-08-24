@@ -4,6 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.strategyengine.config.StrategyCompiler;
+import in.arthayantra.strategyschema.StrategyDocuments;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import in.arthayantra.strategyengine.config.GateNode;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.series.EngineCandle;
@@ -479,26 +484,27 @@ class SwingCoverageProbeTest {
   // probeExit: an OPERAND-AWARE footprint (cross-vendor review, 2026-08-21 and 2026-08-24)
   // ---------------------------------------------------------------------------------------------
 
-  /** The Manas exit shape: entry-pinned ATR stop + rolling-ATR Chandelier trail. */
-  private static StrategyDefinition manasShape() {
-    return definition(
-        List.of(),
-        List.of(
-            new StrategyDefinition.ExitRuleSpec(
-                "stop_loss", Map.of("basis", "atr_multiple", "value", 2, "atr_period", 20)),
-            new StrategyDefinition.ExitRuleSpec(
-                "trailing_stop",
-                Map.of("basis", "atr_multiple", "value", 2, "atr_period", 20, "atr_basis", "rolling"))));
+  /**
+   * ⚠️ REAL seeded resources, never hand-built fixtures. A hand-built "Manas" fixture is exactly what
+   * {@code SwingCoverageDepthRatchetTest} warns about, and the first cut of these tests made that
+   * mistake: {@code manasShape()} declared no indicators, so its depth read 20 instead of the live 50
+   * and the union-vs-sum defect below was invisible.
+   */
+  private static StrategyDefinition seeded(String resource) throws IOException {
+    try (InputStream stream = SwingCoverageProbeTest.class.getResourceAsStream(resource)) {
+      assertThat(stream).as("seeded resource %s must exist", resource).isNotNull();
+      return StrategyCompiler.compile(
+          StrategyDocuments.parse(new String(stream.readAllBytes(), StandardCharsets.UTF_8))
+              .config());
+    }
   }
 
-  /** The Minervini exit shape: entry-PRICE stop + current-bar indicator trail. */
-  private static StrategyDefinition minerviniShape() {
-    return definition(
-        List.of(),
-        List.of(
-            new StrategyDefinition.ExitRuleSpec("stop_loss", Map.of("basis", "percent", "value", 8)),
-            new StrategyDefinition.ExitRuleSpec(
-                "trailing_stop", Map.of("basis", "indicator", "alias", "sma50"))));
+  private static StrategyDefinition manas() throws IOException {
+    return seeded("/manas-arora-strategies/manas-arora-vcp.yaml");
+  }
+
+  private static StrategyDefinition minervini() throws IOException {
+    return seeded("/minervini-strategies/minervini-vcp.yaml");
   }
 
   /**
@@ -507,41 +513,108 @@ class SwingCoverageProbeTest {
    */
   @Test
   @DisplayName("the held span widens Manas and must NOT widen Minervini")
-  void footprintIsOperandAware() {
-    assertThat(SwingCoverageProbe.readsFromEntryBar(manasShape())).isTrue();
-    assertThat(SwingCoverageProbe.readsFromEntryBar(minerviniShape()))
+  void footprintIsOperandAware() throws IOException {
+    assertThat(SwingCoverageProbe.readsFromEntryBar(manas())).isTrue();
+    assertThat(SwingCoverageProbe.readsFromEntryBar(minervini()))
         .as("basis:indicator discards the peak-since-entry, so nothing reads the hold")
         .isFalse();
 
-    int minerviniDeclared = SwingCoverageProbe.exitLookbackBars(minerviniShape(), null);
-    assertThat(SwingCoverageProbe.exitFootprintBars(minerviniShape(), null, 200))
+    int minerviniDeclared = SwingCoverageProbe.exitLookbackBars(minervini(), null);
+    assertThat(SwingCoverageProbe.exitFootprintBars(minervini(), null, 200))
         .as("a 200-bar hold must not widen a current-bar-only exit — that is a false ARMED page")
         .isEqualTo(minerviniDeclared);
-
-    int manasDeclared = SwingCoverageProbe.exitLookbackBars(manasShape(), null);
-    assertThat(SwingCoverageProbe.exitFootprintBars(manasShape(), null, 30))
-        .as("an entry-pinned ATR + peak-since-entry trail must widen by hold AND recursive prefix")
-        .isEqualTo(manasDeclared + 30 + SwingCoverageProbe.recursiveAtrPrefixBars(manasShape()));
   }
 
   /**
-   * The recursive-ATR prefix is grounded in a measurement the repo already recorded, not invented:
-   * "Wilder retains ~12% of seed influence after 42 bars"
-   * ({@code docs/signal-analysis/2026-08-02-manas-exit-stop-doctrine.md}). Decay is {@code
-   * (1-1/n)^k}, so this pins that the formula reproduces the recorded figure.
+   * The two windows OVERLAP (both end at the current bar), so the footprint is their UNION. Summing
+   * them probes history no operand reads — the first cut returned {@code heldBars + 89} on live Manas
+   * where the requirement is {@code max(50, heldBars + 59)}, over-probing by 30 bars.
    */
   @Test
-  @DisplayName("recursive ATR prefix reproduces the recorded 12%-after-42-bars decay")
-  void recursiveAtrPrefixMatchesTheRecordedDecay() {
+  @DisplayName("the footprint UNIONS the current- and entry-anchored windows, never sums them")
+  void footprintUnionsRatherThanSums() throws IOException {
+    StrategyDefinition manas = manas();
+    int declared = SwingCoverageProbe.exitLookbackBars(manas, null);
+    assertThat(declared).as("live Manas declares an unused sma50 — the ratchet pins this").isEqualTo(50);
+
+    int decay = SwingCoverageProbe.atrDecayLength(20);
+    assertThat(decay).isEqualTo(59);
+
+    // Short hold: the current-anchored 50-bar window still dominates.
+    assertThat(SwingCoverageProbe.exitFootprintBars(manas, null, 5))
+        .as("a 5-bar hold cannot need more than the declared window")
+        .isEqualTo(Math.max(declared, 5 + 1 + decay));
+
+    // Long hold: entry-anchored reach dominates, but only by the UNION, not the sum.
+    assertThat(SwingCoverageProbe.exitFootprintBars(manas, null, 100))
+        .as("union = max(50, 100+1+59) = 160, NOT 50+100+59")
+        .isEqualTo(160);
+  }
+
+  /**
+   * {@code time_stop} was missed by the first cut: it carries no {@code basis} param, and the {@code
+   * max_bars} branch looks like pure index arithmetic. Both forms depend on the hold span — {@code
+   * max_bars} counts {@code index - entryIndex}, and {@code max_holding_days} scans {@code
+   * entryIndex + 1..index} reading each candle ({@code ExitEvaluator:692-705}).
+   */
+  @Test
+  @DisplayName("both time_stop forms count as entry-anchored")
+  void timeStopIsHoldSpanDependent() {
+    StrategyDefinition maxBars =
+        definition(
+            List.of(),
+            List.of(new StrategyDefinition.ExitRuleSpec("time_stop", Map.of("max_bars", 30))));
+    StrategyDefinition maxDays =
+        definition(
+            List.of(),
+            List.of(
+                new StrategyDefinition.ExitRuleSpec("time_stop", Map.of("max_holding_days", 30))));
+
+    assertThat(SwingCoverageProbe.readsFromEntryBar(maxBars)).isTrue();
+    assertThat(SwingCoverageProbe.readsFromEntryBar(maxDays)).isTrue();
+    assertThat(SwingCoverageProbe.exitFootprintBars(maxBars, null, 80))
+        .as("a hole delays a max_bars stop, so the hold span must be probed")
+        .isEqualTo(81);
+    assertThat(SwingCoverageProbe.entryReachBars(
+            new StrategyDefinition.ExitRuleSpec("time_stop", Map.of("max_bars", 30))))
+        .as("time_stop reads no PRE-entry bar, so its reach is the hold span alone")
+        .isZero();
+  }
+
+  /**
+   * A peak-since-entry trail reads {@code entryIndex..index} and NO pre-entry bar, so its reach is 0 —
+   * distinct from an entry-pinned ATR, whose recursive history precedes entry.
+   */
+  @Test
+  @DisplayName("a peak-since-entry trail reaches to entry but not before it")
+  void peakTrailReachesEntryOnly() {
+    assertThat(SwingCoverageProbe.entryReachBars(
+            new StrategyDefinition.ExitRuleSpec(
+                "trailing_stop", Map.of("basis", "index_points", "value", 50))))
+        .isZero();
+    assertThat(SwingCoverageProbe.entryReachBars(
+            new StrategyDefinition.ExitRuleSpec(
+                "trailing_stop", Map.of("basis", "indicator", "alias", "sma50"))))
+        .as("the indicator branch is current-anchored — not entry-anchored at all")
+        .isEqualTo(-1);
+    assertThat(SwingCoverageProbe.entryReachBars(
+            new StrategyDefinition.ExitRuleSpec("stop_loss", Map.of("basis", "percent", "value", 8))))
+        .isEqualTo(-1);
+  }
+
+  /**
+   * The recursive-ATR reach is grounded in a measurement the repo already recorded, not invented:
+   * "Wilder retains ~12% of seed influence after 42 bars"
+   * ({@code docs/signal-analysis/2026-08-02-manas-exit-stop-doctrine.md}).
+   */
+  @Test
+  @DisplayName("recursive ATR reach reproduces the recorded 12%-after-42-bars decay")
+  void recursiveAtrReachMatchesTheRecordedDecay() {
     assertThat(Math.pow(1.0 - 1.0 / 20, 42))
         .as("the doc's figure, re-derived — guards the formula this constant rests on")
         .isCloseTo(0.12, org.assertj.core.data.Offset.offset(0.01));
-
-    // 0.95^k < 0.05 first at k = 59; the declared atr_period 20 already covers 20 of those bars.
-    assertThat(SwingCoverageProbe.recursiveAtrPrefixBars(manasShape())).isEqualTo(39);
-    assertThat(SwingCoverageProbe.recursiveAtrPrefixBars(minerviniShape()))
-        .as("no atr_multiple basis means no recursive prefix at all")
-        .isZero();
+    assertThat(SwingCoverageProbe.atrDecayLength(20)).isEqualTo(59);
+    assertThat(SwingCoverageProbe.atrDecayLength(14)).isGreaterThan(14);
   }
 
   /**

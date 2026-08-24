@@ -477,6 +477,39 @@ class ManasAroraSwingEngineTest {
   // ---- harness --------------------------------------------------------------------------------
 
   /**
+   * CONSUMER PROOF FOR THE RECURSIVE ATR PREFIX specifically — the gap this places is outside {@code
+   * declared + heldBars} yet inside the entry-pinned ATR's decay reach, so ONLY the recursive term
+   * can detect it.
+   *
+   * <p>Added because review round 2 pointed out the sibling test below could not prove this: it
+   * anchors entry at the FIRST bar, so its gap always falls inside the held span and the consumer
+   * stays green even with the recursive term removed. Live Manas declares 50 (unused {@code sma50})
+   * and {@code atrDecayLength(20)} is 59. With a 20-bar hold the footprint is {@code max(50, 20+1+59)
+   * = 80}, while a hypothetical {@code declared + held} would reach only 70 — so a gap 75 bars back
+   * separates them.
+   */
+  @Test
+  void exitCoverageSeesAPreEntryGapInsideTheRecursiveAtrReach() throws IOException {
+    List<EngineCandle> full = longDecline();
+    int lastIndex = full.size() - 1;
+    // 2026-04-15/16/17 — three REAL trading days. An earlier attempt used lastIndex-75..-73, which
+    // began on 2026-04-14 (Ambedkar Jayanti): a dropped non-trading day is not a hole, so only 2
+    // counted and 2*22 did not clear the materiality basis of 50. Measured, not assumed.
+    ExitHarness h = new ExitHarness(droppedAt(full, lastIndex - 74, lastIndex - 73, lastIndex - 72));
+    // entry 20 bars before the end: the gap above sits BEFORE entry, outside declared + held
+    h.stubAnchors(h.anchor(42L, full.get(lastIndex - 20).bucketStart()));
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
+
+    h.engine(SwingBatchEngine.CoverageGateMode.ARMED).runDaily(h.doctrine(false));
+
+    assertThat(h.coverageRows)
+        .as(
+            "a PRE-ENTRY gap inside the recursive Wilder ATR's decay reach can move atrAtEntry and"
+                + " therefore the stop — only the recursive term sees it")
+        .containsExactly("manas-arora|2026-08-04|TESTCO|EXIT_DEGRADED_COVERAGE:TESTCO");
+  }
+
+  /**
    * THE CONSUMER TEST for the operand-aware exit footprint. Manas is the shape that genuinely reads
    * from the entry bar — {@code stop_loss basis: atr_multiple} resolves {@code atrAtEntry} (the
    * recursive Wilder ATR AT the entry index) and its {@code trailing_stop basis: atr_multiple
@@ -662,6 +695,21 @@ class ManasAroraSwingEngineTest {
     return new EngineCandle(
         date.atStartOfDay().atOffset(IST), c, BigDecimal.valueOf(price + 1),
         BigDecimal.valueOf(price - 1), c, 1_000L, null);
+  }
+
+  /** Drops the given INDEX positions from a series — precise placement relative to the last bar. */
+  private static List<EngineCandle> droppedAt(List<EngineCandle> series, int... indexes) {
+    java.util.Set<Integer> drop = new java.util.HashSet<>();
+    for (int i : indexes) {
+      drop.add(i);
+    }
+    List<EngineCandle> out = new ArrayList<>();
+    for (int i = 0; i < series.size(); i++) {
+      if (!drop.contains(i)) {
+        out.add(series.get(i));
+      }
+    }
+    return out;
   }
 
   /** Drops the given days of {@code month} from a series. */

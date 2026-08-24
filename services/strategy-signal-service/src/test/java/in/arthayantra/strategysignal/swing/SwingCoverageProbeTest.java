@@ -476,77 +476,127 @@ class SwingCoverageProbeTest {
   }
 
   // ---------------------------------------------------------------------------------------------
-  // probeExit: the held span is part of the footprint (cross-vendor review, 2026-08-21)
+  // probeExit: an OPERAND-AWARE footprint (cross-vendor review, 2026-08-21 and 2026-08-24)
   // ---------------------------------------------------------------------------------------------
 
+  /** The Manas exit shape: entry-pinned ATR stop + rolling-ATR Chandelier trail. */
+  private static StrategyDefinition manasShape() {
+    return definition(
+        List.of(),
+        List.of(
+            new StrategyDefinition.ExitRuleSpec(
+                "stop_loss", Map.of("basis", "atr_multiple", "value", 2, "atr_period", 20)),
+            new StrategyDefinition.ExitRuleSpec(
+                "trailing_stop",
+                Map.of("basis", "atr_multiple", "value", 2, "atr_period", 20, "atr_basis", "rolling"))));
+  }
+
+  /** The Minervini exit shape: entry-PRICE stop + current-bar indicator trail. */
+  private static StrategyDefinition minerviniShape() {
+    return definition(
+        List.of(),
+        List.of(
+            new StrategyDefinition.ExitRuleSpec("stop_loss", Map.of("basis", "percent", "value", 8)),
+            new StrategyDefinition.ExitRuleSpec(
+                "trailing_stop", Map.of("basis", "indicator", "alias", "sma50"))));
+  }
+
   /**
-   * THE DISCRIMINATING CASE for the exit fix. A hole 30 sessions back is invisible to a 20-bar
-   * declared-depth window and visible to the exit's real footprint, because the peak-since-entry
-   * scan and the entry-pinned ATR both reach back to the entry bar. Without this test the widening
-   * could be a no-op and every other test here would still pass.
+   * THE DISCRIMINATING PAIR. Identical hold, opposite requirement — the held span belongs in the
+   * footprint only when an exit operand actually reads from the entry bar.
    */
   @Test
-  @DisplayName("a hole outside the declared depth but INSIDE the held span is reported")
-  void holeInsideTheHeldSpanIsReported() {
+  @DisplayName("the held span widens Manas and must NOT widen Minervini")
+  void footprintIsOperandAware() {
+    assertThat(SwingCoverageProbe.readsFromEntryBar(manasShape())).isTrue();
+    assertThat(SwingCoverageProbe.readsFromEntryBar(minerviniShape()))
+        .as("basis:indicator discards the peak-since-entry, so nothing reads the hold")
+        .isFalse();
+
+    int minerviniDeclared = SwingCoverageProbe.exitLookbackBars(minerviniShape(), null);
+    assertThat(SwingCoverageProbe.exitFootprintBars(minerviniShape(), null, 200))
+        .as("a 200-bar hold must not widen a current-bar-only exit — that is a false ARMED page")
+        .isEqualTo(minerviniDeclared);
+
+    int manasDeclared = SwingCoverageProbe.exitLookbackBars(manasShape(), null);
+    assertThat(SwingCoverageProbe.exitFootprintBars(manasShape(), null, 30))
+        .as("an entry-pinned ATR + peak-since-entry trail must widen by hold AND recursive prefix")
+        .isEqualTo(manasDeclared + 30 + SwingCoverageProbe.recursiveAtrPrefixBars(manasShape()));
+  }
+
+  /**
+   * The recursive-ATR prefix is grounded in a measurement the repo already recorded, not invented:
+   * "Wilder retains ~12% of seed influence after 42 bars"
+   * ({@code docs/signal-analysis/2026-08-02-manas-exit-stop-doctrine.md}). Decay is {@code
+   * (1-1/n)^k}, so this pins that the formula reproduces the recorded figure.
+   */
+  @Test
+  @DisplayName("recursive ATR prefix reproduces the recorded 12%-after-42-bars decay")
+  void recursiveAtrPrefixMatchesTheRecordedDecay() {
+    assertThat(Math.pow(1.0 - 1.0 / 20, 42))
+        .as("the doc's figure, re-derived — guards the formula this constant rests on")
+        .isCloseTo(0.12, org.assertj.core.data.Offset.offset(0.01));
+
+    // 0.95^k < 0.05 first at k = 59; the declared atr_period 20 already covers 20 of those bars.
+    assertThat(SwingCoverageProbe.recursiveAtrPrefixBars(manasShape())).isEqualTo(39);
+    assertThat(SwingCoverageProbe.recursiveAtrPrefixBars(minerviniShape()))
+        .as("no atr_multiple basis means no recursive prefix at all")
+        .isZero();
+  }
+
+  /**
+   * THE DISCRIMINATING CASE for the widening itself: a hole outside the declared depth but inside the
+   * footprint. Without it the widening could be a no-op and every other test here would still pass.
+   */
+  @Test
+  @DisplayName("a hole outside the declared depth but INSIDE the footprint is reported")
+  void holeInsideTheFootprintIsReported() {
     LocalDate end = LocalDate.of(2026, 8, 3);
     List<EngineCandle> bars = tradingWindow(100, end, 69); // 30 sessions back from the newest
 
-    assertThat(SwingCoverageProbe.probe(bars, 20, NSE).incomplete())
+    assertThat(SwingCoverageProbe.probeExit(bars, 20, 20, NSE).incomplete())
         .as("declared depth alone cannot see a gap 30 rows back — this is the defect")
         .isFalse();
-    assertThat(SwingCoverageProbe.probeExit(bars, 20, 30, NSE).incomplete())
-        .as("the exit reads entryIndex..lastIndex, so a gap inside the hold MUST be reported")
+    assertThat(SwingCoverageProbe.probeExit(bars, 20, 50, NSE).incomplete())
+        .as("a footprint reaching the entry bar MUST report a gap inside the hold")
         .isTrue();
   }
 
   /** Widening the footprint may not move the denominator — the one-way property DEPTH_SLACK relies on. */
   @Test
-  @DisplayName("the held span widens the footprint without moving the materiality band")
-  void heldSpanDoesNotLoosenTheBand() {
+  @DisplayName("a wider footprint does not move the materiality band")
+  void widerFootprintDoesNotLoosenTheBand() {
     LocalDate end = LocalDate.of(2026, 8, 3);
     List<EngineCandle> clean = tradingWindow(100, end);
 
-    SwingCoverageProbe.Coverage narrow = SwingCoverageProbe.probeExit(clean, 20, 0, NSE);
-    SwingCoverageProbe.Coverage wide = SwingCoverageProbe.probeExit(clean, 20, 30, NSE);
+    SwingCoverageProbe.Coverage narrow = SwingCoverageProbe.probeExit(clean, 20, 20, NSE);
+    SwingCoverageProbe.Coverage wide = SwingCoverageProbe.probeExit(clean, 20, 50, NSE);
 
     assertThat(wide.materialityBasis())
         .as("denominator is the DECLARED depth's span, never the widened footprint")
         .isEqualTo(narrow.materialityBasis());
-    assertThat(wide.windowSessions())
-        .as("the footprint itself does grow")
-        .isGreaterThan(narrow.windowSessions());
-    assertThat(wide.lookbackBars())
-        .as("the reading is still ABOUT the declared depth")
-        .isEqualTo(20);
+    assertThat(wide.windowSessions()).as("the footprint itself does grow").isGreaterThan(narrow.windowSessions());
+    assertThat(wide.lookbackBars()).as("the reading is still ABOUT the declared depth").isEqualTo(20);
   }
 
-  /** A same-session position must read byte-identically to the pre-fix call. */
+  /** A footprint at or below the declared depth reads byte-identically to the pre-fix call. */
   @Test
-  @DisplayName("heldBars 0 reads exactly as the old declared-depth probe did")
-  void zeroHeldBarsIsTheOldReading() {
+  @DisplayName("a footprint no wider than the declared depth is the old reading")
+  void narrowFootprintIsTheOldReading() {
     LocalDate end = LocalDate.of(2026, 8, 3);
     List<EngineCandle> bars = tradingWindow(60, end, 50);
+    assertThat(SwingCoverageProbe.probeExit(bars, 20, 20, NSE)).isEqualTo(SwingCoverageProbe.probe(bars, 20, NSE));
     assertThat(SwingCoverageProbe.probeExit(bars, 20, 0, NSE))
+        .as("a footprint SMALLER than the declared depth must not shrink the window")
         .isEqualTo(SwingCoverageProbe.probe(bars, 20, NSE));
   }
 
-  /** A negative held span (unresolvable entry) clamps rather than shrinking the window. */
+  /** Zero declared depth still makes NO claim — it must not become "complete" via a wide footprint. */
   @Test
-  @DisplayName("a negative held span clamps to zero, never shrinks the footprint")
-  void negativeHeldSpanClamps() {
+  @DisplayName("zero declared depth stays undeterminable however wide the footprint")
+  void zeroDepthStaysUndeterminable() {
     LocalDate end = LocalDate.of(2026, 8, 3);
-    List<EngineCandle> bars = tradingWindow(60, end, 50);
-    assertThat(SwingCoverageProbe.probeExit(bars, 20, -5, NSE))
-        .isEqualTo(SwingCoverageProbe.probe(bars, 20, NSE));
-  }
-
-  /** Zero declared depth still makes NO claim — it must not become "complete" via a held span. */
-  @Test
-  @DisplayName("zero declared depth stays undeterminable however long the hold")
-  void zeroDepthStaysUndeterminableWithAHold() {
-    LocalDate end = LocalDate.of(2026, 8, 3);
-    assertThat(SwingCoverageProbe.probeExit(tradingWindow(100, end), 0, 40, NSE).determinable())
-        .isFalse();
+    assertThat(SwingCoverageProbe.probeExit(tradingWindow(100, end), 0, 60, NSE).determinable()).isFalse();
   }
 
   /** A fixed count of NSE sessions ending at {@code end}, optionally omitting session indexes. */

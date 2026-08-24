@@ -1126,14 +1126,18 @@ public class SwingBatchEngine {
       // ARMED records + errors + PAGES. ARMED on this half means "alert loudly" — see
       // CoverageGateMode. The evaluation below runs identically under all three.
       if (coverageGateMode != CoverageGateMode.DISABLED) {
-        // heldBars, NOT just the declared depth: the trail is measured off a peak scanned from
-        // entryIndex and an ATR pinned AT entryIndex, so on a long-held position the bars that
-        // decide the level sit OUTSIDE any current-bar window. See SwingCoverageProbe#probeExit.
+        // The footprint is OPERAND-AWARE, not just the declared depth. A trail measured off a peak
+        // scanned from entryIndex, or an ATR pinned AT entryIndex, depends on bars that sit outside
+        // any current-bar window on a long-held position — while a basis:indicator trail (the
+        // Minervini shape) depends on none of them and must NOT be widened, or ARMED pages on
+        // history its exit never reads. See SwingCoverageProbe#exitFootprintBars.
+        int exitDeclaredDepth = SwingCoverageProbe.exitLookbackBars(strat.definition(), bank);
         SwingCoverageProbe.Coverage exitCoverage =
             SwingCoverageProbe.probeExit(
                 series,
-                SwingCoverageProbe.exitLookbackBars(strat.definition(), bank),
-                (series.size() - 1) - entryIndex,
+                exitDeclaredDepth,
+                SwingCoverageProbe.exitFootprintBars(
+                    strat.definition(), bank, (series.size() - 1) - entryIndex),
                 calendar);
         // ⚠️ UNDETERMINABLE counts as degraded here, and materiallyIncomplete() alone does NOT say
         // so — it is false when determinable is false, so a probe that FAILED reported the exit as

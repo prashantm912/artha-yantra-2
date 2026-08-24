@@ -534,21 +534,23 @@ class MinerviniSwingEngineTest {
   }
 
   /**
-   * THE CONSUMER TEST for the 2026-08-21 exit-sizing fix. The probe knowing how to widen is worthless
-   * unless the ENGINE hands it the held span, so this asserts through {@code runDaily}.
+   * THE FALSE-PAGE GUARD, and it asserts the OPPOSITE of what this test did in its first revision.
    *
-   * <p>⚠️ It needs a series LONGER than the declared depth, and that is not a detail. The first cut
-   * of this test reused the 25-bar {@link #craftDecline} harness against a strategy declaring {@code
-   * sma50}: {@code measure} clamps its start to {@code max(0, size - probedBars)}, so the pre-fix
-   * probe was already reading the ENTIRE series and the red-proof stayed GREEN. The harness could not
-   * express the defect. A 145-bar series with the gap ~135 bars back is the shape that can.
+   * <p>That revision required a February gap — 135 bars back, far outside the declared 50-bar depth —
+   * to raise {@code EXIT_DEGRADED_COVERAGE} on a Minervini position, and red-proofed it. The proof was
+   * mechanically valid and pinned the wrong requirement: cross-vendor review (2026-08-24) pointed out
+   * that NO Minervini exit operand reads that history. Its stop is on the entry PRICE and its trail is
+   * {@code basis: indicator} on {@code sma50}, whose branch DISCARDS the peak-since-entry {@code
+   * trailing()} computes ({@code ExitEvaluator:569,659-670}).
    *
-   * <p>Entry is the oldest bar, so the February gap sits inside {@code entryIndex..lastIndex} — where
-   * the peak-since-entry scan and the entry-pinned ATR read — while a 50-bar current-bar window
-   * reaches only to ~May. That is precisely what ARMED reported as cleanly covered.
+   * <p>Under ARMED each such row is a per-position page asserting the stop/trail may be stretched. The
+   * PR's own design note rejected per-symbol entry paging because it would "bury the exit-side alerts
+   * that actually carry money risk" — manufacturing false exit pages does exactly that. So the
+   * requirement is the reverse: a long-held Minervini position with a gap in history its exit never
+   * reads must stay SILENT.
    */
   @Test
-  void exitCoverageSeesAGapInsideTheHoldButOutsideTheDeclaredDepth() throws IOException {
+  void aLongHeldMinerviniPositionDoesNotPageOnHistoryItsExitNeverReads() throws IOException {
     ExitHarness h = new ExitHarness(longDecline());
     List<EngineCandle> holed = holed(h.series, 2, 10, 11, 12);
     assertThat(holed).hasSize(h.series.size() - 3);
@@ -560,28 +562,27 @@ class MinerviniSwingEngineTest {
     assertThat(run.exits()).as("doctrine is unchanged — the exit still fires").isEqualTo(1);
     assertThat(h.coverageRows)
         .as(
-            "a gap inside the hold but outside the declared 50-bar depth must be REPORTED — pre-fix"
-                + " the engine sized the exit probe on declared depth alone and saw nothing here")
-        .containsExactly("minervini|2026-08-04|TESTCO|EXIT_DEGRADED_COVERAGE:TESTCO");
+            "an entry-price stop and a current-bar sma50 trail read NONE of this history — widening"
+                + " the footprint here would page ops about a gap that cannot move either level")
+        .isEmpty();
   }
 
   /**
-   * Control for {@link #exitCoverageSeesAGapInsideTheHoldButOutsideTheDeclaredDepth}: on the SAME
-   * long series, a clean hold reports clean. Without this the test above could pass because widening
-   * makes everything look incomplete.
+   * Control: the same Minervini strategy DOES still page when the gap lands inside the window its
+   * {@code sma50} trail actually reads. Without this, the guard above could pass because the exit
+   * probe had been switched off entirely.
    */
   @Test
-  void aLongCleanHoldStillReportsCleanCoverage() throws IOException {
+  void minerviniStillPagesWhenTheGapIsInsideTheTrailWindow() throws IOException {
     ExitHarness h = new ExitHarness(longDecline());
-    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
+    List<EngineCandle> holed = holed(h.series, 6, 16, 18, 19);
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(holed);
 
-    SwingBatchEngine.SwingRun run =
-        h.engine(SwingBatchEngine.CoverageGateMode.ARMED).runDaily(h.doctrine());
+    h.engine(SwingBatchEngine.CoverageGateMode.ARMED).runDaily(h.doctrine());
 
-    assertThat(run.exits()).isEqualTo(1);
     assertThat(h.coverageRows)
-        .as("widening the footprint must not manufacture a hole on a complete series")
-        .isEmpty();
+        .as("a gap inside the 50-bar sma50 window is real and must still be reported")
+        .containsExactly("minervini|2026-08-04|TESTCO|EXIT_DEGRADED_COVERAGE:TESTCO");
   }
 
   /**

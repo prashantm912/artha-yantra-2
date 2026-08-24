@@ -16,12 +16,16 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
- * M4 (#128 batch scoping): "swing book MTM blind — non-ticking equities mark at cost." Confirmed
- * still true against {@code PaperService.positionDetail}/{@code toPositionDto}: an OPEN position
- * with no live tick (structurally every swing/funnel equity — the live feed is index/options only)
- * leaves {@code mark}/{@code unrealized} {@code null} for its ENTIRE holding period, with nothing
- * anywhere surfacing that condition. {@code mark}/{@code unrealized} stay exactly {@code null} as
- * before (asserted below) — this is CHARACTERIZATION + VISIBILITY, not a fix.
+ * M4 (#128 batch scoping): "swing book MTM blind — non-ticking equities mark at cost."
+ *
+ * <p><b>Scope narrowed 2026-08-13.</b> This originally characterized a permanent condition: a
+ * no-tick equity left {@code mark}/{@code unrealized} {@code null} for its ENTIRE holding period.
+ * That is no longer true in general — {@link EquityMarkCache} supplies a daily close for cash
+ * equities, so a held swing position is normally MARKED and its unrealized is real. What these tests
+ * now characterize is the residual EMPTY-CACHE case: no tick AND no captured close (a fresh boot
+ * before the first swing exit pass, or a symbol the batch never reached). Every harness below wires
+ * an empty cache deliberately, so the assertions still describe genuinely unmarkable positions —
+ * which is exactly what the gauge counts.
  *
  * <p><b>Design history (two review rounds, both against the SAME metric):</b>
  * <ul>
@@ -34,9 +38,12 @@ import org.junit.jupiter.api.Test;
  *       every position was re-observed).
  * </ul>
  *
- * <p>The gauge is now DERIVED, not tracked: {@code PaperService.countMtmBlindPositions()} queries
- * {@code positions.listOpen()} + {@code lastTick.lastPrice} directly on every read, with NO
- * intermediate state to race, purge, or rebuild. The three tests below pin exactly the three holes
+ * <p>The gauge is DERIVED, not tracked: {@code PaperService.countMtmBlindPositions()} resolves
+ * {@code PaperAccountService.unmarkedOpenCount}, which queries {@code positions.listOpen()} and the
+ * shared mark resolution (live tick, else a captured daily close) on every read, with NO
+ * intermediate state to race, purge, or rebuild. Since 2026-08-13 "blind" means NO MARK OF ANY KIND
+ * rather than "no live tick": a cash equity now carries a daily close, so counting it blind would
+ * saturate the gauge on a permanent structural condition and make it useless as an alert. The three tests below pin exactly the three holes
  * round 2 found, proving the derivation is immune to each: {@link
  * #aCloseRacingAStaleDetailReadNeverCorruptsTheGauge}, {@link
  * #resetNeedsNoExplicitGaugeCleanupBecauseTheGaugeFollowsTheRepository}, and {@link
@@ -78,7 +85,11 @@ class PaperServiceMtmBlindGaugeTest {
    */
   private static void stubListOpen(PaperPositionRepository positions, List<PositionRow> rows) {
     when(positions.listOpen()).thenReturn(rows);
-    when(positions.listOpen(anyString())).thenReturn(rows);
+    // any(), NOT anyString(): the gauge asks for the ALL-BOOKS view via listOpen(null), and
+    // anyString() does not match null — the stub would silently return an empty list and the gauge
+    // would read 0 for reasons that have nothing to do with the code under test.
+    when(positions.listOpen(any(String.class))).thenReturn(rows);
+    when(positions.listOpen(null)).thenReturn(rows);
   }
 
   private static PaperService harness(
@@ -89,11 +100,27 @@ class PaperServiceMtmBlindGaugeTest {
             new InstrumentMetaClient.InstrumentMeta(
                 in.arthayantra.strategyengine.fills.InstrumentClass.EQUITY, new BigDecimal("0.05"), 1));
 
+    // A REAL PaperAccountService over the SAME mocked repository + tick reader, with an EMPTY
+    // EquityMarkCache. The gauge derives through its shared mark definition (tick, else captured
+    // close), so with no captured closes the answer is identical to the pre-equity-mark behaviour —
+    // which is exactly what keeps these characterization assertions meaningful.
+    PaperAccountRepository accounts = mock(PaperAccountRepository.class);
+    when(accounts.get(any()))
+        .thenReturn(
+            new PaperAccountRepository.Account(
+                new BigDecimal("150000.00"), new BigDecimal("150000.00"), null));
+    PaperAccountService accountService =
+        new PaperAccountService(
+            accounts, positions, lastTick,
+            new EquityMarkCache(java.time.Clock.systemUTC(), 5), instruments,
+            mock(MarginServiceClient.class), java.time.Clock.systemUTC(),
+            new BigDecimal("0.15"), new BigDecimal("0.12"));
+
     return new PaperService(
         mock(PaperOrderRepository.class), mock(PaperPositionLotRepository.class), positions,
         new PaperFillService(), lastTick, instruments,
         mock(in.arthayantra.strategysignal.signals.SignalRepository.class),
-        mock(PaperAccountService.class), mock(BookResolver.class), mock(RiskService.class),
+        accountService, mock(BookResolver.class), mock(RiskService.class),
         mock(ScalperAccountModel.class),
         mock(org.springframework.context.ApplicationEventPublisher.class),
         mock(PaperStaleTickAlerter.class), mock(PaperOrderRejectionRecorder.class),
@@ -190,7 +217,7 @@ class PaperServiceMtmBlindGaugeTest {
     // stored state to update.
     when(lastTick.lastPrice(anyString(), anyString()))
         .thenReturn(Optional.empty(), Optional.of(new BigDecimal("2600.00")));
-    when(positions.listOpen()).thenReturn(List.of(openRow(1L)));
+    stubListOpen(positions, List.of(openRow(1L)));
     PaperService paper = harness(meters, lastTick, positions);
 
     assertThat(gaugeValue(meters)).as("blind on the first gauge read").isEqualTo(1.0);
@@ -245,7 +272,7 @@ class PaperServiceMtmBlindGaugeTest {
     // Mocks have no real backing store, so this re-stub stands in for what deleteAll() actually
     // does in production: the SAME repository, queried again, now reflects zero open positions.
     // No PaperService method needs to be told about the reset for the gauge to catch up.
-    when(positions.listOpen()).thenReturn(List.of());
+    stubListOpen(positions, List.of());
 
     assertThat(gaugeValue(meters)).as("zero immediately after reset, no cleanup call needed").isZero();
   }
@@ -281,7 +308,7 @@ class PaperServiceMtmBlindGaugeTest {
     paper.settle(openRow(1L), new BigDecimal("2600.00"), "TEST_CLOSE");
     // Mirrors the reset test: settle() calls positions.close(), which in production also removes
     // the row from listOpen()'s result set. The mock re-stub stands in for that real DB effect.
-    when(positions.listOpen()).thenReturn(List.of());
+    stubListOpen(positions, List.of());
 
     assertThat(gaugeValue(meters)).as("a closed position can never be MTM-blind again").isZero();
   }

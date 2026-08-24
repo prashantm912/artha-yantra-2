@@ -377,6 +377,24 @@ services:
       # way). Added so the owner's ticker flip is a one-line .env change. Default kite (no behaviour change).
       ARTHA_MD_SOURCE_TICKER: ${ARTHA_MD_SOURCE_TICKER:-kite}
       ARTHA_MD_SOURCE_FIIDII: ${ARTHA_MD_SOURCE_FIIDII:-nse}
+      # "Can I shut down yet?" evening-chain push (2026-08-11, single-shot per review — the owner's
+      # HARD 19:00 shutdown + the evening batch chain's own move to a compressed 18:20-18:59
+      # single-shot window killed the earlier polling design). EveningChainCanary checks
+      # marketdata.ingest_runs ONCE, at 18:59 IST by default (right after the jobs' own window
+      # closes, before the 19:00 shutdown), and ntfy-pushes exactly once — "chain complete N/N" or
+      # "still pending: ...". Default ON — this is exactly what the owner asked for; alerts-enabled
+      # is a separate knob so the push can be silenced without disabling the GET
+      # /market/health/evening-chain read surface the Data-Ops page uses (that GET is never gated).
+      # Names MUST byte-match EveningChainCanary's artha.evening-chain.* placeholders (#653).
+      ARTHA_EVENING_CHAIN_ENABLED: ${ARTHA_EVENING_CHAIN_ENABLED:-true}
+      ARTHA_EVENING_CHAIN_ALERTS_ENABLED: ${ARTHA_EVENING_CHAIN_ALERTS_ENABLED:-true}
+      ARTHA_EVENING_CHAIN_CHECK_CRON: "${ARTHA_EVENING_CHAIN_CHECK_CRON:-0 59 18 * * MON-FRI}"
+      # How long a RUNNING ingest_runs row may sit unfinished before the push says "(stuck)" rather
+      # than "still pending". DELIBERATELY NOT the shared ARTHA_INGEST_CANARY_RUNNING_STALE_MINUTES
+      # (120): the nine expected writers fire 18:45-18:51 and this check runs at 18:59, so the oldest
+      # RUNNING row it can ever see is 14 minutes old — at 120 the STUCK state was unreachable in
+      # production. VALUE IS THE CODE DEFAULT, BYTE FOR BYTE (#653).
+      ARTHA_EVENING_CHAIN_RUNNING_STALE_MINUTES: ${ARTHA_EVENING_CHAIN_RUNNING_STALE_MINUTES:-10}
       # ---- Evening-chain cron passthroughs (added 2026-08-11) ----
       # ⚠️ VALUES ARE THE CODE DEFAULTS, BYTE FOR BYTE. This block changes NOTHING about when these
       # jobs run; it exists because they had no passthrough at all, so setting any of them in `.env`
@@ -439,6 +457,19 @@ services:
       # Moved 18:53 -> 18:59 to free 18:53 for the manas-arora swing settle (ledger H27). It only
       # needs to follow its own screen (18:47); nothing downstream reads it.
       ARTHA_MINERVINI_BUYABLE_ALERTS_CRON: "${ARTHA_MINERVINI_BUYABLE_ALERTS_CRON:-0 59 18 * * MON-FRI}"
+      # ---- MIRRORS of two strategy-signal crons (added 2026-08-17, review Major C) ----
+      # ⚠️ market-data runs NEITHER of these two jobs. They are here because EveningChainCanary now
+      # covers the strategy-signal tail (18:54-18:57) and derives each leg's expected-not-before
+      # boundary from its producer's own cron property — so THIS container has to be able to resolve
+      # them. Without the passthrough the canary would fall back to the compiled default and a cron
+      # moved in .env would silently keep the old boundary: #653 again, one service over.
+      #
+      # These are the SAME .env variables the strategy-signal block reads, so the two containers can
+      # never disagree about a value the owner sets; the only drift risk left is the two DEFAULTS
+      # here and there, which EveningChainCanaryIntegrationTest pins against the producing
+      # @Scheduled annotation itself.
+      ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON: "${ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON:-0 56 18 * * MON-FRI}"
+      ARTHA_INSIGHTS_SELL_DECISION_CRON: "${ARTHA_INSIGHTS_SELL_DECISION_CRON:-0 57 18 * * MON-FRI}"
       ARTHA_MD_SOURCE_OPTIONANALYTICS: ${ARTHA_MD_SOURCE_OPTIONANALYTICS:-native}
       # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.
       ARTHA_UPSTOX_ANALYTICS_ENABLED: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:-false}

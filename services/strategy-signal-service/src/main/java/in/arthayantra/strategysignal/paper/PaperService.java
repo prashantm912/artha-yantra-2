@@ -359,6 +359,9 @@ public class PaperService {
     // tick state directly (see #countMtmBlindPositions), so there is no persistent state to race,
     // purge, or rebuild.
     meterRegistry.gauge("ay_paper_mtm_blind_positions", this, PaperService::countMtmBlindPositions);
+    // Derived the same way, for the same reason: re-queried on every scrape, no stored state.
+    meterRegistry.gauge(
+        "ay_paper_unrealized_withheld_books", this, PaperService::countUnrealizedWithheldBooks);
   }
 
   /**
@@ -1443,7 +1446,14 @@ public class PaperService {
     BigDecimal mark = null;
     BigDecimal unrealized = null;
     if ("OPEN".equals(row.status())) {
-      mark = lastTick.lastPrice(row.exchange(), row.tradingsymbol()).orElse(null);
+      // Same mark resolution as book equity (tick, else the captured daily close) so a swing
+      // position's displayed unrealized agrees with the account header instead of reading null.
+      // Position-scoped, NOT the raw symbol lookup: that one has no opening-session guard, so a
+      // reopened symbol would display P&L measured from a close predating this position.
+      mark =
+          accountService
+              .markFor(row.exchange(), row.tradingsymbol(), row.openedAt())
+              .orElse(null);
       if (mark != null) {
         BigDecimal move =
             "BUY".equals(row.side())
@@ -1754,7 +1764,11 @@ public class PaperService {
   }
 
   private PositionDto toPositionDto(PositionRow row) {
-    BigDecimal mark = lastTick.lastPrice(row.exchange(), row.tradingsymbol()).orElse(null);
+    // Same position-scoped mark resolution as book equity — see positionDetail.
+    BigDecimal mark =
+          accountService
+              .markFor(row.exchange(), row.tradingsymbol(), row.openedAt())
+              .orElse(null);
     BigDecimal unrealized = null;
     if (mark != null) {
       BigDecimal move =
@@ -1782,9 +1796,25 @@ public class PaperService {
    * scraped/read, decoupled from how often the UI polls {@link #positionDetail}/{@link
    * #openPositions} (which stay display-only and never touch this method at all).
    */
+  /**
+   * Companion to {@link #countMtmBlindPositions}: how many BOOKS are currently reporting a CLAMPED
+   * unrealized because at least one of their positions cannot be marked. The blind-position count
+   * says how much data is missing; this says how much MONEY MATH is degraded, which is the alertable
+   * quantity — one unmarked position clamps its whole book's unrealized.
+   *
+   * <p>⚠️ "Withholding entirely" is the OLD behaviour and the word is deliberately gone: the book
+   * still reports its measured LOSS, and only a positive partial is suppressed to zero. A book
+   * counted here is degraded, not blank.
+   */
+  private double countUnrealizedWithheldBooks() {
+    return accountService.withheldBookCount();
+  }
+
   private double countMtmBlindPositions() {
-    return positions.listOpen().stream()
-        .filter(p -> lastTick.lastPrice(p.exchange(), p.tradingsymbol()).isEmpty())
-        .count();
+    // Counts positions with NO mark of any kind — tick OR captured daily close. Before the equity-mark
+    // change this read `lastTick` alone, so all 18 cash-equity swing positions counted as blind purely
+    // because equities do not tick; that made the gauge saturate on a permanent structural condition
+    // and useless as an alert. Blind now means genuinely unmarkable, which is what it always claimed.
+    return accountService.unmarkedOpenCount(null);
   }
 }

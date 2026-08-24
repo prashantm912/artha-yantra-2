@@ -16,10 +16,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class IngestHealthController {
 
   private final IngestHealthBoard board;
+  private final EveningChainCanary eveningChain;
 
-  /** Wires the board service. */
-  public IngestHealthController(IngestHealthBoard board) {
+  /** Wires the board service + the today's-chain canary. */
+  public IngestHealthController(IngestHealthBoard board, EveningChainCanary eveningChain) {
     this.board = board;
+    this.eveningChain = eveningChain;
   }
 
   /**
@@ -30,5 +32,15 @@ public class IngestHealthController {
   public IngestHealthBoard.BoardReport ingest(
       @RequestParam(name = "days", defaultValue = "10") int days) {
     return board.board(days);
+  }
+
+  /**
+   * TODAY's evening-chain completion status — "can I shut the machine down yet?" (§ {@link
+   * EveningChainCanary}). Deliberately distinct from {@code /ingest}, which windows strictly BEFORE
+   * today.
+   */
+  @GetMapping("/evening-chain")
+  public EveningChainCanary.ChainReport eveningChain() {
+    return eveningChain.report();
   }
 }

@@ -17,6 +17,7 @@ import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
 import in.arthayantra.marketdata.constituents.StaticIndexConstituents;
+import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import in.arthayantra.marketdata.kite.GapBackfiller;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -366,6 +367,10 @@ class BhavcopyClosePopulationPrefetchTest {
     return new BhavcopyCloseCanary(
         mock(JdbcTemplate.class),
         ntfy,
+        // This branch made the canary open an ingest_runs row so the 18:59 evening-chain check can
+        // see it; these cases assert enumeration and dispatch, not the ledger, so a bare mock is
+        // the honest collaborator here. IngestRunLedgerTest owns the row semantics.
+        mock(IngestRunLedger.class),
         Clock.fixed(now, ZoneOffset.UTC),
         constituents,
         backfiller,

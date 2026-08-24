@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
 import in.arthayantra.marketdata.constituents.StaticIndexConstituents;
+import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import in.arthayantra.marketdata.kite.GapBackfiller;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -98,6 +99,7 @@ class BhavcopyCloseCanaryStaleSessionTest {
     return new BhavcopyCloseCanary(
         jdbc,
         ntfy,
+        mock(IngestRunLedger.class),
         Clock.fixed(Instant.parse("2026-08-10T19:00:00Z"), ZoneOffset.UTC),
         mock(StaticIndexConstituents.class),
         mock(GapBackfiller.class),

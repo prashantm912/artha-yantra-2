@@ -1081,6 +1081,13 @@ public class SwingBatchEngine {
         skipped++;
         continue;
       }
+      // Capture the daily close as this symbol's mark-to-market price for book equity — the ONLY
+      // producer of EquityMarkCache. Reuses the bar this pass has already fetched: no extra
+      // round-trip, no new query, no deadline interaction, and it cannot vary with the exit outcome
+      // because it sits above the evaluation. Cash equities never appear in the Redis `ticks:last`
+      // hash (the WS subscription is the futures/options universe), so without this every swing
+      // position marks at its own entry price and contributes ZERO unrealized to equity.
+      cacheEquityMark(primary.tradingsymbol(), series.get(series.size() - 1));
       // geometry is irrelevant to the exit rules (percent/ATR stop + trail), so the pivot contexts are
       // seeded neutral (0) — the bank still builds every declared indicator, the exit eval never reads
       // their value.
@@ -1250,6 +1257,37 @@ public class SwingBatchEngine {
       log.warn(
           "{} swing: governing-stop cache failed for {} (accounting only, exit unaffected): {}",
           doctrine.batchName(), primary.tradingsymbol(), e.getMessage());
+    }
+  }
+
+  /**
+   * Publishes a held cash equity's latest daily close through the {@code EmissionGuard} port so
+   * {@code PaperAccountService} can mark the position to market. Pure accounting, exactly like
+   * {@link #cacheGoverningStop}: nothing here closes a position, changes an exit decision, or writes
+   * to the database — the adapter holds it in memory only, and no exit path reads it.
+   *
+   * <p>Fail-soft for the same reason the governing-stop cache is: this batch is a swing position's
+   * ONLY daily exit evaluator, so an accounting failure must never propagate and cost a LATER
+   * position its stop evaluation this run.
+   */
+  private void cacheEquityMark(String tradingsymbol, EngineCandle bar) {
+    if (emissionGuard.isEmpty() || bar == null) {
+      return;
+    }
+    try {
+      emissionGuard
+          .get()
+          .cacheEquityMark(
+              EX,
+              tradingsymbol,
+              bar.close(),
+              // IST, never the raw offset: daily buckets arrive as 18:30+00, so a bare toLocalDate()
+              // yields the PREVIOUS calendar day and the mark would claim a session it is not from.
+              bar.bucketStart().withOffsetSameInstant(IST).toLocalDate());
+    } catch (RuntimeException e) {
+      log.warn(
+          "swing: equity-mark cache failed for {} (accounting only, exit unaffected): {}",
+          tradingsymbol, e.getMessage());
     }
   }
 

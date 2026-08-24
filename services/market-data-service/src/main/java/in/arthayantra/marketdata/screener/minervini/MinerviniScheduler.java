@@ -261,11 +261,39 @@ public class MinerviniScheduler {
       int written = repo.replaceAll(r.screenDate(), r.candidates());
       long passing = r.candidates().stream().filter(TrendCandidate::passesAll).count();
       int geo = computeGeometry(r);
-      ledger.succeed(runId, written);
       log.info(
           "minervini screen upserted {} rows for {} ({} pass all 8 gates, {} geometry rows) [{}]",
           written, r.screenDate(), passing, geo, trigger);
-      probePlaneDivergence(r.screenDate(), trigger, false);
+      // Ledger completion is deliberately AFTER the probe, not after the write (review finding,
+      // 2026-08-11): EveningChainCanary reads SOURCE_MINERVINI_SCREEN's ingest_runs row as "this
+      // leg of the evening chain is done" — if the ledger closed right after repo.replaceAll, that
+      // would be true while MINERVINI_PLANE_DIVERGENCE was still running, so the "safe to shut
+      // down" push could fire mid-probe. Safe to move: probePlaneDivergence is fail-soft and never
+      // throws (its own try/catch), so this reordering changes WHEN succeed() is called, never
+      // WHETHER — a probe failure still leaves a clean SUCCESS row, exactly as before.
+      // ⚠️ Ordering AND outcome both matter here, and my first attempt got the second one wrong.
+      //
+      // Ordering: succeed() must come after the probe, because EveningChainCanary reads this
+      // SOURCE_MINERVINI_SCREEN row as "this leg of the evening chain is done" — closing it right
+      // after repo.replaceAll would let the "safe to shut down" push fire mid-probe.
+      //
+      // Outcome: the first fix wrapped the probe in a bare `finally`, which closes the row SUCCESS
+      // even when the probe DIED — contradicting the very boundary the reordering established, and
+      // telling the canary a leg finished that did not. probePlaneDivergence swallows every
+      // EXCEPTION itself, so only an ERROR (OOM and friends) reaches here; that is a real failure
+      // and the row must say so. catch-record-rethrow keeps the row terminal without lying about
+      // which way it ended.
+      //
+      // Note this does NOT repair the container-recreate case (cross-vendor review): a killed
+      // process runs no catch and no finally, so a stranded RUNNING row still needs the reaper that
+      // ledger H12's second half is still open on. Claiming otherwise was overreach on my part.
+      try {
+        probePlaneDivergence(r.screenDate(), trigger, false);
+      } catch (Error fatal) {
+        ledger.fail(runId, "plane-divergence probe died: " + fatal);
+        throw fatal;
+      }
+      ledger.succeed(runId, written);
     } catch (Exception e) {
       // Audit P0-4/H10: a failed screen leaves the NEXT swing batch on yesterday's funnel — the
       // owner must hear about it, not find it in a log next week. NtfyClient never throws.

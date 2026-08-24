@@ -35,6 +35,7 @@ public class PaperEmissionGuard implements EmissionGuard {
   private final PaperPositionRepository positions;
   private final PaperOrderRejectionRecorder rejections;
   private final ManasGoverningStopCache governingStopCache;
+  private final EquityMarkCache equityMarks;
 
   /** Wires the risk gate + capital model + the scalper 5-account discipline + the position ledger. */
   public PaperEmissionGuard(
@@ -44,7 +45,8 @@ public class PaperEmissionGuard implements EmissionGuard {
       ScalperAccountModel scalperAccounts,
       PaperPositionRepository positions,
       PaperOrderRejectionRecorder rejections,
-      ManasGoverningStopCache governingStopCache) {
+      ManasGoverningStopCache governingStopCache,
+      EquityMarkCache equityMarks) {
     this.risk = risk;
     this.account = account;
     this.instruments = instruments;
@@ -52,6 +54,7 @@ public class PaperEmissionGuard implements EmissionGuard {
     this.positions = positions;
     this.rejections = rejections;
     this.governingStopCache = governingStopCache;
+    this.equityMarks = equityMarks;
   }
 
   @Override
@@ -63,6 +66,17 @@ public class PaperEmissionGuard implements EmissionGuard {
   public Optional<String> entryVeto(String book) {
     // PF-03: surface the exact governor rail (the single source of truth is RiskService.entryVeto,
     // of which risk.entryAllowed is a thin isEmpty() view — identical decision AND audit side-effects).
+    //
+    // NOTE (owner ruling, 2026-08-13): an UNMARKED position does NOT veto entry here. The
+    // cross-vendor review rated the fail-open fallback a Critical and a veto rail was built at this
+    // exact point, then removed on the owner's call. The reasoning: the mark cache is cold on every
+    // boot, so a gate keyed on it locks the books hardest on exactly the days they are already
+    // degraded. The pre-entry hydration that would have made a fail-closed rail safe was itself
+    // withdrawn (it perturbed the exit sample), so the cold-boot window is real and open. The
+    // residual exposure (a position at a LOSS, unmarked, valued at cost, inflating equity) is
+    // bounded by the book's own open risk and is
+    // SURFACED — AccountDto.unmarkedPositions, the ay_paper_mtm_blind_positions gauge — rather than
+    // blocked. Arming it later is a one-branch change at this line.
     return risk.entryVeto(book);
   }
 
@@ -244,6 +258,20 @@ public class PaperEmissionGuard implements EmissionGuard {
     positions
         .findOpenIdIfOpenedBy(book, exchange, tradingsymbol, side, openingSignalId)
         .ifPresent(id -> governingStopCache.put(id, side, newStop));
+  }
+
+  /**
+   * Stores the daily-bar close in the {@link EquityMarkCache} so {@link PaperAccountService#equity}
+   * can mark cash equities to market. No position lookup and no {@code openingSignalId} validation
+   * here, unlike {@link #cacheManasGoverningStop}: a mark is a property of the SYMBOL, not of a
+   * position, so there is no identity to mis-attach it to — every book holding that symbol wants the
+   * same number, and a mark for a symbol nobody holds is simply never read (the equity sum iterates
+   * OPEN positions).
+   */
+  @Override
+  public void cacheEquityMark(
+      String exchange, String tradingsymbol, BigDecimal close, java.time.LocalDate session) {
+    equityMarks.put(exchange, tradingsymbol, close, session);
   }
 
   @Override

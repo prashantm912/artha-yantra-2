@@ -961,6 +961,44 @@
         }
       }
     },
+    "/api/v1/market/health/evening-chain/legs" : {
+      "post" : {
+        "tags" : [ "evening-chain-leg-controller" ],
+        "operationId" : "recordLeg",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/LegReport"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LegRecorded"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/fundamentals/refresh" : {
       "post" : {
         "tags" : [ "fundamentals-controller" ],
@@ -4498,6 +4536,34 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/BoardReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/health/evening-chain" : {
+      "get" : {
+        "tags" : [ "ingest-health-controller" ],
+        "operationId" : "eveningChain",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ChainReport"
                 }
               }
             }
@@ -8399,6 +8465,40 @@
         },
         "required" : [ "additionalMargin", "equityMargin", "exposureMargin", "finalMargin", "netBuyPremium", "priced", "requiredMargin", "spanMargin", "totalMargin", "unpricedReason" ]
       },
+      "LegReport" : {
+        "type" : "object",
+        "properties" : {
+          "source" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "startedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "finishedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "error" : {
+            "type" : [ "string", "null" ]
+          }
+        }
+      },
+      "LegRecorded" : {
+        "type" : "object",
+        "properties" : {
+          "source" : {
+            "type" : "string"
+          },
+          "recorded" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "recorded", "source" ]
+      },
       "RefreshResponse" : {
         "type" : "object",
         "properties" : {
@@ -11533,6 +11633,64 @@
           }
         },
         "required" : [ "days", "detail", "lastRun", "missingDays", "policy", "source", "status" ]
+      },
+      "ChainReport" : {
+        "type" : "object",
+        "properties" : {
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "day" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "tradingDay" : {
+            "type" : "boolean"
+          },
+          "total" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "done" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "complete" : {
+            "type" : "boolean"
+          },
+          "sources" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SourceProgress"
+            }
+          }
+        },
+        "required" : [ "complete", "day", "done", "generatedAt", "sources", "total", "tradingDay" ]
+      },
+      "SourceProgress" : {
+        "type" : "object",
+        "properties" : {
+          "source" : {
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "STUCK", "DONE" ]
+          },
+          "status" : {
+            "type" : [ "string", "null" ]
+          },
+          "startedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "finishedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "finishedAt", "source", "startedAt", "state", "status" ]
       },
       "CanaryReport" : {
         "type" : "object",

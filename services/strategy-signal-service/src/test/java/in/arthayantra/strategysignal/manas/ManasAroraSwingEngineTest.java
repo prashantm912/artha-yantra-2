@@ -219,6 +219,78 @@ class ManasAroraSwingEngineTest {
   }
 
   @Test
+  void theExitPassPublishesTheDailyCloseAsTheEquityMark() throws IOException {
+    // Book equity marks positions through the Redis `ticks:last` hash, which the live WS ticker fills
+    // from the futures/options universe — measured 2026-08-13, 307 entries, not one an NSE cash
+    // equity. So every swing position marked at its own avgEntryPrice and contributed ZERO unrealized
+    // (+₹27,213.97 invisible across the two books). This proves the exit pass — which already holds
+    // the right number, since it settles these positions at bar.close() precisely because equities do
+    // not tick — publishes that close through the EmissionGuard port for the paper adapter to cache.
+    ExitHarness h = new ExitHarness();
+    when(h.candles.fetch(any(), any(), any(), any(), any())).thenReturn(h.series);
+    EmissionGuard guard = mock(EmissionGuard.class);
+
+    SwingBatchEngine.SwingRun run = h.engine(Optional.of(guard)).runDaily(h.doctrine(false));
+
+    ArgumentCaptor<BigDecimal> close = ArgumentCaptor.forClass(BigDecimal.class);
+    verify(guard).cacheEquityMark(eq("NSE"), eq("TESTCO"), close.capture(), any());
+    assertThat(close.getValue())
+        .as("the mark is the LAST bar's close — the same bar the exit rules were evaluated against")
+        .isEqualByComparingTo(h.series.get(h.series.size() - 1).close());
+    assertThat(run.exitSkipped()).as("marking is pure accounting — no position goes unevaluated").isZero();
+  }
+
+  @Test
+  void theCapturedMarkSessionIsTheISTDateNotTheRawOffsetDate() throws IOException {
+    // Daily buckets reach this code as 18:30+00 (measured: marketdata.candles stores session
+    // 2026-08-12 as `2026-08-11 18:30:00+00`), so a bare bucketStart().toLocalDate() yields the
+    // PREVIOUS calendar day and the mark claims a session it is not from. Once freshness is judged on
+    // the session, that off-by-one is a real one-day error in the staleness bound, not cosmetic.
+    // NOTE: the shared fixture builds bars at IST offset, where both readings agree — so this test
+    // re-expresses the SAME instants at UTC offset, which is the only shape that discriminates.
+    ExitHarness h = new ExitHarness();
+    List<EngineCandle> utcSeries =
+        h.series.stream()
+            .map(
+                b ->
+                    new EngineCandle(
+                        b.bucketStart().withOffsetSameInstant(java.time.ZoneOffset.UTC),
+                        b.open(), b.high(), b.low(), b.close(), b.volume(), null))
+            .toList();
+    when(h.candles.fetch(any(), any(), any(), any(), any())).thenReturn(utcSeries);
+    EmissionGuard guard = mock(EmissionGuard.class);
+
+    h.engine(Optional.of(guard)).runDaily(h.doctrine(false));
+
+    EngineCandle last = utcSeries.get(utcSeries.size() - 1);
+    ArgumentCaptor<java.time.LocalDate> session = ArgumentCaptor.forClass(java.time.LocalDate.class);
+    verify(guard).cacheEquityMark(eq("NSE"), eq("TESTCO"), any(), session.capture());
+    assertThat(session.getValue())
+        .as(
+            "the IST session date (%s), not the raw-offset date (%s) the UTC-stamped bucket reads as",
+            last.bucketStart().withOffsetSameInstant(IST).toLocalDate(),
+            last.bucketStart().toLocalDate())
+        .isEqualTo(last.bucketStart().withOffsetSameInstant(IST).toLocalDate());
+  }
+
+  @Test
+  void theEquityMarkIsPublishedEvenWhenThePositionExitsThisRun() throws IOException {
+    // Placement proof: the capture sits BEFORE the exit rules are evaluated, so it cannot vary with
+    // the exit outcome. If it were inside the no-exit branch (where cacheManasGoverningStop lives) a
+    // book whose positions all exited would silently stop being markable.
+    ExitHarness h = new ExitHarness();
+    when(h.candles.fetch(any(), any(), any(), any(), any())).thenReturn(h.series);
+    // The same anchor placement the pyramid-exit test uses, which the declining series does exit.
+    h.stubAnchors(h.anchor(42L, h.series.get(24).bucketStart()));
+    EmissionGuard guard = mock(EmissionGuard.class);
+
+    SwingBatchEngine.SwingRun run = h.engine(Optional.of(guard)).runDaily(h.doctrine(false));
+
+    assertThat(run.exits()).as("this run really does exit the position").isEqualTo(1);
+    verify(guard).cacheEquityMark(eq("NSE"), eq("TESTCO"), any(), any());
+  }
+
+  @Test
   void aFreshEntryAtSixOpenPositionsIsRefusedWhenTheSeventhWouldBreachTheOpenRiskCap() throws IOException {
     // M40 (owner-directed 2026-08-02): 6 open Manas positions already risking exactly 6% of a
     // ₹1,000,000 book (representative of 6 names each risking risk_pct_equity=1.0, the value both
@@ -582,8 +654,12 @@ class ManasAroraSwingEngineTest {
     }
 
     SwingBatchEngine engine() {
+      return engine(Optional.empty());
+    }
+
+    SwingBatchEngine engine(Optional<EmissionGuard> guard) {
       return new SwingBatchEngine(
-          registry, candles, signals, mock(SignalPublisher.class), events, Optional.empty(),
+          registry, candles, signals, mock(SignalPublisher.class), events, guard,
           passthroughTx(), new ObjectMapper(), Clock.systemUTC());
     }
 

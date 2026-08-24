@@ -3,6 +3,7 @@ package in.arthayantra.marketdata;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import in.arthayantra.marketdata.canary.DataHealthCanary;
+import in.arthayantra.marketdata.canary.EveningChainCanary;
 import in.arthayantra.marketdata.candles.CandlesConfig;
 import in.arthayantra.marketdata.feed.FeedWatchdog;
 import in.arthayantra.marketdata.kite.session.SessionHealthProbe;
@@ -68,6 +69,10 @@ class MonitorSchedulingConfigTest {
     assertBoundToMonitorScheduler(FeedWatchdog.class, "check");
     assertBoundToMonitorScheduler(DataHealthCanary.class, "sweep");
     assertBoundToMonitorScheduler(SessionHealthProbe.class, "scheduledProbe");
+    // MAJOR 4 (review, 2026-08-11): the single-shot "is tonight's chain done" push must not be
+    // starvable by the very batch jobs it is checking on — it is exactly the detector that must
+    // notice a hung one.
+    assertBoundToMonitorScheduler(EveningChainCanary.class, "check");
   }
 
   /**

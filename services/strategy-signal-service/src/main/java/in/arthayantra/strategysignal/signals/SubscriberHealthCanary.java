@@ -146,9 +146,10 @@ public class SubscriberHealthCanary {
   // `strategies-idle` close followed by a re-enable DURING the same outage cannot backdate the new
   // window over the interval that was already accounted for.
   private volatile Instant lastWindowClosedAt = Instant.EPOCH;
-  // Wall-clock of the previous sweep. A fixedDelay sweep can only move FORWARD, so a smaller value
-  // means the host clock stepped backwards -- see the guard at the top of sweep().
-  private volatile long lastSweepAtMs;
+  // HIGH-WATER MARK of the wall clock across sweeps -- it only ever rises. A fixedDelay sweep can
+  // only move forward, so a smaller reading means the host clock stepped backwards; see sweep().
+  private volatile long clockHighWaterMs;
+  private volatile boolean clockWarped; // latch, so one step does not log on every later sweep
   private long lastResubscribeAtMs;
 
   /** One producer-blind episode. Immutable; every transition replaces it. */
@@ -203,10 +204,18 @@ public class SubscriberHealthCanary {
         return;
       }
       long sweepAtMs = clock.millis();
-      if (sweepAtMs < lastSweepAtMs) {
+      if (sweepAtMs < clockHighWaterMs) {
         // ⚠️ The host clock stepped BACKWARDS, a measured failure on this box (the 87-minute July
         // 2026 drift). Every time computation below is then wrong, so the sweep does nothing at all
         // this cycle rather than acting on any of them.
+        //
+        // ⚠️ The mark is a HIGH-WATER value and is deliberately NEVER lowered. Resyncing it down to
+        // the warped reading protected exactly ONE sweep: the next tick, 09:17 > 09:16, processing
+        // resumed and the same false session-ended close went through. The cost is real and worth
+        // stating -- after an 87-minute step this canary is DORMANT for 87 minutes, so receive-stall
+        // detection is down for that window too. That is the safer half of the trade: a host whose
+        // clock jumps needs a human either way, and acting on times known to be wrong manufactures
+        // false closes and false stalls on a live money engine. The ERROR line is the signal.
         //
         // This detector replaces two narrower ones that both missed. The negative-receive-gap check
         // sits inside updateBlindWindow, which the session gate returns before reaching; and the
@@ -215,14 +224,21 @@ public class SubscriberHealthCanary {
         // 09:15 and a step from 10:43 to 09:16 satisfies the interval and still fakes a session
         // boundary. Comparing successive sweeps needs no such reasoning: a fixedDelay sweep only
         // ever moves forward, so a smaller reading is the fault itself rather than a symptom of it.
-        log.warn(
-            "subscriber watchdog: clock stepped BACKWARDS {}ms since the last sweep — skipping this"
-                + " sweep entirely; every window and stall computation would be wrong",
-            lastSweepAtMs - sweepAtMs);
-        lastSweepAtMs = sweepAtMs; // resync, so one step does not warn on every later sweep
+        if (!clockWarped) {
+          clockWarped = true;
+          log.error(
+              "subscriber watchdog: clock stepped BACKWARDS {}ms — DORMANT until it passes {} again;"
+                  + " every window and stall computation would be wrong until then",
+              clockHighWaterMs - sweepAtMs,
+              Instant.ofEpochMilli(clockHighWaterMs));
+        }
         return;
       }
-      lastSweepAtMs = sweepAtMs;
+      if (clockWarped) {
+        clockWarped = false;
+        log.info("subscriber watchdog: clock caught up past {} — resuming", Instant.ofEpochMilli(clockHighWaterMs));
+      }
+      clockHighWaterMs = sweepAtMs;
       ZonedDateTime now = clock.instant().atZone(Ist.ZONE);
       boolean inSession = inSession(now);
       if (!inSession || registry.countEnabledPublished() == 0) {

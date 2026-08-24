@@ -641,6 +641,13 @@ class SubscriberHealthCanaryTest {
     c.sweep(); // 10:43 — window opens, started_at clamped to 09:15 IST
     advancing.advanceMs(-87 * 60_000L); // 10:43 -> 09:16: after the start, before ARMED_FROM
     c.sweep();
+    // ⚠️ AND AGAIN, still warped. Stopping after one skipped sweep hid a real defect: an earlier
+    // revision resynced the mark DOWN to the warped reading, so the very next tick (09:17 > 09:16)
+    // resumed processing and let the same false close through. The mark is a high-water value.
+    advancing.advanceMs(60_000);
+    c.sweep();
+    advancing.advanceMs(60_000);
+    c.sweep();
 
     verify(blindWindows, never()).close(any(), any(Instant.class), anyString());
   }

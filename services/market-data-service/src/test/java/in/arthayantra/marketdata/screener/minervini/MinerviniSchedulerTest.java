@@ -281,4 +281,53 @@ class MinerviniSchedulerTest {
               verify(repo).replaceAll(eq(day), any());
             });
   }
+
+  /**
+   * ⚠️ H13, and it is a LIVE measurement rather than a hypothetical. On 2026-08-24 the
+   * {@code bhavcopy-complete} door ran 18:46:42→18:47:39 on thread {@code eod-bhavcopy-backfill}
+   * while the 18:47 cron started at 18:46:57 on {@code scheduling-1}. The dedup below them is a
+   * read-then-act on {@code latestScreenDate}, so the cron read the watermark BEFORE the event run
+   * had written it, the skip did not fire, and the evening got two full screens and two ~290-symbol
+   * geometry fan-outs. Both {@code ingest_runs} rows say SUCCESS with 1,800 rows, which is exactly
+   * why nothing noticed.
+   *
+   * <p>The test holds the first door INSIDE the screen on a latch and then opens the second, which
+   * is the only way to reach the window — a sequential call cannot, because by then the watermark
+   * is written and the ordinary dedup handles it. {@code repo.latestScreenDate()} is left returning
+   * null on purpose so the dedup can never be what makes this pass.
+   */
+  @Test
+  void aSecondDoorArrivingMidScreenIsSkippedRatherThanRunningASecondScreen() throws Exception {
+    LocalDate day = LocalDate.of(2026, 8, 24);
+    java.util.concurrent.CountDownLatch insideScreen = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.atomic.AtomicInteger screens =
+        new java.util.concurrent.atomic.AtomicInteger();
+    when(screener.screen(null))
+        .thenAnswer(
+            invocation -> {
+              screens.incrementAndGet();
+              insideScreen.countDown();
+              release.await(5, java.util.concurrent.TimeUnit.SECONDS);
+              return new TrendTemplateService.ScreenResult(day, 0, List.of());
+            });
+
+    MinerviniScheduler scheduler = scheduler(true);
+    Thread eventDoor = new Thread(scheduler::onBhavcopyBackfillCompleted, "event-door");
+    eventDoor.start();
+    org.assertj.core.api.Assertions.assertThat(
+            insideScreen.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        .as("the event door must actually be inside the screen, or this proves nothing")
+        .isTrue();
+
+    scheduler.scheduled(); // the cron door arrives while the first screen is still running
+
+    release.countDown();
+    eventDoor.join(10_000);
+
+    org.assertj.core.api.Assertions.assertThat(screens.get())
+        .as("one screen, not two — the second door found the lock held and skipped")
+        .isEqualTo(1);
+    verify(repo, org.mockito.Mockito.times(1)).replaceAll(eq(day), any());
+  }
 }

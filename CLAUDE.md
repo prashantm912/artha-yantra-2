@@ -477,10 +477,17 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   books use the BARE symbol, so `marketdata.instruments` holds both — a tokenless bare row and a tokened
   `<SYM>-BE` row. `TokenResolverAdapter` falls back to the twin on NSE only, never recursing, never on BSE,
   and COUNTS every fallback (`ay_instrument_be_suffix_fallback_total`) because the original defect was
-  invisible precisely by fail-softing. ⚠️ **It keys on `instrument_token IS NULL`, which is the NARROWER
-  half of the population (ledger H36): all four affected bare rows are `is_active = f`, but two carry NULL
-  tokens (fixed) and two carry STALE ones Kite rejects as `invalid token` (NOT fixed — `DIACABS`,
-  `MENONBE` 400 every evening).** Drift caught by 3 contract canaries (Kite/Upstox/OpenAlgo,
+  invisible precisely by fail-softing. ⚠️ **BOTH halves are now shipped — this bullet said the second was
+  "NOT fixed" for four days after it was (corrected 2026-08-25).** H29 keyed on `instrument_token IS NULL`,
+  the NARROWER half; ledger H36 covers the wider one, where the bare row carries a token Kite REJECTS
+  (`400 … invalid token`) and therefore *resolves*, so the H29 fallback never fired for it. The twin now
+  also wins when the bare row is `is_active = f`, on a SECOND counter
+  (`ay_instrument_be_suffix_inactive_fallback_total`) so the two halves stay separable. `sourced`:
+  `TokenResolverAdapter.resolve` gates on `direct.isPresent() && directRow.get().active()`. `computed`
+  2026-08-25 from the live DB: `DIACABS` and `MENONBE` are exactly this shape — bare row inactive WITH a
+  token, active `-BE` twin carrying a different one. ⚠️ Still **strictly additive by design**: an inactive
+  bare row with NO twin returns its own (rejected) token rather than a 404, so ~389 such NSE rows are
+  deliberately untouched. Drift caught by 3 contract canaries (Kite/Upstox/OpenAlgo,
   CONSUMED-field sentinels). Full map: `docs/symbol-normalization.md`.
 
 ## Strategy engine & paper book

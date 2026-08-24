@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.screener.manas;
 
 import in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
+import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,6 +37,18 @@ public class ManasScheduler {
   private final in.arthayantra.marketdata.alerts.NtfyClient ntfy;
   private final IngestRunLedger ledger;
 
+  /**
+   * Serialises the three screen doors against each other (ledger H13) — same defect and same remedy
+   * as {@code MinerviniScheduler}, which is where the full reasoning lives.
+   *
+   * <p>The measured instance was minervini's (2026-08-24), but this screen has the identical
+   * read-then-act dedup and the identical three doors, one minute later in the same tail — and it
+   * has already double-run once: {@code MANAS_SCREEN} on 2026-08-11 at 18:00:05, 18:00:47 and
+   * 18:01:00, three runs inside 55 seconds. Fixing one and not the other would leave the same hole
+   * open one cron minute away.
+   */
+  private final ReentrantLock screenLock = new ReentrantLock();
+
   /** Wires the screener + screen repository + geometry service + the ops ntfy client + ingest ledger. */
   public ManasScheduler(
       ManasScreenService screener,
@@ -69,6 +82,22 @@ public class ManasScheduler {
   }
 
   private void runQuietly(String trigger) {
+    // ⚠️ tryLock, NOT lock: the cron door runs on the DEFAULT taskScheduler (pool size 1, shared by
+    // ~32 scheduled methods), so blocking it for the length of a screen would starve them all to
+    // fix something that costs nothing to skip.
+    if (!screenLock.tryLock()) {
+      log.warn(
+          "manas screen already running — {} trigger skipped (H13: two doors overlapped)", trigger);
+      return;
+    }
+    try {
+      runLocked(trigger);
+    } finally {
+      screenLock.unlock();
+    }
+  }
+
+  private void runLocked(String trigger) {
     // Ingest-run ledger (audit §7.2.3). Opened only after the dedup skip below, so a no-op run
     // records nothing; the id survives into the catch so a screen failure is recorded, not vanished.
     Long runId = null;

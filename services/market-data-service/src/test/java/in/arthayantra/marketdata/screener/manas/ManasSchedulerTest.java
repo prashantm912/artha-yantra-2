@@ -69,4 +69,45 @@ class ManasSchedulerTest {
               verify(repo).replaceAll(eq(day), any());
             });
   }
+
+  /**
+   * ⚠️ H13, the manas half. Same three doors, same read-then-act dedup, one cron minute after
+   * minervini's. This screen has already double-run in production — {@code MANAS_SCREEN} on
+   * 2026-08-11 at 18:00:05, 18:00:47 and 18:01:00, three runs inside 55 seconds — so this is a
+   * regression test, not a precaution. See {@code MinerviniSchedulerTest} for the full measurement.
+   */
+  @Test
+  void aSecondDoorArrivingMidScreenIsSkippedRatherThanRunningASecondScreen() throws Exception {
+    LocalDate day = LocalDate.of(2026, 8, 11);
+    java.util.concurrent.CountDownLatch insideScreen = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.atomic.AtomicInteger screens =
+        new java.util.concurrent.atomic.AtomicInteger();
+    when(screener.screen(null))
+        .thenAnswer(
+            invocation -> {
+              screens.incrementAndGet();
+              insideScreen.countDown();
+              release.await(5, java.util.concurrent.TimeUnit.SECONDS);
+              return new ManasScreenService.ScreenResult(day, 0, List.of());
+            });
+
+    ManasScheduler scheduler = new ManasScheduler(screener, repo, geometry, ntfy, ledger);
+    Thread eventDoor = new Thread(scheduler::onBhavcopyBackfillCompleted, "event-door");
+    eventDoor.start();
+    org.assertj.core.api.Assertions.assertThat(
+            insideScreen.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        .as("the event door must actually be inside the screen, or this proves nothing")
+        .isTrue();
+
+    scheduler.scheduled(); // the cron door arrives while the first screen is still running
+
+    release.countDown();
+    eventDoor.join(10_000);
+
+    org.assertj.core.api.Assertions.assertThat(screens.get())
+        .as("one screen, not two — the second door found the lock held and skipped")
+        .isEqualTo(1);
+    verify(repo, org.mockito.Mockito.times(1)).replaceAll(eq(day), any());
+  }
 }

@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.screener.minervini;
 import in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import java.time.LocalDate;
+import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,6 +34,24 @@ public class MinerviniScheduler {
   private final IngestRunLedger ledger;
   private final boolean enabled;
   private final boolean planeDivergenceEnabled;
+
+  /**
+   * Serialises the three screen doors against each other (ledger H13).
+   *
+   * <p>⚠️ The dedup below is a READ-then-ACT on {@code latestScreenDate}, and nothing made it
+   * atomic. Measured live on 2026-08-24: the {@code bhavcopy-complete} event ran 18:46:42→18:47:39
+   * on thread {@code eod-bhavcopy-backfill} while the 18:47 cron started at 18:46:57 on
+   * {@code scheduling-1} — the cron read the watermark BEFORE the event run had written it, so the
+   * skip did not fire and the day got two full screens plus two ~290-symbol geometry fan-outs
+   * against a 1 GB Timescale box that has OOM-crashed twice. Both wrote the same 1,800 rows, so it
+   * cost load rather than data, but two concurrent {@code replaceAll} on one screen date is a
+   * delete/insert interleave waiting for a slower evening.
+   *
+   * <p>A JVM lock is sufficient BECAUSE all three doors are in-process (two {@code @EventListener},
+   * one {@code @Scheduled}) and market-data runs one container — the same single-writer convention
+   * the rest of the ingest path assumes. It is not a distributed claim and must not be read as one.
+   */
+  private final ReentrantLock screenLock = new ReentrantLock();
 
   /** Wires the screener + screen repository + geometry service + the ops ntfy client + ingest ledger. */
   public MinerviniScheduler(
@@ -90,6 +109,20 @@ public class MinerviniScheduler {
    * what was persisted without a second read.
    */
   public TrendTemplateService.ScreenResult runOnce(LocalDate asOf) {
+    // ⚠️ BLOCKING here, unlike the scheduled doors, and the asymmetry is the point: this runs on an
+    // HTTP request thread where waiting is acceptable, and it deliberately bypasses the dedup skip
+    // — so without the lock it is the ONE door that can still race a scheduled screen into two
+    // concurrent replaceAll on the same date. Skipping would be wrong (a forced recompute that
+    // silently did not recompute), so it waits instead.
+    screenLock.lock();
+    try {
+      return runOnceLocked(asOf);
+    } finally {
+      screenLock.unlock();
+    }
+  }
+
+  private TrendTemplateService.ScreenResult runOnceLocked(LocalDate asOf) {
     TrendTemplateService.ScreenResult r = screener.screen(asOf);
     if (r.screenDate() == null) {
       return r;
@@ -104,6 +137,24 @@ public class MinerviniScheduler {
     if (!enabled) {
       return;
     }
+    // ⚠️ tryLock, NOT lock: `scheduled()` has no `scheduler = ...`, so it runs on the DEFAULT
+    // taskScheduler whose pool size is 1 and which ~32 other scheduled methods share. Blocking it
+    // for the ~60 s a screen takes would starve every one of them to fix a problem that costs
+    // nothing to skip — the in-flight run is already doing this trigger's work.
+    if (!screenLock.tryLock()) {
+      log.warn(
+          "minervini screen already running — {} trigger skipped (H13: two doors overlapped)",
+          trigger);
+      return;
+    }
+    try {
+      runLocked(trigger);
+    } finally {
+      screenLock.unlock();
+    }
+  }
+
+  private void runLocked(String trigger) {
     // Ingest-run ledger (audit §7.2.3). Opened only after the dedup skip below, so a no-op run
     // records nothing; the id survives into the catch so a screen failure is recorded, not vanished.
     Long runId = null;

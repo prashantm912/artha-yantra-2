@@ -15,6 +15,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -79,15 +80,36 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
   private final Set<LocalDate> touchedDays = new LinkedHashSet<>();
 
   /**
-   * ⚠️ Deletes only the SOURCES this class seeds, on only the DAYS it touched — never a blanket day
+   * The sources this class actually WROTE, recorded in the same funnels as the days.
+   *
+   * <p>⚠️ Cleanup and its assertion are both scoped to THIS, not to {@link #BOARD_SOURCES}, and the
+   * distinction is not cosmetic. {@code seedBatchesHealthy} is a hand-kept list of seven constants
+   * while {@code BOARD_SOURCES} is derived from {@code IngestCoverageCanary.EXPECTED}; if a source
+   * were ever removed from EXPECTED while this class still seeded it, an EXPECTED-scoped teardown
+   * would silently stop removing it and an EXPECTED-scoped assertion would not notice. "Exactly what
+   * we wrote" cannot drift that way. EXPECTED keeps the job it genuinely belongs to — bounding
+   * {@link #clearWindow}'s RESET scope.
+   */
+  private final Set<String> touchedSources = new LinkedHashSet<>();
+
+  /**
+   * ⚠️ Deletes only the SOURCES this class wrote, on only the DAYS it touched — never a blanket day
    * sweep. A blanket delete is the mirror defect: it would destroy rows another Spring context wrote
    * for the same day (the screener schedulers fire on every {@code ApplicationReadyEvent}), turning
    * a residue bug into a data-destruction bug.
+   *
+   * <p>⚠️ <b>"Leaves the ledger as it found it" is BOUNDED, not absolute, and the PR body said it too
+   * flatly.</b> On a day real time has reached, this still deletes rows of those sources regardless
+   * of who wrote them — and writers exist in prime CI hours ({@code MinerviniScheduler} 18:47,
+   * {@code ManasScheduler} 18:48, {@code EquityBreadthEodJob} 18:51 IST = 13:17-13:21 UTC). Same for
+   * the screen-result deletes, which are unscoped by symbol. That is strictly better than the
+   * pre-image, which deleted EVERY source in the day — but scoping bounds the blast radius, it does
+   * not make the property date-independent.
    */
   @AfterEach
   void leaveTheLedgerAsWeFoundIt() {
     for (LocalDate day : touchedDays) {
-      for (String source : BOARD_SOURCES) {
+      for (String source : touchedSources) {
         deleteSource(day, source);
       }
       OffsetDateTime start = day.atStartOfDay(Ist.ZONE).toOffsetDateTime();
@@ -100,6 +122,7 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
       jdbc.update("DELETE FROM manas_arora_screen_results WHERE screen_date = ?", day);
     }
     touchedDays.clear();
+    touchedSources.clear();
   }
 
   /**
@@ -249,7 +272,9 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   private void seedBatch(LocalDate day, String source, String status, Long rows, boolean finished) {
-    touchedDays.add(day); // recorded HERE, in the funnel, so a new test cannot forget to register
+    // Recorded HERE, in the funnel, so a new test cannot forget to register either one.
+    touchedDays.add(day);
+    touchedSources.add(source);
     OffsetDateTime started = day.atTime(19, 0).atZone(Ist.ZONE).toOffsetDateTime();
     OffsetDateTime finishedAt = finished ? day.atTime(19, 1).atZone(Ist.ZONE).toOffsetDateTime() : null;
     jdbc.update(
@@ -263,6 +288,7 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
 
   private void seedCapture(LocalDate day, Long rows) {
     touchedDays.add(day);
+    touchedSources.add(IngestRunLedger.SOURCE_OPTIONS_SNAPSHOT_CAPTURE);
     OffsetDateTime windowStart = day.atStartOfDay(Ist.ZONE).toOffsetDateTime();
     jdbc.update(
         "INSERT INTO ingest_runs (source, window_start, status, rows_written, started_at, finished_at) "
@@ -307,7 +333,7 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   private static String placeholders(int n) {
-    return String.join(",", java.util.Collections.nCopies(n, "?"));
+    return String.join(",", Collections.nCopies(n, "?"));
   }
 
   private void deleteSource(LocalDate day, String source) {
@@ -339,7 +365,7 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
    * "previous trading day" and a DIFFERENT test class failed on an assertion about live coverage.
    */
   @Test
-  void theClassLeavesNoIngestRunsBehind() {
+  void theClassLeavesNoIngestRunsBehind() throws NoSuchMethodException {
     LocalDate today = LocalDate.of(2026, 9, 16);
     LocalDate d1 = CAL.previousTradingDay(today);
     LocalDate d2 = CAL.previousTradingDay(d1);
@@ -348,31 +374,75 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
       seedBatchesHealthy(d);
       seedCapture(d, 5200L);
     }
-    assertThat(seededRunRows(d1, d2))
+    // Snapshot BEFORE the teardown clears them, and assert over EVERY day the funnels recorded —
+    // not just the two this method seeded — so a funnel that stopped registering a day used only by
+    // another test method cannot go unnoticed.
+    Set<String> wrote = Set.copyOf(touchedSources);
+    LocalDate[] all = touchedDays.toArray(LocalDate[]::new);
+    assertThat(seededRunRows(wrote, all))
         .as("the seed must actually have written something, or the cleanup assertion is vacuous")
         .isGreaterThan(0);
 
+    // ⚠️ Pins the WIRING, not just the body. The call below is direct, because a test cannot assert
+    // its own @AfterEach — so nothing else here observes that JUnit actually invokes it. Deleting
+    // the annotation is a plausible merge accident that would leave every test green and every row
+    // leaking, which is precisely the pre-fix state.
+    assertThat(
+            getClass()
+                .getDeclaredMethod("leaveTheLedgerAsWeFoundIt")
+                .isAnnotationPresent(AfterEach.class))
+        .as("the teardown must be wired to JUnit, not merely present")
+        .isTrue();
+
     leaveTheLedgerAsWeFoundIt();
 
-    assertThat(seededRunRows(d1, d2))
+    assertThat(seededRunRows(wrote, all))
         .as("every ingest_runs row this class wrote must be gone — a future date is safe only until"
             + " real time reaches it")
         .isZero();
-    assertThat(seededScreenRows(d1, d2))
+    assertThat(seededScreenRows(all))
         .as("the screen-result rows it wrote must be gone too — the SCREENER policy reads those")
         .isZero();
   }
 
-  private Integer seededRunRows(LocalDate... days) {
+  /**
+   * Counts only the sources this class WROTE, on the given days.
+   *
+   * <p>⚠️ The source predicate is the whole point and its absence was a real defect, caught in
+   * review. An unscoped count is strictly WIDER than the cleanup's scope, which makes it a false-red
+   * generator by construction: any row the teardown correctly declines to delete becomes a failure
+   * blamed on the teardown. And it detonates on a date — four in-module writers stamp
+   * {@code ingest_runs} at real {@code now()} with sources outside this set
+   * ({@code IngestRunLedgerSucceededTodayIntegrationTest}, {@code IngestRunLedgerIntegrationTest},
+   * {@code IngestRunReaperIntegrationTest}, and {@code DataQualityEodJob}'s
+   * {@code ApplicationReadyEvent} listener, which the shared substrate does NOT disable). So on
+   * 2026-09-11/-12/-15/-16 the unscoped version would have failed naming a row this class never
+   * wrote: <b>the exact H19 shape, reintroduced inside the fix for H19.</b>
+   */
+  private Integer seededRunRows(Set<String> sources, LocalDate... days) {
+    if (sources.isEmpty()) {
+      return 0;
+    }
     int total = 0;
+    List<String> ordered = List.copyOf(sources);
     for (LocalDate day : days) {
       OffsetDateTime start = day.atStartOfDay(Ist.ZONE).toOffsetDateTime();
       OffsetDateTime end = day.plusDays(1).atStartOfDay(Ist.ZONE).toOffsetDateTime();
+      Object[] args = new Object[ordered.size() + 4];
+      for (int i = 0; i < ordered.size(); i++) {
+        args[i] = ordered.get(i);
+      }
+      args[ordered.size()] = start;
+      args[ordered.size() + 1] = end;
+      args[ordered.size() + 2] = start;
+      args[ordered.size() + 3] = end;
       Integer n =
           jdbc.queryForObject(
-              "SELECT count(*) FROM ingest_runs WHERE (started_at >= ? AND started_at < ?)"
-                  + " OR (window_start >= ? AND window_start < ?)",
-              Integer.class, start, end, start, end);
+              "SELECT count(*) FROM ingest_runs WHERE source IN ("
+                  + placeholders(ordered.size())
+                  + ") AND ((started_at >= ? AND started_at < ?)"
+                  + " OR (window_start >= ? AND window_start < ?))",
+              Integer.class, args);
       total += n == null ? 0 : n;
     }
     return total;

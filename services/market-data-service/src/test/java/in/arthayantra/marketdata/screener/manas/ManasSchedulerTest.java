@@ -25,13 +25,17 @@ class ManasSchedulerTest {
   private final in.arthayantra.marketdata.ingest.IngestRunLedger ledger =
       mock(in.arthayantra.marketdata.ingest.IngestRunLedger.class);
 
+  // ⚠️ A REAL lock, never a mock. A mocked ManasScreenLock returns false from tryLock() by default,
+  // which would make every door skip and the concurrency test pass for the opposite reason.
+  private final ManasScreenLock screenLock = new ManasScreenLock();
+
   @Test
   void bhavcopyCompletedEventRunsAndPersistsTheScreen() {
     LocalDate day = LocalDate.of(2026, 7, 6);
     when(screener.screen(null))
         .thenReturn(new ManasScreenService.ScreenResult(day, 0, List.of()));
 
-    new ManasScheduler(screener, repo, geometry, ntfy, ledger).onBhavcopyBackfillCompleted();
+    new ManasScheduler(screener, repo, geometry, ntfy, ledger, screenLock).onBhavcopyBackfillCompleted();
 
     verify(repo).replaceAll(eq(day), any());
     verify(geometry).persistForPassers(eq(day), any());
@@ -43,7 +47,7 @@ class ManasSchedulerTest {
     when(repo.latestScreenDate()).thenReturn(day);
     when(screener.latestScreenDate()).thenReturn(day);
 
-    new ManasScheduler(screener, repo, geometry, ntfy, ledger).onBhavcopyBackfillCompleted();
+    new ManasScheduler(screener, repo, geometry, ntfy, ledger, screenLock).onBhavcopyBackfillCompleted();
 
     org.mockito.Mockito.verify(screener, org.mockito.Mockito.never()).screen(any());
     org.mockito.Mockito.verify(repo, org.mockito.Mockito.never()).replaceAll(any(), any());
@@ -60,7 +64,7 @@ class ManasSchedulerTest {
         // the class-level @ConditionalOnProperty is evaluated even for withBean registrations —
         // without the flag the bean (and its listener) is silently skipped
         .withPropertyValues("artha.manas-arora.screen.enabled=true")
-        .withBean(ManasScheduler.class, () -> new ManasScheduler(screener, repo, geometry, ntfy, ledger))
+        .withBean(ManasScheduler.class, () -> new ManasScheduler(screener, repo, geometry, ntfy, ledger, screenLock))
         .run(
             ctx -> {
               ctx.getSourceApplicationContext()
@@ -92,7 +96,7 @@ class ManasSchedulerTest {
               return new ManasScreenService.ScreenResult(day, 0, List.of());
             });
 
-    ManasScheduler scheduler = new ManasScheduler(screener, repo, geometry, ntfy, ledger);
+    ManasScheduler scheduler = new ManasScheduler(screener, repo, geometry, ntfy, ledger, screenLock);
     Thread eventDoor = new Thread(scheduler::onBhavcopyBackfillCompleted, "event-door");
     eventDoor.start();
     org.assertj.core.api.Assertions.assertThat(

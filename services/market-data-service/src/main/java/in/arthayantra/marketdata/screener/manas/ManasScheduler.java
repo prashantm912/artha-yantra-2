@@ -2,7 +2,6 @@ package in.arthayantra.marketdata.screener.manas;
 
 import in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
-import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,16 +37,20 @@ public class ManasScheduler {
   private final IngestRunLedger ledger;
 
   /**
-   * Serialises the three screen doors against each other (ledger H13) — same defect and same remedy
-   * as {@code MinerviniScheduler}, which is where the full reasoning lives.
+   * Serialises every screen door against the others (ledger H13) — same defect and same remedy as
+   * {@code MinerviniScheduler}, which is where the full reasoning lives.
    *
    * <p>The measured instance was minervini's (2026-08-24), but this screen has the identical
-   * read-then-act dedup and the identical three doors, one minute later in the same tail — and it
-   * has already double-run once: {@code MANAS_SCREEN} on 2026-08-11 at 18:00:05, 18:00:47 and
-   * 18:01:00, three runs inside 55 seconds. Fixing one and not the other would leave the same hole
-   * open one cron minute away.
+   * read-then-act dedup and the identical doors, one minute later in the same tail — and it has
+   * already double-run once: {@code MANAS_SCREEN} on 2026-08-11 at 18:00:05, 18:00:47 and 18:01:00,
+   * three runs inside 55 seconds.
+   *
+   * <p>⚠️ A SHARED {@link ManasScreenLock} bean rather than a field, because there are FOUR doors,
+   * not three: {@code ManasController.run} publishes the screen INLINE and cannot be covered by a
+   * lock that lives on this {@code @ConditionalOnProperty} bean. See that class for what an
+   * uncovered door actually costs.
    */
-  private final ReentrantLock screenLock = new ReentrantLock();
+  private final ManasScreenLock screenLock;
 
   /** Wires the screener + screen repository + geometry service + the ops ntfy client + ingest ledger. */
   public ManasScheduler(
@@ -55,12 +58,14 @@ public class ManasScheduler {
       ManasScreenRepository repo,
       ManasGeometryService geometry,
       in.arthayantra.marketdata.alerts.NtfyClient ntfy,
-      IngestRunLedger ledger) {
+      IngestRunLedger ledger,
+      ManasScreenLock screenLock) {
     this.screener = screener;
     this.repo = repo;
     this.geometry = geometry;
     this.ntfy = ntfy;
     this.ledger = ledger;
+    this.screenLock = screenLock;
   }
 
   /** Boot one-shot. */
@@ -82,12 +87,20 @@ public class ManasScheduler {
   }
 
   private void runQuietly(String trigger) {
-    // ⚠️ tryLock, NOT lock: the cron door runs on the DEFAULT taskScheduler (pool size 1, shared by
-    // ~32 scheduled methods), so blocking it for the length of a screen would starve them all to
-    // fix something that costs nothing to skip.
-    if (!screenLock.tryLock()) {
-      log.warn(
-          "manas screen already running — {} trigger skipped (H13: two doors overlapped)", trigger);
+    // ⚠️ The wait is PER DOOR, because the doors do not run on the same kind of thread and dropping
+    // them does not cost the same thing. See MinerviniScheduler.runQuietly for the full reasoning
+    // and the 2026-08-24 timing that forced it.
+    if (!acquire(trigger)) {
+      // Same severity split as the minervini twin, and the same reason.
+      if ("bhavcopy-complete".equals(trigger)) {
+        log.error(
+            "manas screen still locked after {} ms — the bhavcopy-complete door gave up; tonight's"
+                + " fresh watermark may go unscreened (H13)",
+            EVENT_DOOR_WAIT_MS);
+      } else {
+        log.warn(
+            "manas screen already running — {} trigger skipped (H13: two doors overlapped)", trigger);
+      }
       return;
     }
     try {
@@ -96,6 +109,18 @@ public class ManasScheduler {
       screenLock.unlock();
     }
   }
+
+  /**
+   * Waits for the screen lock in the way this door can afford. Mirror of the minervini rule:
+   * {@code bhavcopy-complete} runs on the dedicated {@code eod-bhavcopy-backfill} executor and is
+   * the trigger whose whole purpose is screening the FRESH watermark, so it waits; the cron and boot
+   * doors are on the shared pool-size-1 scheduler and skip instead.
+   */
+  private boolean acquire(String trigger) {
+    return screenLock.tryLock();
+  }
+
+  private static final long EVENT_DOOR_WAIT_MS = 180_000;
 
   private void runLocked(String trigger) {
     // Ingest-run ledger (audit §7.2.3). Opened only after the dedup skip below, so a no-op run

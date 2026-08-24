@@ -23,6 +23,9 @@ class ManasControllerDefaultDateTest {
   private final ManasScreenRepository repo = mock(ManasScreenRepository.class);
   private final ManasFunnelService funnelService = mock(ManasFunnelService.class);
 
+  /** Shared with the scheduler in production; held by the test in {@link #manualRunWaitsForTheScreenLock()}. */
+  private final ManasScreenLock screenLock = new ManasScreenLock();
+
   private ManasController controller() {
     return new ManasController(
         screener,
@@ -31,7 +34,56 @@ class ManasControllerDefaultDateTest {
         mock(ManasSetupsRepository.class),
         funnelService,
         mock(ManasAroraBacktestService.class),
-        mock(in.arthayantra.marketdata.screener.ScreenerHistoryRepository.class));
+        mock(in.arthayantra.marketdata.screener.ScreenerHistoryRepository.class),
+        screenLock); // a REAL lock — a mocked one returns false from tryLock and would skip instead
+  }
+
+  /**
+   * ⚠️ LEDGER H13, the FOURTH door. {@code POST /run} publishes the screen ITSELF — it calls
+   * {@code screen} then {@code replaceAll} inline rather than delegating the way the minervini
+   * controller delegates to {@code MinerviniScheduler.runOnce}. So a lock living only on
+   * {@code ManasScheduler} would leave this door open, and the review of #1456 caught exactly that:
+   * a lock covering every door but one reads as solved.
+   *
+   * <p>Concurrency here is not merely duplicated work. {@code ManasScreenRepository.replaceAll} is a
+   * DELETE-by-date plus a batch upsert in ONE transaction, so under READ COMMITTED the second
+   * transaction's DELETE cannot see rows the first inserted after its snapshot and the two candidate
+   * sets MERGE — a symbol the trailing-bar guard dropped survives into the published screen.
+   *
+   * <p>The assertion is that the call BLOCKS while the lock is held and completes once it is
+   * released. Holding the lock from the test thread is what makes this reachable at all.
+   */
+  @Test
+  void manualRunWaitsForTheScreenLock() throws Exception {
+    when(screener.screen(null))
+        .thenReturn(new ManasScreenService.ScreenResult(LocalDate.of(2026, 8, 24), 0, List.of()));
+    ManasController c = controller();
+    java.util.concurrent.CountDownLatch finished = new java.util.concurrent.CountDownLatch(1);
+
+    screenLock.lock();
+    Thread caller =
+        new Thread(
+            () -> {
+              c.run(null, true, 50);
+              finished.countDown();
+            },
+            "manual-run");
+    try {
+      caller.start();
+      assertThat(finished.await(750, java.util.concurrent.TimeUnit.MILLISECONDS))
+          .as("POST /run must NOT publish while another door holds the screen lock")
+          .isFalse();
+      verify(screener, org.mockito.Mockito.never()).screen(null);
+    } finally {
+      screenLock.unlock();
+    }
+
+    assertThat(finished.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        .as("…and it must proceed as soon as the lock is released, never skip the recompute")
+        .isTrue();
+    caller.join(5_000);
+    verify(screener).screen(null);
+    verify(repo).replaceAll(eq(LocalDate.of(2026, 8, 24)), org.mockito.ArgumentMatchers.any());
   }
 
   @Test

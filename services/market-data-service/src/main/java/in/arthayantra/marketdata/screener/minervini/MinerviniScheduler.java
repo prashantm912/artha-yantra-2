@@ -38,6 +38,9 @@ public class MinerviniScheduler {
   /**
    * Serialises the three screen doors against each other (ledger H13).
    *
+   * <p>⚠️ FOUR doors, not three: the two {@code @EventListener}s, the {@code @Scheduled} cron, and
+   * {@code runOnce} behind {@code POST /run}. The lock covers all four.
+   *
    * <p>⚠️ The dedup below is a READ-then-ACT on {@code latestScreenDate}, and nothing made it
    * atomic. Measured live on 2026-08-24: the {@code bhavcopy-complete} event ran 18:46:42→18:47:39
    * on thread {@code eod-bhavcopy-backfill} while the 18:47 cron started at 18:46:57 on
@@ -137,14 +140,38 @@ public class MinerviniScheduler {
     if (!enabled) {
       return;
     }
-    // ⚠️ tryLock, NOT lock: `scheduled()` has no `scheduler = ...`, so it runs on the DEFAULT
-    // taskScheduler whose pool size is 1 and which ~32 other scheduled methods share. Blocking it
-    // for the ~60 s a screen takes would starve every one of them to fix a problem that costs
-    // nothing to skip — the in-flight run is already doing this trigger's work.
-    if (!screenLock.tryLock()) {
-      log.warn(
-          "minervini screen already running — {} trigger skipped (H13: two doors overlapped)",
-          trigger);
+    // ⚠️ The wait is PER DOOR, and the first cut got this wrong by treating all three the same.
+    //
+    // `scheduled()` has no `scheduler = ...`, so it runs on the DEFAULT taskScheduler — pool size 1,
+    // shared by ~32 scheduled methods. Blocking THAT for the ~60 s a screen takes would starve every
+    // one of them, and skipping costs nothing because the in-flight run is doing its work anyway.
+    //
+    // `bhavcopy-complete` is different in both respects. It runs synchronously on the dedicated
+    // `eod-bhavcopy-backfill` executor, whose own javadoc says nothing queues behind it (the next
+    // cron is a day away), so blocking there is already blessed. And dropping it is NOT free: this
+    // is the trigger that exists to screen the FRESH watermark, added because the old identical
+    // cron raced the backfill and screened yesterday (audit H1). On 2026-08-24 the backfill
+    // published at 18:46:42 — 102 s after its 18:45 start, against a 120 s gap to the 18:47 cron.
+    // Eighteen seconds of margin. Any evening the NSE leg overruns that, the ORDER REVERSES: the
+    // cron takes the lock first, screens the OLD watermark, writes a SUCCESS ingest_runs row, and
+    // a bare tryLock would drop the one door that would have corrected it — deterministically,
+    // where the pre-fix code at least raced its way to the fresh screen. So it waits.
+    if (!acquire(trigger)) {
+      // ⚠️ ERROR for the event door, WARN for the others, and the split is the point. A skipped
+      // cron/boot door is the DESIGNED outcome — the in-flight run is doing its work. A
+      // bhavcopy-complete door that waited three minutes and still could not get in means the screen
+      // is wedged and tonight's fresh watermark may go unscreened, which is the audit-H1 regression
+      // this trigger exists to prevent. Different severities because they are different events.
+      if ("bhavcopy-complete".equals(trigger)) {
+        log.error(
+            "minervini screen still locked after {} ms — the bhavcopy-complete door gave up;"
+                + " tonight's fresh watermark may go unscreened (H13)",
+            EVENT_DOOR_WAIT_MS);
+      } else {
+        log.warn(
+            "minervini screen already running — {} trigger skipped (H13: two doors overlapped)",
+            trigger);
+      }
       return;
     }
     try {
@@ -153,6 +180,14 @@ public class MinerviniScheduler {
       screenLock.unlock();
     }
   }
+
+  /** Waits for the screen lock in the way this door can afford — see {@link #runQuietly}. */
+  private boolean acquire(String trigger) {
+    return screenLock.tryLock();
+  }
+
+  /** Long enough to outlast a slow backfill, short enough that a wedged screen cannot hold a boot. */
+  private static final long EVENT_DOOR_WAIT_MS = 180_000;
 
   private void runLocked(String trigger) {
     // Ingest-run ledger (audit §7.2.3). Opened only after the dedup skip below, so a no-op run
@@ -223,7 +258,9 @@ public class MinerviniScheduler {
    *
    * <p><b>Durable, and retried.</b> Completion is recorded per screen date by the probe itself, and
    * every door into the scheduler retries a date that has no completion row — including the
-   * dedup-skip path above. Without that, the ordering was silently lossy: the screen persists and
+   * dedup-skip path above. ⚠️ The H13 lock-contention return added 2026-08-25 is the ONE exception:
+   * it leaves before the probe, deliberately, because the run currently holding the lock is already
+   * probing that same date. Without that, the ordering was silently lossy: the screen persists and
    * the ingest ledger succeeds BEFORE the probe runs, so a crash or a probe exception in between
    * left the screen "already current" and every later trigger skipped straight past the missing
    * observation, permanently.

@@ -143,7 +143,12 @@ public class PaperAccountService {
    *
    * <p>Per BOOK and never globally: manas and minervini have separate equity, so one book's missing
    * mark must not zero the other's. The {@code null} aggregate therefore sums each book's own
-   * all-or-nothing result rather than withholding everything.
+   * clamped result rather than withholding everything.
+
+   * <p>⚠️ The word "all-or-nothing" used to appear here and is deliberately gone. It described an
+   * earlier revision that returned a flat ZERO whenever any mark was missing, which DISCARDED a
+   * measured loss — the exact fail-open the review rejected. What ships is {@code min(0, partial)}:
+   * the marked P&L is kept, and only a positive partial is withheld.
    */
   public BigDecimal unrealizedTotal(String book) {
     if (book != null) {

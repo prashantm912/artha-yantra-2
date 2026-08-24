@@ -1797,10 +1797,14 @@ public class PaperService {
    * #openPositions} (which stay display-only and never touch this method at all).
    */
   /**
-   * Companion to {@link #countMtmBlindPositions}: how many BOOKS are currently withholding their
-   * unrealized entirely because at least one of their positions cannot be marked. The blind-position
-   * count says how much data is missing; this says how much MONEY MATH is degraded, which is the
-   * alertable quantity — one unmarked position withholds its whole book's unrealized.
+   * Companion to {@link #countMtmBlindPositions}: how many BOOKS are currently reporting a CLAMPED
+   * unrealized because at least one of their positions cannot be marked. The blind-position count
+   * says how much data is missing; this says how much MONEY MATH is degraded, which is the alertable
+   * quantity — one unmarked position clamps its whole book's unrealized.
+   *
+   * <p>⚠️ "Withholding entirely" is the OLD behaviour and the word is deliberately gone: the book
+   * still reports its measured LOSS, and only a positive partial is suppressed to zero. A book
+   * counted here is degraded, not blank.
    */
   private double countUnrealizedWithheldBooks() {
     return accountService.withheldBookCount();

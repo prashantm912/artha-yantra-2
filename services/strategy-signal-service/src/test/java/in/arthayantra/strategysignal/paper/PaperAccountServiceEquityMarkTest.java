@@ -320,9 +320,13 @@ class PaperAccountServiceEquityMarkTest {
    * 100 ABOVE. What withholding buys is a bound on HOW FAR above (the assertion is
    * {@code isLessThan(150,500)}, the per-position figure), not a sign guarantee. The sign guarantee
    * only exists in the other direction, and that is {@link #aMeasuredLossIsNeverDiscardedByWithholding}.
+   *
+   * <p>⚠️ The method was renamed on 2026-08-25 because its old name — "MustNotPushEquityAbove" —
+   * asserted the opposite of what the body checks, and a name that contradicts its own assertion is
+   * how a reader concludes a guarantee exists that does not. Cross-vendor review, Minor.
    */
   @Test
-  void anUnmarkedLoserMustNotPushEquityAboveTheFullyMarkedFigure() {
+  void anUnmarkedLoserBoundsHowFarEquityMaySitAboveTheFullyMarkedFigure() {
     PositionRow winner = row(1, BOOK, "WINNER", 10, "100.00"); // marks at 150 -> +500
     PositionRow loser = row(2, BOOK, "LOSER", 10, "100.00"); //  marks at  40 -> -600
     PaperPositionRepository positions = mock(PaperPositionRepository.class);

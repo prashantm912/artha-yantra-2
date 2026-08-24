@@ -28,8 +28,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /**
- * BEJ-01 (monitor-scheduler isolation): the pure liveness detectors ({@code SubscriberHealthCanary},
- * {@code PartialBucketCanary}, {@code DotHealthCanary} sweeps) run on
+ * BEJ-01 (monitor-scheduler isolation): the pure liveness detectors run on
  * a dedicated {@code monitorTaskScheduler}, isolated from the default single-thread pool that the
  * synchronous swing batch and every EOD job share, so a blocked sibling can never starve detection.
  */

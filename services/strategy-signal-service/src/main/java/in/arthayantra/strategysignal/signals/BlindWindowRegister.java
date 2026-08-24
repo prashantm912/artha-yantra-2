@@ -45,9 +45,11 @@ public class BlindWindowRegister {
    * move off this pool too, because a STALLED call starves every sibling while it hangs". The
    * unbounded HANG is the property that rule exists to prevent, so these statements are bounded:
    * they cannot hold the detector thread indefinitely, whatever the database does. It is a bound,
-   * not a full answer — moving these writes (and the pre-existing
-   * {@link SubscriberHealthTelemetry} one, which has been on that pool far longer) off the pool
-   * entirely is filed separately.
+   * not the only measure: as of #1453 the whole sweep runs on its own
+   * {@code subscriberWatchdogTaskScheduler}, so a stall here cannot starve the fenced detector pool
+   * at all. {@link SubscriberHealthTelemetry}'s insert on the same sweep is still UNBOUNDED — that
+   * predates this and is filed separately; the ordering in {@code openOrRetry} is what stops it
+   * costing the artifact.
    */
   private static final int STATEMENT_TIMEOUT_SECONDS = 2;
 

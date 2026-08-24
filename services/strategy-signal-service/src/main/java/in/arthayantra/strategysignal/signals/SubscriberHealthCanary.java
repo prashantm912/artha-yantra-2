@@ -348,27 +348,44 @@ public class SubscriberHealthCanary {
             + "s old — the PRODUCER is blind, so remediation stays market-data's; recording the "
             + "window because the reconnect backfill repairs the CANDLES but never the fact that the "
             + "engine did not see them live";
-    log.error("subscriber watchdog: engine BLIND — {}", detail);
-    telemetry.record("feed-blind", detail);
+    // ⚠️ THE DURABLE TRANSITION GOES FIRST, and the order is load-bearing rather than stylistic.
+    // `telemetry.record` writes to a DIFFERENT table; with it first, a stall on
+    // subscriber_health_events would stop blind_windows from ever being ATTEMPTED, even while
+    // blind_windows itself was perfectly writable — losing the artifact this whole feature exists to
+    // produce, to a failure in a table nothing here depends on.
+    //
     // One key per episode, generated ONCE here: every later retry of this INSERT reuses it, so an
     // ambiguous commit resolves to the SAME row instead of a second, permanently-open one.
     String key = UUID.randomUUID().toString();
     episode = new Episode(key, startedAt, detail, blindWindows.open(key, startedAt, detail), null, null);
+    log.error("subscriber watchdog: engine BLIND — {}", detail);
+    telemetry.record("feed-blind", detail);
   }
 
-  /** Marks the open episode closed and tries to make that durable. No-op when nothing is open. */
+  /**
+   * Marks the open episode closed and tries to make that durable. No-op when nothing is open.
+   *
+   * <p>⚠️ Same ordering rule as the open path, for a sharper reason: telemetry used to run BEFORE
+   * the close was persisted, so a stall on {@code subscriber_health_events} could block after
+   * recovery had been observed but before {@code ended_at} was written — and a restart then loses
+   * the in-memory episode and leaves the row open forever, which is exactly the corruption the
+   * episode key was added to prevent, arriving by a different route.
+   */
   private void requestClose(Instant endedAt, String reason) {
     Episode current = episode;
     if (current == null) {
       return;
     }
-    if (current.endedAt() == null) {
-      log.info("subscriber watchdog: engine blind window closed — {}", reason);
-      telemetry.record("recovery", "engine blind window closed — " + reason);
+    boolean firstTransition = current.endedAt() == null;
+    if (firstTransition) {
       episode = current.closing(endedAt, reason);
       lastWindowClosedAt = endedAt; // the next window can never start before this
     }
     flush();
+    if (firstTransition) {
+      log.info("subscriber watchdog: engine blind window closed — {}", reason);
+      telemetry.record("recovery", "engine blind window closed — " + reason);
+    }
   }
 
   /**

@@ -15,8 +15,11 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  * their sweeps keep firing regardless of what the default pool is doing.
  *
  * <p>Scope-fenced: ONLY pure detectors move onto {@link #monitorTaskScheduler()} via
- * {@code @Scheduled(scheduler = "monitorTaskScheduler")} — {@code SubscriberHealthCanary.sweep},
- * {@code PartialBucketCanary.sweep}, {@code DotHealthCanary.sweep}. The engine reload trio, PaperScheduler, and every EOD/batch job
+ * {@code @Scheduled(scheduler = "monitorTaskScheduler")} — {@code DotHealthCanary.sweep} and
+ * {@code StrategyCoverageWatchdog.sweep}. ⚠️ {@code SubscriberHealthCanary.sweep} LEFT this pool in
+ * #1453 once it was writing JDBC (see {@link #subscriberWatchdogTaskScheduler()}), and
+ * {@code PartialBucketCanary.sweep} left at G9 — both are listed here because a stale tenant list is
+ * how the JDBC write stayed invisible on a pool documented as in-memory only. The engine reload trio, PaperScheduler, and every EOD/batch job
  * keep the default pool (their serial single-thread assumption is load-bearing), except for the
  * synchronous swing missed-batch detector and the synchronous multi-session
  * {@code SwingBatchCatchUp}, which each have their own fenced pool below.

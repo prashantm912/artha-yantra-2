@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -19,6 +20,7 @@ import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
@@ -496,6 +498,57 @@ class SubscriberHealthCanaryTest {
     assertThat(starts.getAllValues().get(1))
         .as("the second window must not reach back over the interval the first one covered")
         .isAfterOrEqualTo(closedAt);
+  }
+
+  /**
+   * ⚠️ ORDERING, and it is correctness rather than style. `telemetry.record` writes a DIFFERENT
+   * table (`subscriber_health_events`) through an UNBOUNDED insert. With it first, a stall there
+   * would stop `blind_windows` from ever being ATTEMPTED — losing the artifact this feature exists
+   * to produce, to a failure in a table nothing here depends on.
+   */
+  @Test
+  void openRegistersTheWindowBeforeWritingTelemetry() {
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    evalKeepingUp(NOW_MS - 200_000);
+    feedAgeMs(200_000);
+    registerAccepts();
+
+    canary(true).sweep();
+
+    InOrder order = inOrder(blindWindows, telemetry);
+    order.verify(blindWindows).open(anyString(), any(Instant.class), anyString());
+    order.verify(telemetry).record(eq("feed-blind"), anyString());
+  }
+
+  /**
+   * The mirror, and the sharper half: telemetry running before the close was PERSISTED meant a stall
+   * could block after recovery was observed but before `ended_at` was written — and a restart then
+   * loses the in-memory episode and leaves the row open forever.
+   */
+  @Test
+  void recoveryPersistsTheCloseBeforeWritingTelemetry() {
+    MutableClock advancing = new MutableClock(IN_SESSION);
+    AtomicLong received = new AtomicLong(NOW_MS - 200_000);
+    when(registry.countEnabledPublished()).thenReturn(1L);
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    when(engine.lastBarReceivedAtMs()).thenAnswer(inv -> received.get());
+    when(engine.lastBarEvaluatedAtMs()).thenAnswer(inv -> received.get());
+    when(redis.opsForValue()).thenReturn(valueOps);
+    when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000));
+    registerAccepts();
+
+    SubscriberHealthCanary c =
+        new SubscriberHealthCanary(
+            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
+            FEED_FRESH);
+    c.sweep();
+    advancing.advanceMs(60_000);
+    received.set(advancing.millis() - 5_000);
+    c.sweep();
+
+    InOrder order = inOrder(blindWindows, telemetry);
+    order.verify(blindWindows).close(eq(7L), any(Instant.class), eq("bars-resumed"));
+    order.verify(telemetry).record(eq("recovery"), anyString());
   }
 
   /** A test clock whose instant can be advanced, to drive the multi-sweep throttle path. */

@@ -47,7 +47,8 @@ CREATE INDEX idx_blind_windows_started ON blind_windows (started_at DESC);
 
 COMMENT ON TABLE blind_windows IS
     'Windows in which the live signal engine received no bars because the PRODUCER was blind. '
-    'Written by SubscriberHealthCanary; a record, never a replay trigger.';
+    'Written by SubscriberHealthCanary, on its own dedicated scheduler pool since #1453; a '
+    'record, never a replay trigger.';
 COMMENT ON COLUMN blind_windows.started_at IS
     'Receipt time of the last bar before the gap -- the last moment the engine is known to have '
     'had data -- CLAMPED so it can never precede today''s 09:15 IST session open, nor the end of '
@@ -58,7 +59,7 @@ COMMENT ON COLUMN blind_windows.ended_at IS
     'Receipt time of the newest bar seen by the sweep that OBSERVED recovery -- not the first bar '
     'back. It therefore OVERSTATES the true end by up to one sweep, normally the 60s configured '
     'cadence but longer whenever the sweep itself is delayed -- fixedDelay is a spacing, not an '
-    'upper bound, and the sweep shares a pool. Pinning it exactly would need a transition hook on '
+    'upper bound. Pinning it exactly would need a transition hook on '
     'the engine receive path.';
 COMMENT ON COLUMN blind_windows.closed_reason IS
     'How the window ended -- bars-resumed / session-ended / strategies-idle. session-ended is NOT '

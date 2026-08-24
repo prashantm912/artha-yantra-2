@@ -62,6 +62,41 @@ public class NseEodScheduler {
     pullAll();
   }
 
+  /**
+   * Intra-day retry for sources that FAILED earlier today — a few fixed attempts, each a no-op for
+   * any source that has already landed (owner decision 2026-08-24).
+   *
+   * <h2>The defect this closes</h2>
+   *
+   * Each {@code pull*} above catches its failure and logs "will retry next schedule". Until now the
+   * next schedule was {@code eod-cron} — roughly TEN HOURS later. On 2026-08-24 a ~22-minute
+   * host-network outage happened to span the 08:32 startup pull, so all three NSE sources failed,
+   * {@code nse_eod_participant_oi} kept a max trade_date of 08-20, and the FII rail read null on all
+   * 1,196 rejection rows for the WHOLE session — degrading to pass, by design, and silently. One bad
+   * 30-second window blinded a rail until the evening batch.
+   *
+   * <p><b>Skips anything already successful today</b> ({@link IngestRunLedger#succeededToday}). That
+   * is not just an optimisation: this class's own javadoc flags NSE anti-bot behaviour, so a retry
+   * that re-fetched healthy sources three times a day would be a new problem.
+   *
+   * <p>Fail-soft like every other path here — {@code pullAll}'s per-source try/catch is reused
+   * unchanged, so a retry that also fails logs and leaves the evening batch as the backstop.
+   */
+  @Scheduled(cron = "${artha.nse.fii-retry-cron:0 50 9,11,14 * * MON-FRI}", zone = "Asia/Kolkata")
+  public void retryFailedSources() {
+    retryIfFailed(IngestRunLedger.SOURCE_NSE_FII_DII, this::pullFiiDii);
+    retryIfFailed(IngestRunLedger.SOURCE_NSE_PARTICIPANT_OI, this::pullParticipantOi);
+    retryIfFailed(IngestRunLedger.SOURCE_NSE_FII_DERIVATIVE, this::pullFiiDerivative);
+  }
+
+  private void retryIfFailed(String source, Runnable pull) {
+    if (ledger.succeededToday(source)) {
+      return;
+    }
+    log.info("NSE {} has no SUCCESS today — intra-day retry", source);
+    pull.run();
+  }
+
   private void pullAll() {
     pullFiiDii();
     pullParticipantOi();

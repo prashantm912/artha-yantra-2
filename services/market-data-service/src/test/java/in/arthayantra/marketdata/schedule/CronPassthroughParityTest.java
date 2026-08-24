@@ -52,11 +52,15 @@ class CronPassthroughParityTest {
    * the whole file execute zero assertions and pass — the guard-that-checks-nothing shape. Lowering
    * this number is a deliberate act that must be justified in the PR that does it.
    */
-  private static final int EXPECTED_JOB_COUNT = 11;
+  private static final int EXPECTED_JOB_COUNT = 12;
 
   private static final List<Job> JOBS =
       List.of(
           new Job("artha.nse.eod-cron", "ARTHA_NSE_EOD_CRON", SRC + "nse/NseEodScheduler.java"),
+          new Job(
+              "artha.nse.fii-retry-cron",
+              "ARTHA_NSE_FII_RETRY_CRON",
+              SRC + "nse/NseEodScheduler.java"),
           new Job(
               "artha.bhavcopy.eod-cron",
               "ARTHA_BHAVCOPY_EOD_CRON",

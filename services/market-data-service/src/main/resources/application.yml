@@ -306,6 +306,9 @@ artha:
     base-url: https://www.nseindia.com
     archives-url: https://nsearchives.nseindia.com
     eod-cron: "${ARTHA_NSE_EOD_CRON:0 46 18 * * MON-FRI}"
+    # Intra-day retry for sources that FAILED earlier today (ledger: 2026-08-24 outage blinded
+    # the FII rail for a whole session). No-op for any source already SUCCESS today.
+    fii-retry-cron: "${ARTHA_NSE_FII_RETRY_CRON:0 50 9,11,14 * * MON-FRI}"
     bhavcopy:
       # NSE series projected into candles as 1d source=BHAVCOPY (cash equities). EQ = rolling
       # settlement, BE = trade-to-trade. Non-equity series (GS gilts, etc.) stay raw-only.

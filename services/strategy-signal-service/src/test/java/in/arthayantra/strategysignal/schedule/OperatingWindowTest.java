@@ -56,6 +56,9 @@ class OperatingWindowTest {
     JOBS.put("artha.upstox.canary-cron", MD + "upstox/canary/UpstoxContractCanary.java");
     JOBS.put("artha.bhavcopy.eod-cron", MD + "bhavcopy/BhavcopyBackfillService.java");
     JOBS.put("artha.nse.eod-cron", MD + "nse/NseEodScheduler.java");
+    // Intra-day retry for a FAILED NSE pull (2026-08-24). Three firings a day, so the collision
+    // check below expands it to 09:50/11:50/14:50 and each must be free — that is why it is here.
+    JOBS.put("artha.nse.fii-retry-cron", MD + "nse/NseEodScheduler.java");
     JOBS.put("artha.minervini.cron", MD + "screener/minervini/MinerviniScheduler.java");
     JOBS.put("artha.manas-arora.cron", MD + "screener/manas/ManasScheduler.java");
     JOBS.put("artha.context.eod-cron", MD + "context/MarketContextEodJob.java");
@@ -83,7 +86,7 @@ class OperatingWindowTest {
     JOBS.put("artha.paper.past-expiry-recon.cron", SS + "paper/PaperScheduler.java");
   }
 
-  private static final int EXPECTED_JOB_COUNT = 18;
+  private static final int EXPECTED_JOB_COUNT = 19;
 
   @Test
   @DisplayName("the catalogue is not silently shrunk")

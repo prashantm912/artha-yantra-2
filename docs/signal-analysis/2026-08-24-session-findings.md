@@ -178,10 +178,48 @@ the standing level (77–80 s every session since 08-11). One-line watch, not a 
   standing #1075 disabled-scalper drafts), 0 DB-only, 0 YAML-only.** Unchanged; nothing
   republished by this run.
 
-### 6.8 T10 stale OPEN paper positions
+### 6.8 T10 RETIRED — "stale OPEN paper positions" was measuring age, not health
 
-**18 OPEN (unchanged vs 08-21)**, oldest 07-08. Chronic, owner-gated, as-of ~16:00 IST
-(pre-evening batch).
+**18 OPEN (unchanged vs 08-21)**, oldest 07-08 — and investigated properly for the first time
+this evening (owner asked for investigation before any action). **Every part of the defect framing
+is false**, so T10 is retired rather than carried:
+
+- **Not orphaned.** All 18 carry a `TAKEN` ENTRY anchor, so `SignalRepository.activeEntries()`
+  (`signal_type='ENTRY' AND status IN ('ACTIVE','TAKEN')`) picks up every one.
+- **Not unmanaged.** Verified from the CONSUMER side, not the anchor side: all 18 have a
+  `strategy.sell_decisions` row for `run_date=2026-08-24`, and for every prior session too
+  (23 rows/day, 15 minervini + 8 manas).
+- **Not underwater.** 17 of 18 are PROFITABLE. Range **−1.33% to +53.05%**, median ~+13%. The only
+  negative is TFCILTD at −1.33%, opened three sessions ago. The two 07-08 rows the label kept citing
+  as proof of staleness are **ATHERENERG +22.08%** and **DIACABS +53.05%**.
+
+**Age was doing all the work in that framing.** A trend-following book is SUPPOSED to hold winners
+for weeks-to-months; the losers already left (18 `STRUCTURAL_STOP` closes on record, 3 today). The
+row had a defect label on the book's best outcome and regenerated every session.
+
+⚠️ Marks are sound despite `DIACABS`/`MENONBE` being the two [[H36]] stale-Kite-token symbols: both
+carry 10 daily bars in the last 10 sessions, because the BHAVCOPY EOD path writes them and only the
+Kite gap-fetch path is affected.
+
+### 6.9 The replacement watch — a trail that should have fired and did not
+
+T10's honest successor. `sell_decisions` already carries everything needed, so this is a query, not
+a build:
+
+```sql
+SELECT sd.run_date, sd.book, sd.symbol, sd.current_price, sd.stop_level, sd.trail_level
+  FROM strategy.sell_decisions sd
+  JOIN strategy.paper_positions p
+    ON p.book = sd.book AND p.tradingsymbol = sd.symbol AND p.status = 'OPEN'
+ WHERE sd.run_date = (SELECT max(run_date) FROM strategy.sell_decisions)
+   AND sd.selling_now = false
+   AND sd.current_price <= GREATEST(COALESCE(sd.stop_level, 0), COALESCE(sd.trail_level, 0));
+```
+
+**First measurement 2026-08-24: 0 rows — clean.** ⚠️ And checked for the armed-gate-over-an-empty-
+operand shape before reporting that as reassurance: the same run_date has **23 rows, 23 with a
+`stop_level`, 21 with a `trail_level`**, so the query had real data to fail on and did not. A watch
+whose operand is structurally zero reports clean forever; this one is not that.
 
 ## 7 Tuning candidates
 
@@ -189,7 +227,7 @@ Ledger §0 group G is the authoritative status; nothing applied by this run.
 
 | # | knob | status | today's evidence |
 |---|---|---|---|
-| NEW-7 (08-24) | **fii ingest has no intra-day retry after a failed morning catch-up** | **PROPOSED (build, small)** — a failed 08:3x FII/participant fetch leaves the gate's fii inputs null ALL session with no retry until 18:45; today it was outage-induced and harmless (rail degrades to pass), but the same gap after a mere NSE-side hiccup would silently blind the fii bias every session it happens | §6.2 |
+| NEW-7 (08-24) | **fii ingest has no intra-day retry after a failed morning catch-up** | ✅ **BUILT SAME EVENING — [#1450](https://github.com/prashantm912/artha-yantra-2/pull/1450)**, owner approved "a few fixed attempts" (09:50/11:50/14:50 IST, skipping any source already SUCCESS today). Proposed independently by this routine and by the main session — same defect, same evening. Original note: — a failed 08:3x FII/participant fetch leaves the gate's fii inputs null ALL session with no retry until 18:45; today it was outage-induced and harmless (rail degrades to pass), but the same gap after a mere NSE-side hiccup would silently blind the fii bias every session it happens | §6.2 |
 | NEW-6 (08-19) | unpaired mid-session §3.17 WARNs w/o reconnect | **WATCH — 2nd consecutive session with zero unexplained WARNs** (today even the reconnect-inflation class stayed silent); today is NOT a clean no-outage day, so the "one more clean session" condition is still unmet — hold | §4 |
 | watch | `strike-pick` chain-proximity | **WATCH — Mon/Tue NSE window LANDED (452, all NIFTY-rooted)**; tomorrow = NSE monthly expiry day-of: expect S24 OI suppression (NIFTY root) + saturation | §2 |
 | NEW (08-04) | mid-session deploys | **PROPOSED — carried** | no deploy today; the outage demonstrated the same starvation §3.38 predicts, from the environment side |
@@ -202,7 +240,8 @@ Ledger §0 group G is the authoritative status; nothing applied by this run.
 | T23 | partial-bucket tolerance | **OPEN** | 2 WARNs 0 straddles, boot-fresh ±1,885 first-pair class; clean thereafter |
 | T1 | `relativeVolumeMultiplier` | **REJECTED — carried** | vol-12k5/vol-off each won their n=1 challenger-only trade (+₹1,091.34) — 14th/15th measured loosenings, noted, not decision-grade |
 | T7 | composite threshold | **REJECTED — carried** | composite-055 all-time now −₹19.78, but today's gain was champion-shared (no loosening observation) |
-| T10 | stale OPEN paper positions | **OWNER — chronic** | 18 OPEN, oldest 07-08 |
+| T10 | stale OPEN paper positions | **RETIRED 2026-08-24 (owner)** — the label measured AGE, not health: all 18 evaluated every session, 17 of 18 profitable (−1.33%..+53.05%) | §6.8 |
+| NEW-8 (08-24) | **trail-should-have-fired watch** (T10's replacement) | **ADDED — first measurement 0 rows, operand non-empty (23 rows / 21 with a trail_level)** | §6.9 |
 | T8/T26 | latency | OPEN (data) | emit 17.2–20.2 s (one >18 s first); shadow p50 77.5 s standing | 
 | T2 | `iv_rank` | carried, not open | NULL 1,196/1,196 |
 

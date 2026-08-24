@@ -9,6 +9,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
@@ -253,7 +254,7 @@ class SubscriberHealthCanaryTest {
   /**
    * A failed register INSERT is RETRIED on later sweeps, with the ORIGINAL start - losing the row
    * would lose the whole artifact for that outage, which is the one thing this feature produces. The
-   * alert side stays latched throughout: exactly one ERROR/telemetry row, however many retries.
+   * The producer-blind branch writes no telemetry at all -- blind_windows is its record.
    */
   @Test
   void registerInsertFailed_retriesWithTheOriginalStart() {
@@ -567,6 +568,10 @@ class SubscriberHealthCanaryTest {
     order.verify(blindWindows, times(2)).open(anyString(), any(Instant.class), anyString());
     order.verify(blindWindows).close(eq(7L), any(Instant.class), eq("bars-resumed"));
     verifyNoMoreInteractions(blindWindows);
+    // ⚠️ verifyNoMoreInteractions(blindWindows) CANNOT see a telemetry call sitting between the open
+    // and the close -- the round-7 implementation, which put exactly that there, would pass without
+    // this line. Asserting on the OTHER mock is what makes the gap observable.
+    verifyNoInteractions(telemetry);
   }
 
   /**
@@ -607,6 +612,37 @@ class SubscriberHealthCanaryTest {
     assertThat(keys.getAllValues().get(1))
         .as("the retry must reuse the ORIGINAL episode key, not open a fresh window")
         .isEqualTo(keys.getAllValues().get(0));
+  }
+
+  /**
+   * The step that satisfies the interval guard and still fakes a session boundary: a start clamped
+   * to 09:15 with a step from 10:43 back to 09:16 lands AFTER the start (so "a window cannot end
+   * before it began" accepts it) and BEFORE ARMED_FROM (so the session gate closes it). Only
+   * comparing successive sweeps catches this one.
+   */
+  @Test
+  void clockStepLandingAfterTheClampedStart_isStillDetected() {
+    // 10:43 IST on the same NSE session == 05:13Z
+    MutableClock advancing = new MutableClock(Instant.parse("2026-07-07T05:13:00Z"));
+    when(registry.countEnabledPublished()).thenReturn(1L);
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    // feed dead since before the open, so the start clamps to 09:15 IST
+    long deadSince = Instant.parse("2026-07-06T10:00:00Z").toEpochMilli();
+    when(engine.lastBarReceivedAtMs()).thenReturn(deadSince);
+    when(engine.lastBarEvaluatedAtMs()).thenReturn(deadSince);
+    when(redis.opsForValue()).thenReturn(valueOps);
+    when(valueOps.get("ticks:last-at")).thenAnswer(inv -> Long.toString(advancing.millis() - 400_000));
+    registerAccepts();
+
+    SubscriberHealthCanary c =
+        new SubscriberHealthCanary(
+            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
+            FEED_FRESH);
+    c.sweep(); // 10:43 — window opens, started_at clamped to 09:15 IST
+    advancing.advanceMs(-87 * 60_000L); // 10:43 -> 09:16: after the start, before ARMED_FROM
+    c.sweep();
+
+    verify(blindWindows, never()).close(any(), any(Instant.class), anyString());
   }
 
   /** A test clock whose instant can be advanced, to drive the multi-sweep throttle path. */

@@ -146,6 +146,9 @@ public class SubscriberHealthCanary {
   // `strategies-idle` close followed by a re-enable DURING the same outage cannot backdate the new
   // window over the interval that was already accounted for.
   private volatile Instant lastWindowClosedAt = Instant.EPOCH;
+  // Wall-clock of the previous sweep. A fixedDelay sweep can only move FORWARD, so a smaller value
+  // means the host clock stepped backwards -- see the guard at the top of sweep().
+  private volatile long lastSweepAtMs;
   private long lastResubscribeAtMs;
 
   /** One producer-blind episode. Immutable; every transition replaces it. */
@@ -199,6 +202,27 @@ public class SubscriberHealthCanary {
       if (!enabled) {
         return;
       }
+      long sweepAtMs = clock.millis();
+      if (sweepAtMs < lastSweepAtMs) {
+        // ⚠️ The host clock stepped BACKWARDS, a measured failure on this box (the 87-minute July
+        // 2026 drift). Every time computation below is then wrong, so the sweep does nothing at all
+        // this cycle rather than acting on any of them.
+        //
+        // This detector replaces two narrower ones that both missed. The negative-receive-gap check
+        // sits inside updateBlindWindow, which the session gate returns before reaching; and the
+        // "a window cannot end before it began" guard is necessary but NOT sufficient, because a
+        // step can land AFTER a clamped start and still before ARMED_FROM -- a start clamped to
+        // 09:15 and a step from 10:43 to 09:16 satisfies the interval and still fakes a session
+        // boundary. Comparing successive sweeps needs no such reasoning: a fixedDelay sweep only
+        // ever moves forward, so a smaller reading is the fault itself rather than a symptom of it.
+        log.warn(
+            "subscriber watchdog: clock stepped BACKWARDS {}ms since the last sweep — skipping this"
+                + " sweep entirely; every window and stall computation would be wrong",
+            lastSweepAtMs - sweepAtMs);
+        lastSweepAtMs = sweepAtMs; // resync, so one step does not warn on every later sweep
+        return;
+      }
+      lastSweepAtMs = sweepAtMs;
       ZonedDateTime now = clock.instant().atZone(Ist.ZONE);
       boolean inSession = inSession(now);
       if (!inSession || registry.countEnabledPublished() == 0) {

@@ -786,8 +786,10 @@ public class SwingBatchEngine {
         sessionDate
             + ": "
             + symbols.size()
-            + " symbol(s) refused — a material share of the window the entry"
-            + " gate reads is missing, so the score would be computed off a stretched window. NOTE:"
+            + " symbol(s) refused — the window the entry gate reads is materially incomplete OR"
+            + " undeterminable (the probe could not make a claim: an uncovered calendar year, an"
+            + " invalid bar, or a depth that degraded to zero), so the score would be computed off a"
+            + " window that is stretched or unverified. NOTE:"
             + " this is PER STRATEGY, and the family runs several with different depths in one pass,"
             + " so a name refused by one strategy may still have been entered by another. "
             + String.join(", ", sample)
@@ -1124,9 +1126,15 @@ public class SwingBatchEngine {
       // ARMED records + errors + PAGES. ARMED on this half means "alert loudly" — see
       // CoverageGateMode. The evaluation below runs identically under all three.
       if (coverageGateMode != CoverageGateMode.DISABLED) {
+        // heldBars, NOT just the declared depth: the trail is measured off a peak scanned from
+        // entryIndex and an ATR pinned AT entryIndex, so on a long-held position the bars that
+        // decide the level sit OUTSIDE any current-bar window. See SwingCoverageProbe#probeExit.
         SwingCoverageProbe.Coverage exitCoverage =
-            SwingCoverageProbe.probe(
-                series, SwingCoverageProbe.exitLookbackBars(strat.definition(), bank), calendar);
+            SwingCoverageProbe.probeExit(
+                series,
+                SwingCoverageProbe.exitLookbackBars(strat.definition(), bank),
+                (series.size() - 1) - entryIndex,
+                calendar);
         // ⚠️ UNDETERMINABLE counts as degraded here, and materiallyIncomplete() alone does NOT say
         // so — it is false when determinable is false, so a probe that FAILED reported the exit as
         // cleanly covered and said nothing (cross-vendor review, 2026-08-10). On the ENTRY side the

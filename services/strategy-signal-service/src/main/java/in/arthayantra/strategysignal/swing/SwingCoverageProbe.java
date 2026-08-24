@@ -281,9 +281,14 @@ public final class SwingCoverageProbe {
    *
    * <p>Applied to the ENTRY probe only, and applied INSIDE {@link #probeEntry} rather than folded
    * into {@link #entryLookbackBars}: the probe needs the declared depth and the widened depth as two
-   * separate numbers, so a caller that pre-widens leaves it no way to compute the basis. The exit
-   * probe is observational (it alerts, never refuses), so under-probing there costs an alert rather
-   * than a wrong trade.
+   * separate numbers, so a caller that pre-widens leaves it no way to compute the basis. {@link
+   * #probeExit} widens by the held span instead of by this constant — the exit's footprint is a
+   * measured quantity, not a slack allowance.
+   *
+   * <p>An earlier revision of this paragraph justified leaving the exit narrow on the grounds that
+   * "under-probing there costs an alert rather than a wrong trade". That is wrong and {@link
+   * #probeExit} documents why: the missed alert is precisely the one covering a position whose
+   * trail level IS being computed off bars the probe never looked at.
    */
   static final int DEPTH_SLACK = 2;
 
@@ -356,9 +361,16 @@ public final class SwingCoverageProbe {
   }
 
   /**
-   * The deepest window ANY rule reads — every declared indicator plus every exit rule, plus the built
-   * bank's own normalized warm-up. Used by the EXIT pass, whose output is a detective alert rather
-   * than a refusal, so over-scoping costs a little alert precision and never a stranded position.
+   * The deepest WARM-UP any exit rule needs — every declared indicator plus every exit rule, plus the
+   * built bank's own normalized warm-up. Used by the EXIT pass, whose output is a detective alert
+   * rather than a refusal, so over-scoping costs a little alert precision and never a stranded
+   * position.
+   *
+   * <p>⚠️ This is a warm-up depth, NOT the span the exit reads. It was described as "the deepest
+   * window ANY rule reads" until 2026-08-21, and that phrasing is what let the exit probe be sized
+   * on it alone: the peak-since-entry scan and the entry-pinned ATR reach back to {@code entryIndex},
+   * which on a held position is arbitrarily further than this number. Callers must add the held span
+   * — {@link #probeExit} does.
    *
    * <p>Both inputs are needed and neither subsumes the other: {@code unstableBars()} is precise for
    * composites ({@code MACD_HIST -> slow + signal - 2}) that the param estimate under-counts, while
@@ -460,6 +472,59 @@ public final class SwingCoverageProbe {
       return undeterminable(declaredDepth);
     }
     return measure(series, declaredDepth + DEPTH_SLACK, declaredDepth, calendar);
+  }
+
+  /**
+   * The EXIT reading: probes the span the exit evaluator actually reads — {@code declaredDepth} bars
+   * of warm-up PLUS every bar held since entry — while keeping the materiality denominator at the
+   * declared depth's own span.
+   *
+   * <h2>Why held bars belong in the footprint (cross-vendor review, 2026-08-21)</h2>
+   *
+   * The first cut sized this pass on declared depth alone, which silently assumed every exit operand
+   * reads a rolling window ending at the current bar. Three do not, and all three are live:
+   *
+   * <ul>
+   *   <li>{@code ExitEvaluator#favorableExtreme} scans {@code entryIndex..index} for the
+   *       peak-since-entry every trailing rule is measured off.
+   *   <li>{@code ExitEvaluator#rollingAtrTrailLevel} (the H4 Chandelier, {@code atr_basis: rolling})
+   *       ratchets over that same span.
+   *   <li>{@code ExitEvaluator#atrAtEntry} reads the ATR AT {@code entryIndex}, so its own warm-up
+   *       sits {@code atr_period} bars BEFORE entry — earlier than any current-bar window reaches.
+   * </ul>
+   *
+   * <p>So on a position held longer than its declared depth the probe reported clean coverage over a
+   * window that did not contain the bars the trail was computed from. Measured on the live book
+   * 2026-08-24: both {@code manas-arora} slugs run {@code atr_period: 20} while SANSERA and
+   * KANORICHEM had been held 25 and 24 trading sessions. At a 20-bar declared depth that is a
+   * footprint of 44 bars against a probe of 20 — roughly HALF the span the Chandelier ratchets over
+   * was never looked at, and ARMED reported it clean.
+   *
+   * <p>The four {@code minervini} slugs are NOT affected and that is not luck: their trail is {@code
+   * basis: indicator alias: sma50}, and {@code ExitEvaluator}'s indicator branch discards the
+   * peak-since-entry it computes, reading only a rolling 50-bar SMA at the current bar. The fix is
+   * written for the general case rather than the Manas one because which branch a strategy takes is
+   * a config edit away.
+   *
+   * <p>{@code declaredDepth + heldBars} is the exact span rather than a padded guess: the declared
+   * depth is the warm-up the deepest operand needs at whichever bar it is evaluated at, and adding
+   * the held span covers both anchors at once — a rolling window ending at the current bar, and an
+   * entry-pinned window ending at {@code entryIndex} plus the forward scan from there.
+   *
+   * <p>Widening cannot loosen the gate, by the same one-way construction {@link #DEPTH_SLACK} relies
+   * on: extra bars can only ADD to {@code missing} (the numerator) while {@code materialityBasis}
+   * stays computed from the declared depth alone. A same-session position ({@code heldBars == 0})
+   * reads byte-identically to the old call.
+   *
+   * @param heldBars bars from the entry bar to the bar being evaluated, i.e. {@code lastIndex -
+   *     entryIndex}; negative or zero is clamped to 0 (a same-bar or unresolvable entry)
+   */
+  public static Coverage probeExit(
+      List<EngineCandle> series, int declaredDepth, int heldBars, MarketCalendar calendar) {
+    if (declaredDepth <= 0) {
+      return undeterminable(declaredDepth);
+    }
+    return measure(series, declaredDepth + Math.max(0, heldBars), declaredDepth, calendar);
   }
 
   /**

@@ -534,6 +534,57 @@ class MinerviniSwingEngineTest {
   }
 
   /**
+   * THE CONSUMER TEST for the 2026-08-21 exit-sizing fix. The probe knowing how to widen is worthless
+   * unless the ENGINE hands it the held span, so this asserts through {@code runDaily}.
+   *
+   * <p>⚠️ It needs a series LONGER than the declared depth, and that is not a detail. The first cut
+   * of this test reused the 25-bar {@link #craftDecline} harness against a strategy declaring {@code
+   * sma50}: {@code measure} clamps its start to {@code max(0, size - probedBars)}, so the pre-fix
+   * probe was already reading the ENTIRE series and the red-proof stayed GREEN. The harness could not
+   * express the defect. A 145-bar series with the gap ~135 bars back is the shape that can.
+   *
+   * <p>Entry is the oldest bar, so the February gap sits inside {@code entryIndex..lastIndex} — where
+   * the peak-since-entry scan and the entry-pinned ATR read — while a 50-bar current-bar window
+   * reaches only to ~May. That is precisely what ARMED reported as cleanly covered.
+   */
+  @Test
+  void exitCoverageSeesAGapInsideTheHoldButOutsideTheDeclaredDepth() throws IOException {
+    ExitHarness h = new ExitHarness(longDecline());
+    List<EngineCandle> holed = holed(h.series, 2, 10, 11, 12);
+    assertThat(holed).hasSize(h.series.size() - 3);
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(holed);
+
+    SwingBatchEngine.SwingRun run =
+        h.engine(SwingBatchEngine.CoverageGateMode.ARMED).runDaily(h.doctrine());
+
+    assertThat(run.exits()).as("doctrine is unchanged — the exit still fires").isEqualTo(1);
+    assertThat(h.coverageRows)
+        .as(
+            "a gap inside the hold but outside the declared 50-bar depth must be REPORTED — pre-fix"
+                + " the engine sized the exit probe on declared depth alone and saw nothing here")
+        .containsExactly("minervini|2026-08-04|TESTCO|EXIT_DEGRADED_COVERAGE:TESTCO");
+  }
+
+  /**
+   * Control for {@link #exitCoverageSeesAGapInsideTheHoldButOutsideTheDeclaredDepth}: on the SAME
+   * long series, a clean hold reports clean. Without this the test above could pass because widening
+   * makes everything look incomplete.
+   */
+  @Test
+  void aLongCleanHoldStillReportsCleanCoverage() throws IOException {
+    ExitHarness h = new ExitHarness(longDecline());
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
+
+    SwingBatchEngine.SwingRun run =
+        h.engine(SwingBatchEngine.CoverageGateMode.ARMED).runDaily(h.doctrine());
+
+    assertThat(run.exits()).isEqualTo(1);
+    assertThat(h.coverageRows)
+        .as("widening the footprint must not manufacture a hole on a complete series")
+        .isEmpty();
+  }
+
+  /**
    * The degraded exit is not silent WHEN ARMED: ops gets a per-position alert beside the evaluation.
    * Paging is precisely what arming buys on this half — the exit fires either way.
    */
@@ -851,10 +902,16 @@ class MinerviniSwingEngineTest {
     final SwingBatchRefusalRepository refusals = mock(SwingBatchRefusalRepository.class);
     final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     final List<String> coverageRows = new ArrayList<>();
-    final List<EngineCandle> series = craftDecline();
+    final List<EngineCandle> series;
     final UUID versionId;
 
     ExitHarness() throws IOException {
+      this(craftDecline());
+    }
+
+    /** Same harness over a caller-supplied series — used by the exit-coverage sizing tests. */
+    ExitHarness(List<EngineCandle> bars) throws IOException {
+      this.series = bars;
       doAnswer(
               invocation -> {
                 coverageRows.add(
@@ -1003,6 +1060,28 @@ class MinerviniSwingEngineTest {
     }
     bars.add(bar(24, 135.0, 1_000L));
     return bars;
+  }
+
+  /**
+   * {@link #craftDecline} stretched back to 2026-02-02 — 145 calendar-day bars, so the series is
+   * LONGER than the strategy's declared 50-bar exit depth. Same ending decline, so the exit still
+   * fires on the last bar; only the history behind it is longer.
+   */
+  private static List<EngineCandle> longDecline() {
+    List<EngineCandle> bars = new ArrayList<>();
+    java.time.LocalDate start = java.time.LocalDate.of(2026, 2, 2);
+    int span = (int) java.time.temporal.ChronoUnit.DAYS.between(start, LAST_BAR_DATE);
+    for (int d = 0; d < span; d++) {
+      bars.add(barOn(start.plusDays(d), 150.0, 1_000L));
+    }
+    bars.add(barOn(LAST_BAR_DATE, 135.0, 1_000L));
+    return bars;
+  }
+
+  private static EngineCandle barOn(java.time.LocalDate date, double price, long volume) {
+    BigDecimal p = BigDecimal.valueOf(price);
+    return new EngineCandle(
+        date.atStartOfDay().atOffset(IST), p, p, p, p, volume, null);
   }
 
   private static EngineCandle bar(int day, double price, long volume) {

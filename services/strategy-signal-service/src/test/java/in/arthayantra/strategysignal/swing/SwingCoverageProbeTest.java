@@ -475,6 +475,80 @@ class SwingCoverageProbeTest {
         .doesNotContain("% of the probed span");
   }
 
+  // ---------------------------------------------------------------------------------------------
+  // probeExit: the held span is part of the footprint (cross-vendor review, 2026-08-21)
+  // ---------------------------------------------------------------------------------------------
+
+  /**
+   * THE DISCRIMINATING CASE for the exit fix. A hole 30 sessions back is invisible to a 20-bar
+   * declared-depth window and visible to the exit's real footprint, because the peak-since-entry
+   * scan and the entry-pinned ATR both reach back to the entry bar. Without this test the widening
+   * could be a no-op and every other test here would still pass.
+   */
+  @Test
+  @DisplayName("a hole outside the declared depth but INSIDE the held span is reported")
+  void holeInsideTheHeldSpanIsReported() {
+    LocalDate end = LocalDate.of(2026, 8, 3);
+    List<EngineCandle> bars = tradingWindow(100, end, 69); // 30 sessions back from the newest
+
+    assertThat(SwingCoverageProbe.probe(bars, 20, NSE).incomplete())
+        .as("declared depth alone cannot see a gap 30 rows back — this is the defect")
+        .isFalse();
+    assertThat(SwingCoverageProbe.probeExit(bars, 20, 30, NSE).incomplete())
+        .as("the exit reads entryIndex..lastIndex, so a gap inside the hold MUST be reported")
+        .isTrue();
+  }
+
+  /** Widening the footprint may not move the denominator — the one-way property DEPTH_SLACK relies on. */
+  @Test
+  @DisplayName("the held span widens the footprint without moving the materiality band")
+  void heldSpanDoesNotLoosenTheBand() {
+    LocalDate end = LocalDate.of(2026, 8, 3);
+    List<EngineCandle> clean = tradingWindow(100, end);
+
+    SwingCoverageProbe.Coverage narrow = SwingCoverageProbe.probeExit(clean, 20, 0, NSE);
+    SwingCoverageProbe.Coverage wide = SwingCoverageProbe.probeExit(clean, 20, 30, NSE);
+
+    assertThat(wide.materialityBasis())
+        .as("denominator is the DECLARED depth's span, never the widened footprint")
+        .isEqualTo(narrow.materialityBasis());
+    assertThat(wide.windowSessions())
+        .as("the footprint itself does grow")
+        .isGreaterThan(narrow.windowSessions());
+    assertThat(wide.lookbackBars())
+        .as("the reading is still ABOUT the declared depth")
+        .isEqualTo(20);
+  }
+
+  /** A same-session position must read byte-identically to the pre-fix call. */
+  @Test
+  @DisplayName("heldBars 0 reads exactly as the old declared-depth probe did")
+  void zeroHeldBarsIsTheOldReading() {
+    LocalDate end = LocalDate.of(2026, 8, 3);
+    List<EngineCandle> bars = tradingWindow(60, end, 50);
+    assertThat(SwingCoverageProbe.probeExit(bars, 20, 0, NSE))
+        .isEqualTo(SwingCoverageProbe.probe(bars, 20, NSE));
+  }
+
+  /** A negative held span (unresolvable entry) clamps rather than shrinking the window. */
+  @Test
+  @DisplayName("a negative held span clamps to zero, never shrinks the footprint")
+  void negativeHeldSpanClamps() {
+    LocalDate end = LocalDate.of(2026, 8, 3);
+    List<EngineCandle> bars = tradingWindow(60, end, 50);
+    assertThat(SwingCoverageProbe.probeExit(bars, 20, -5, NSE))
+        .isEqualTo(SwingCoverageProbe.probe(bars, 20, NSE));
+  }
+
+  /** Zero declared depth still makes NO claim — it must not become "complete" via a held span. */
+  @Test
+  @DisplayName("zero declared depth stays undeterminable however long the hold")
+  void zeroDepthStaysUndeterminableWithAHold() {
+    LocalDate end = LocalDate.of(2026, 8, 3);
+    assertThat(SwingCoverageProbe.probeExit(tradingWindow(100, end), 0, 40, NSE).determinable())
+        .isFalse();
+  }
+
   /** A fixed count of NSE sessions ending at {@code end}, optionally omitting session indexes. */
   private static List<EngineCandle> tradingWindow(
       int sessionCount, LocalDate end, int... missingIndexes) {

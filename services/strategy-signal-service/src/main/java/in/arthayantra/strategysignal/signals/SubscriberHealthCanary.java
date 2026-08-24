@@ -135,6 +135,12 @@ public class SubscriberHealthCanary {
   // `strategies-idle` close followed by a re-enable DURING the same outage cannot backdate the new
   // window over the interval that was already accounted for.
   private volatile Instant lastWindowClosedAt = Instant.EPOCH;
+  // Telemetry OWED but not yet written, because the durable write it describes has not landed. The
+  // log line always fires immediately (it cannot block); only the subscriber_health_events INSERT
+  // waits. Without this, a fast register failure followed by a telemetry stall would spend the sweep
+  // thread on the forensic write and never retry the one that matters.
+  private volatile String owedOpenDetail;
+  private volatile String owedCloseReason;
   private long lastResubscribeAtMs;
 
   /** One producer-blind episode. Immutable; every transition replaces it. */
@@ -335,6 +341,7 @@ public class SubscriberHealthCanary {
         Long recovered = blindWindows.open(current.key(), current.startedAt(), current.detail());
         if (recovered != null) {
           episode = current.withId(recovered);
+          writeOwedTelemetry(); // the row landed on a retry — now the forensic write is safe
         }
       }
       return; // already blind; one row per episode
@@ -358,8 +365,9 @@ public class SubscriberHealthCanary {
     // ambiguous commit resolves to the SAME row instead of a second, permanently-open one.
     String key = UUID.randomUUID().toString();
     episode = new Episode(key, startedAt, detail, blindWindows.open(key, startedAt, detail), null, null);
-    log.error("subscriber watchdog: engine BLIND — {}", detail);
-    telemetry.record("feed-blind", detail);
+    log.error("subscriber watchdog: engine BLIND — {}", detail); // never blocks; always immediate
+    owedOpenDetail = detail;
+    writeOwedTelemetry();
   }
 
   /**
@@ -376,14 +384,38 @@ public class SubscriberHealthCanary {
     if (current == null) {
       return;
     }
-    boolean firstTransition = current.endedAt() == null;
-    if (firstTransition) {
+    if (current.endedAt() == null) {
       episode = current.closing(endedAt, reason);
       lastWindowClosedAt = endedAt; // the next window can never start before this
+      log.info("subscriber watchdog: engine blind window closed — {}", reason); // never blocks
+      owedCloseReason = reason;
     }
     flush();
-    if (firstTransition) {
-      log.info("subscriber watchdog: engine blind window closed — {}", reason);
+    writeOwedTelemetry();
+  }
+
+  /**
+   * Writes the forensic {@code subscriber_health_events} rows this episode owes — but ONLY once the
+   * durable write they describe has actually landed.
+   *
+   * <p>⚠️ Ordering telemetry after the register CALL was not enough, which is what the fifth review
+   * round caught. {@code open()} can fail fast and return null, and {@code flush()} can return
+   * false; the sweep would then still spend its thread on an UNBOUNDED insert into a different
+   * table, and a stall there means no later sweep ever retries the write that matters. A restart
+   * then loses the opening episode, or leaves a recovered one open forever. So the rule is not
+   * "telemetry last" but "telemetry only once the thing it reports is durable".
+   */
+  private void writeOwedTelemetry() {
+    Episode current = episode;
+    if (owedOpenDetail != null && current != null && current.id() != null) {
+      String detail = owedOpenDetail;
+      owedOpenDetail = null;
+      telemetry.record("feed-blind", detail);
+    }
+    if (owedCloseReason != null && current == null) {
+      // episode == null is exactly "the close flushed durably and nothing is pending"
+      String reason = owedCloseReason;
+      owedCloseReason = null;
       telemetry.record("recovery", "engine blind window closed — " + reason);
     }
   }
@@ -434,6 +466,8 @@ public class SubscriberHealthCanary {
       return; // nothing pending, or pending a CLOSE on a real row — keep retrying that one
     }
     episode = null;
+    owedOpenDetail = null; // the row it described never existed; do not report it later
+    owedCloseReason = null;
     log.error(
         "subscriber watchdog: blind window insert never landed before the session boundary — "
             + "dropping it (started {}, reason {})",

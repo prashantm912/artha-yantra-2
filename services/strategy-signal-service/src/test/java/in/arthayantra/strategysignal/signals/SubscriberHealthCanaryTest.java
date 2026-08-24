@@ -551,6 +551,63 @@ class SubscriberHealthCanaryTest {
     order.verify(telemetry).record(eq("recovery"), anyString());
   }
 
+  /**
+   * The failure path the ordering tests could NOT reach, because `registerAccepts()` forces success.
+   * A fast register failure must not spend the sweep thread on the unbounded telemetry insert: if it
+   * stalled there, no later sweep would ever retry the write that actually matters.
+   */
+  @Test
+  void openThatFailsWritesNoTelemetryUntilTheRowLands() {
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    evalKeepingUp(NOW_MS - 200_000);
+    feedAgeMs(200_000);
+    when(blindWindows.open(anyString(), any(Instant.class), anyString()))
+        .thenReturn(null) // first attempt lost
+        .thenReturn(7L); // second lands
+
+    SubscriberHealthCanary c = canary(true);
+    c.sweep();
+    verify(telemetry, never()).record(eq("feed-blind"), anyString());
+
+    c.sweep(); // the retry lands the row — only NOW is the forensic write safe
+    verify(telemetry, times(1)).record(eq("feed-blind"), anyString());
+
+    c.sweep(); // already reported: exactly once per episode
+    verify(telemetry, times(1)).record(eq("feed-blind"), anyString());
+  }
+
+  /** The mirror on the close path: a failed flush must not report a recovery it did not persist. */
+  @Test
+  void closeThatFailsWritesNoRecoveryTelemetryUntilItPersists() {
+    MutableClock advancing = new MutableClock(IN_SESSION);
+    AtomicLong received = new AtomicLong(NOW_MS - 200_000);
+    when(registry.countEnabledPublished()).thenReturn(1L);
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
+    when(engine.lastBarReceivedAtMs()).thenAnswer(inv -> received.get());
+    when(engine.lastBarEvaluatedAtMs()).thenAnswer(inv -> received.get());
+    when(redis.opsForValue()).thenReturn(valueOps);
+    when(valueOps.get("ticks:last-at")).thenReturn(Long.toString(NOW_MS - 200_000));
+    when(blindWindows.open(anyString(), any(Instant.class), anyString())).thenReturn(7L);
+    when(blindWindows.close(any(), any(Instant.class), anyString()))
+        .thenReturn(false) // the close is lost
+        .thenReturn(true); // and lands on the retry
+
+    SubscriberHealthCanary c =
+        new SubscriberHealthCanary(
+            engine, registry, redis, events, telemetry, blindWindows, advancing, true, BAR_GAP,
+            FEED_FRESH);
+    c.sweep(); // blind
+    advancing.advanceMs(60_000);
+    received.set(advancing.millis() - 5_000);
+    c.sweep(); // recovery observed, close FAILS
+    verify(telemetry, never()).record(eq("recovery"), anyString());
+
+    advancing.advanceMs(60_000);
+    received.set(advancing.millis() - 5_000);
+    c.sweep(); // retry persists it
+    verify(telemetry, times(1)).record(eq("recovery"), anyString());
+  }
+
   /** A test clock whose instant can be advanced, to drive the multi-sweep throttle path. */
   private static final class MutableClock extends Clock {
     private Instant instant;

@@ -485,7 +485,7 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   (`ay_instrument_be_suffix_inactive_fallback_total`) so the two halves stay separable. `sourced`:
   `TokenResolverAdapter.resolve` gates on `direct.isPresent() && directRow.get().active()`. `computed`
   2026-08-25 from the live DB: `DIACABS` and `MENONBE` are exactly this shape — bare row inactive WITH a
-  token, active `-BE` twin carrying a different one. ⚠️ **The population is TWELVE symbols, not the two
+  token, active `-BE` twin carrying a different one. ⚠️ **The population is **140** symbols, not twelve and not the two
   this bullet used to name** (measured 2026-08-21, and recorded in `TokenResolverAdapter`'s own javadoc):
   every one is `is_active = false` with a token. The two named above are examples, not the set. ⚠️ Still **strictly additive by design**: an inactive
   bare row with NO twin returns its own (rejected) token rather than a 404, so ~389 such NSE rows are

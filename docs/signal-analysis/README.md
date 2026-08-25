@@ -302,6 +302,20 @@ Run in order; each answers one question. Canned SQL in §6.
     the broker-corrected 3m rollup, are untouched). An unpaired mid-session WARN with NO adjacent
     reconnect remains the alarming shape (the same session's 14:54 −910 and 15:09 −8,970 are
     unexplained and on watch as NEW-6).
+    ⚠️ **AMENDED 2026-08-25 — the "boot-fresh first-pair" class keys on the day's FIRST NON-BENIGN
+    EVENT, not on boot time, so it can land at ANY hour and it defeats pair suppression for that one
+    pair.** The lot-size cache is filled LAZILY: `cachedLotSize` is non-blocking, a miss returns
+    null ("cannot prove", fail CLOSED) and only then kicks the async master fetch — so the cache
+    stays empty until the first sweep that actually needs it. Measured 2026-08-25: boot 08:34, first
+    non-benign event 14:22 — a textbook consecutive-bucket ±910 (14-lot) pair on 14:18/14:21, and
+    BOTH halves WARNed "UNPAIRED": the leading half could not be deferred (cache miss at first read)
+    and reported immediately, the trailing half deferred correctly, found no partner in the NEXT
+    bucket (its real partner was BEHIND it, already reported), and was released at its documented
+    heldBucketStart+2×3m+one-sweep deadline — observed to the second (14:28:31). **Reading rule: a
+    ± lot-multiple pair on consecutive buckets is benign-by-shape even when both halves say
+    UNPAIRED, IF it is the day's first non-benign pair** — check whether any earlier WARN/straddle
+    exists that day before alarming. This also gives 08-19's unexplained 14:54 −910 (NEW-6) a
+    plausible benign sibling, though that instance is unprovable (logs gone).
 18. **Identify the SIGNAL CONTRACT from the data before running any ground-truth query** (added
     2026-07-27) — the live scalper signal series is the **dated front future**, and
     `FuturesUniverseResolver` rolls it at the ~08:40 IST re-resolve near monthly expiry. On 2026-07-27

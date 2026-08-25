@@ -312,6 +312,85 @@ class MinerviniSwingEngineTest {
   }
 
   @Test
+  void anExitsOnlyPassReportsTheBookItWalkedAndZeroForTheEntryCountersItDidNot() throws IOException {
+    // Ledger H16. The evening settle runs entriesEnabled=false and used to take AdmissionProbe.empty()
+    // — "nothing measured" — so swing_batch_runs.open_at_start read 0 for a run that had just walked
+    // the whole book. Until H23 (#1457) the next morning's entries catch-up overwrote that row, so the
+    // zero was transient; with `pass` in the primary key the settle row survives and the zero is the
+    // permanent answer to the one question that column exists to answer.
+    ExitHarness h = new ExitHarness();
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
+    // A THREE-name book, and every name is a different KIND of walk — that is what makes the
+    // assertion pin the book size rather than a proxy for it:
+    //   TESTCO  stop fires        -> exits = 1
+    //   HOLDCO  bar never arrives -> exitSkipped = 1  (unstubbed fetch → empty)
+    //   STAYCO  bar arrives, stop does NOT fire -> the ORDINARY settle name, eventless
+    // So openAtStart = 3 while the post-exit book is 2, the exits are 1, and closed+skipped is 2.
+    // ⚠️ STAYCO exists because a two-name book CANNOT catch closed+skipped: with every name eventful
+    // the touched-count equals the book size, and substituting it ran 30/30 GREEN (review, 2026-08-25).
+    // The eventless name is the typical settle, and it was the one the fixture did not represent.
+    SignalRepository.SignalRow exiting = anchor(42L, h.versionId, new BigDecimal("152"), h.series);
+    SignalRepository.SignalRow skipped = heldElsewhere(44L, h.versionId, "HOLDCO", h.series);
+    SignalRepository.SignalRow eventless = heldElsewhere(45L, h.versionId, "STAYCO", h.series);
+    when(h.candles.fetch(eq("NSE"), eq("STAYCO"), eq("1d"), any(), any())).thenReturn(craft(1_000L));
+    // The book as the DB actually reports it across the run: all three for the heldBefore snapshot
+    // and for the exit pass, then two once the stop has closed TESTCO. A probe that re-read the book
+    // AFTER the exits would see 2 — a different question from "how big was the book we walked".
+    when(h.signals.activeEntries())
+        .thenReturn(
+            List.of(exiting, skipped, eventless),
+            List.of(exiting, skipped, eventless),
+            List.of(skipped, eventless));
+
+    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine(), null, false);
+
+    assertThat(run.exits()).as("the exit pass genuinely walked the book and fired the stop").isEqualTo(1);
+    assertThat(run.exitSkipped()).as("the missing bar was walked too, and its miss counted").isEqualTo(1);
+    SwingBatchEngine.AdmissionProbe probe = run.admission();
+    assertThat(probe.openAtStart())
+        .as("the PRE-exit book size — not 0, not the post-exit 2, not the 1 exit, not the 2 touched")
+        .isEqualTo(3);
+    // The entry-specific counters stay zero because no entry was ATTEMPTED — that honest zero is the
+    // whole distinction from empty(), and fabricating anything here would be the mirror defect.
+    assertThat(probe.wouldEnter()).as("an exits-only pass attempts no entry").isZero();
+    assertThat(probe.admitted()).isZero();
+    assertThat(probe.capExceedance()).isZero();
+    assertThat(probe.capBound()).isFalse();
+    assertThat(probe.droppedByCap()).isEmpty();
+    assertThat(run.entries()).isZero();
+    assertThat(run.candidates()).as("the funnel is not read on an exits-only pass").isZero();
+    verifyNoInteractions(h.funnel);
+  }
+
+  @Test
+  void aProbeThatThrowsStillReportsTheBookBecauseItWasSnapshottedBeforeTheThrow() throws IOException {
+    // The same H16 zero, one branch over: the ENTRIES probe is wrapped fail-soft, and its catch used
+    // to return empty() — writing open_at_start = 0 for a run whose book was known before the probe
+    // was ever called. heldBefore is a PARAMETER of admissionProbe, so it survives the throw.
+    ExitHarness h = new ExitHarness();
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
+    SignalRepository.SignalRow exiting = anchor(42L, h.versionId, new BigDecimal("152"), h.series);
+    SignalRepository.SignalRow skipped = heldElsewhere(44L, h.versionId, "HOLDCO", h.series);
+    // Reads 1 (heldBefore) and 2 (the exit pass) succeed; the entry pass early-outs on the empty
+    // funnel without reading. Read 3 is the probe's own heldAfter snapshot — that is the one that
+    // throws, which is exactly where a probe defect lands.
+    when(h.signals.activeEntries())
+        .thenReturn(List.of(exiting, skipped), List.of(exiting, skipped))
+        .thenThrow(new IllegalStateException("probe boom"));
+
+    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine());
+
+    assertThat(run.exits()).as("the throw is swallowed — the batch's exits are untouched").isEqualTo(1);
+    SwingBatchEngine.AdmissionProbe probe = run.admission();
+    assertThat(probe.openAtStart())
+        .as("measured before the probe ran, so it survives the probe's failure")
+        .isEqualTo(2);
+    assertThat(probe.wouldEnter()).as("the funnel walk was genuinely lost").isZero();
+    assertThat(probe.capBound()).isFalse();
+    assertThat(probe.droppedByCap()).isEmpty();
+  }
+
+  @Test
   void entryGateIsReCheckedPerEntryAndStopsTheRunWhenTheBookTrips() throws IOException {
     UUID strategyId = UUID.randomUUID();
     UUID publishedVersion = UUID.randomUUID();
@@ -1008,6 +1087,15 @@ class MinerviniSwingEngineTest {
     return new SignalRepository.SignalRow(
         id, versionId, "NSE", "TESTCO", "1d", "ENTRY", "BUY", entryPrice, null, null, BigDecimal.ONE,
         new ObjectMapper().createObjectNode(), "TAKEN", series.get(0).bucketStart(),
+        series.get(0).bucketStart().plusDays(1), null, null, null, null, null, null, null);
+  }
+
+  /** A held ENTRY anchor on a symbol other than TESTCO, timed to the same series as {@link #anchor}. */
+  private static SignalRepository.SignalRow heldElsewhere(
+      long id, UUID versionId, String symbol, List<EngineCandle> series) {
+    return new SignalRepository.SignalRow(
+        id, versionId, "NSE", symbol, "1d", "ENTRY", "BUY", new BigDecimal("152"), null, null,
+        BigDecimal.ONE, new ObjectMapper().createObjectNode(), "TAKEN", series.get(0).bucketStart(),
         series.get(0).bucketStart().plusDays(1), null, null, null, null, null, null, null);
   }
 

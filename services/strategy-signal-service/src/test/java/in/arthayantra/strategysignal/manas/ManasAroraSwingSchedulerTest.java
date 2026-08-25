@@ -9,6 +9,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import in.arthayantra.strategysignal.signals.SwingBatchRunRepository.Pass;
 import in.arthayantra.strategysignal.swing.SwingBatchIntentRepository;
 import in.arthayantra.strategysignal.swing.SwingBatchRecorder;
 import java.time.Clock;
@@ -57,7 +58,7 @@ class ManasAroraSwingSchedulerTest {
     run();
 
     verify(intents).recordSettled("manas-arora", SESSION, true);
-    verify(recorder).runScheduled(doctrine, false);
+    verify(recorder).runScheduled(doctrine, Pass.SETTLE);
   }
 
   @Test
@@ -67,7 +68,7 @@ class ManasAroraSwingSchedulerTest {
 
     run();
 
-    verify(recorder, never()).runScheduled(any(), eq(true));
+    verify(recorder, never()).runScheduled(any(), eq(Pass.ENTRIES));
     verify(recorder, never()).runScheduled(any());
   }
 
@@ -91,7 +92,7 @@ class ManasAroraSwingSchedulerTest {
 
     run();
 
-    verify(recorder).runScheduled(doctrine, false);
+    verify(recorder).runScheduled(doctrine, Pass.SETTLE);
   }
 
   /**
@@ -111,7 +112,7 @@ class ManasAroraSwingSchedulerTest {
     run();
 
     verify(intents, never()).recordSettled(any(), any(), anyBoolean());
-    verify(recorder, never()).runScheduled(any(), anyBoolean());
+    verify(recorder, never()).runScheduled(any(), any());
     verify(recorder, never()).runScheduled(any());
   }
 

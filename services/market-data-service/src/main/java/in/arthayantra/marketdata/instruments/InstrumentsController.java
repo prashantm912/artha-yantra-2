@@ -103,7 +103,11 @@ public class InstrumentsController {
     return lookups.underlyings();
   }
 
-  /** Single instrument by stable key. */
+  /**
+   * Single instrument by stable key. 404 only when the key is absent; a key we hold but know
+   * nothing else about answers 200 with {@code masterMetadataMissing = true} (ledger H30) rather
+   * than pretending the nulls are the instrument's real spec.
+   */
   @GetMapping("/{exchange}/{tradingsymbol}")
   public Instrument byKey(@PathVariable String exchange, @PathVariable String tradingsymbol) {
     return repository

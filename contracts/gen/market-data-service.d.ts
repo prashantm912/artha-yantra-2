@@ -5240,6 +5240,8 @@ export interface components {
             /** Format: int32 */
             lotSize: number | null;
             active: boolean;
+            /** @description True when the row carries no instrument-master metadata at all — the master sync has never populated it, so token/name/segment are unknown rather than merely absent. Purely derived from the three fields above it; a consumer can recompute it from this same response. */
+            masterMetadataMissing: boolean;
         };
         PageInstrument: {
             items: components["schemas"]["Instrument"][];

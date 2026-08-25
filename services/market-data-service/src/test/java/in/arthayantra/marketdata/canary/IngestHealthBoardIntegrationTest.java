@@ -126,15 +126,18 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   /**
-   * The sources this class may touch — DERIVED from the board's own expected set, never a hand-kept
-   * copy.
+   * The sources the board reports on — {@link #clearWindow}'s RESET scope, and nothing else.
+   *
+   * <p>⚠️ This javadoc used to say it scoped the CLEANUP too, and that stopped being true when
+   * teardown moved to {@link #touchedSources}. Deleting what the board cares about is a RESET;
+   * deleting what this class WROTE is a CLEANUP. Conflating them is how a source removed from
+   * {@code EXPECTED} while this class still seeded it would silently stop being cleaned.
    *
    * <p>Both {@code IngestCoverageCanary} and {@code IngestHealthBoard} build their entire source
    * list from {@code IngestCoverageCanary.EXPECTED}, so that constant is exactly "the sources this
-   * board has an opinion about". Deriving from it means the reset scope and the cleanup scope follow
-   * the board automatically: registering a new expected source (as {@code EQUITY_BREADTH} was in
-   * 2026-08) needs no edit here, and — more to the point — a hardcoded list that silently fell
-   * behind would start leaving exactly the rows nobody remembered to clean.
+   * board has an opinion about". Deriving from it means the RESET scope follows the board
+   * automatically: registering a new expected source (as {@code EQUITY_BREADTH} was in 2026-08)
+   * needs no edit here.
    *
    * <p>It also bounds the DESTRUCTION: rows for any source outside this set belong to somebody else
    * and are none of this class's business, in either direction.
@@ -374,9 +377,12 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
       seedBatchesHealthy(d);
       seedCapture(d, 5200L);
     }
-    // Snapshot BEFORE the teardown clears them, and assert over EVERY day the funnels recorded —
-    // not just the two this method seeded — so a funnel that stopped registering a day used only by
-    // another test method cannot go unnoticed.
+    // Snapshot BEFORE the teardown clears them, and assert over every day the funnels recorded for
+    // THIS method. ⚠️ That is exactly the two seeded below and no more: JUnit's default PER_METHOD
+    // lifecycle gives each test a fresh instance, so another method's days are structurally
+    // invisible here. An earlier version of this comment claimed the wider coverage, and a false
+    // rationale is worse than none — it tells the next reader a guard exists that does not. Reading
+    // from the funnels rather than naming d1/d2 stays correct if this method later seeds more.
     Set<String> wrote = Set.copyOf(touchedSources);
     LocalDate[] all = touchedDays.toArray(LocalDate[]::new);
     assertThat(seededRunRows(wrote, all))

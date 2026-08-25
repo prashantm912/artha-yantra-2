@@ -3,6 +3,7 @@ package in.arthayantra.strategysignal.paper;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.eq;
@@ -217,6 +218,90 @@ class PaperEmissionGuardTest {
     // null / non-positive premium -> null (the caller keeps the ordinary advisory qty).
     assertThat(guard.heroZeroSuggestedQty(UNCAPPED, "NFO", "NIFTY25000CE", null)).isNull();
     assertThat(guard.heroZeroSuggestedQty(UNCAPPED, "NFO", "NIFTY25000CE", BigDecimal.ZERO)).isNull();
+  }
+
+  /**
+   * An option the master has no lot size for is NOT sizable. {@code RestInstrumentMetaClient} reports
+   * {@code lotSize == 0} there instead of fabricating {@code 1}; before this, the class check alone
+   * could not see the case — a {@code tools/historical-import} placeholder row carries a POPULATED
+   * {@code instrument_type} with a NULL {@code lot_size}, so it classifies as a genuine OPTION and
+   * sailed straight through, sizing 15000/776 = 19 units of a 20-lot contract.
+   *
+   * <p>The second half is the control that makes the first half mean something: the IDENTICAL call
+   * with a KNOWN lot still sizes. A refusal that also fired on present metadata would pass the first
+   * assertion and be a worse defect than the one it replaces.
+   */
+  @Test
+  void optionWithUnknownLotIsNotSizableWhileKnownLotStillSizes() {
+    PaperAccountService account = mock(PaperAccountService.class);
+    InstrumentMetaClient instruments = mock(InstrumentMetaClient.class);
+    PaperEmissionGuard guard =
+        new PaperEmissionGuard(
+            mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
+            mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class),
+            new ManasGoverningStopCache(),
+            new EquityMarkCache(java.time.Clock.systemUTC(), 5));
+    StrategyDefinition.SizingSpec sizing =
+        new StrategyDefinition.SizingSpec("premium_budget", Map.of("budget_inr", bd("15000")));
+
+    // lot UNKNOWN -> refuse. Both entry-sizing doors, not just the ordinary one.
+    when(instruments.meta(any(), any()))
+        .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 0L));
+    assertThat(guard.suggestedQty(sizing, "NFO", "NIFTY26MAY24000CE", bd("100"), null, "scalper"))
+        .isNull();
+    when(account.realisedProfit("scalper")).thenReturn(bd("150000"));
+    assertThat(guard.heroZeroSuggestedQty(sizing, "NFO", "NIFTY26MAY24000CE", bd("100"))).isNull();
+
+    // lot KNOWN -> sizes exactly as before: 15000 / (100 x 75) = 2 lots = 150 units.
+    when(instruments.meta(any(), any()))
+        .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
+    assertThat(guard.suggestedQty(sizing, "NFO", "NIFTY26MAY24000CE", bd("100"), null, "scalper"))
+        .isEqualByComparingTo("150");
+
+    // and an EQUITY is untouched by the derivatives rule: NSE lot 1 sizes 15000/100 = 150 units.
+    when(instruments.meta(any(), any()))
+        .thenReturn(new InstrumentMeta(InstrumentClass.EQUITY, bd("0.05"), 1L));
+    assertThat(guard.suggestedQty(sizing, "NSE", "KANORICHEM", bd("100"), null, "scalper"))
+        .isEqualByComparingTo("150");
+  }
+
+  /**
+   * An unknown lot is recorded as its OWN fact, not as a ZERO_SIZE with a re-fabricated lot of 1
+   * (cross-vendor review Major 4). ZERO_SIZE means "priced against a known lot, could not afford
+   * one"; this means "we never knew what a lot was". One value meaning two things makes the
+   * rejections ledger — the one surface built to answer "why did this entry not happen?" — answer it
+   * wrongly, and the old {@code Math.max(1, lot)} persisted a {@code computed_lots} derived from a
+   * lot that does not exist.
+   */
+  @Test
+  void anUnknownLotIsRecordedAsADataGapNotAsAnUnaffordableZeroSize() {
+    PaperAccountService account = mock(PaperAccountService.class);
+    InstrumentMetaClient instruments = mock(InstrumentMetaClient.class);
+    PaperOrderRejectionRecorder rejections = mock(PaperOrderRejectionRecorder.class);
+    when(instruments.meta("NFO", "NIFTY26MAY24000CE"))
+        .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 0L));
+    when(account.equity(any())).thenReturn(bd("150000"));
+    PaperEmissionGuard guard =
+        new PaperEmissionGuard(
+            mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
+            mock(PaperPositionRepository.class), rejections,
+            new ManasGoverningStopCache(),
+            new EquityMarkCache(java.time.Clock.systemUTC(), 5));
+    StrategyDefinition.SizingSpec sizing =
+        new StrategyDefinition.SizingSpec("premium_budget", Map.of("budget_inr", bd("15000")));
+
+    guard.recordZeroSizedEntry(
+        91L, "scalp-connect-the-dots-nifty", sizing, "scalper", "NFO",
+        "NIFTY26MAY24000CE", bd("100"), null, "BUY");
+
+    ArgumentCaptor<String> detail = ArgumentCaptor.forClass(String.class);
+    verify(rejections)
+        .recordUnknownLot(
+            eq(91L), eq("scalper"), eq("NFO"), eq("NIFTY26MAY24000CE"), eq("BUY"), detail.capture());
+    assertThat(detail.getValue()).contains("lot=unknown");
+    // and it must NOT be filed as the unaffordable-at-a-known-lot case.
+    verify(rejections, never())
+        .recordZeroSize(any(), any(), any(), any(), any(), any());
   }
 
   @Test

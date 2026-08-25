@@ -49,7 +49,13 @@ class PaperStrategyScopedOpenKeyIntegrationTest extends StrategySignalIntegratio
     @Primary
     InstrumentMetaClient stubMeta() {
       return (exchange, tradingsymbol) ->
-          new InstrumentMeta(InstrumentClass.OPTION, new BigDecimal("0.05"), 50);
+          // Lot 5, not 50: openOrder now REFUSES a non-lot-multiple fill (the alignment rule
+          // moved to the writer), and this fixture's quantities (10/20/25/30/40/65) were
+          // chosen years before that rule existed. 5 divides every one of them, so the
+          // QUANTITIES and every asserted figure derived from them are untouched — only the
+          // stub's declared lot moves. Live is unaffected: all 40 F&O paper positions are
+          // lot-aligned today (computed 2026-08-25), which is why the rule is safe to enforce.
+          new InstrumentMeta(InstrumentClass.OPTION, new BigDecimal("0.05"), 5);
     }
   }
 

@@ -239,6 +239,28 @@ public class SwingPaperEffectRepository {
         == 1;
   }
 
+  /**
+   * Closes a CLAIMED entry lease that the risk governor PERMANENTLY refused (H22). A governor
+   * verdict is a policy reading of live book state — open risk, deployment, the kill switch — not a
+   * transient fault, so replaying it can only re-refuse, and binds HARDER as the book fills. Left
+   * CLAIMED it burns the catch-up's attempt budget and ends in an "UNRECOVERABLE" page for a book
+   * that behaved exactly as designed, so the row resolves with the same no-money-effect pair
+   * {@link #skipEntry} uses and stops being repairable ({@link #pending} filters it out).
+   *
+   * <p>Deliberately NOT {@code skipEntry}: that statement requires {@code decision='UNDECIDED'} (the
+   * auto-paper "never claimed this emission" case) and would match ZERO rows for the {@code REQUIRED}
+   * lease this closes. {@code status='CLAIMED'} is required so only the holder of a live lease can
+   * close it.
+   */
+  public boolean refuseEntry(long effectId) {
+    return jdbc.update(
+            "UPDATE swing_paper_effects SET decision='SKIPPED', status='CONFIRMED',"
+                + " confirmed_at=now(), updated_at=now()"
+                + " WHERE id=? AND effect_type='ENTRY' AND decision='REQUIRED' AND status='CLAIMED'",
+            effectId)
+        == 1;
+  }
+
   /** Binds the exact paper-position ids that existed for this exit before claiming the close. */
   public boolean bindExitPositionIds(long effectId, List<Long> positionIds) {
     if (positionIds == null || positionIds.isEmpty()) {

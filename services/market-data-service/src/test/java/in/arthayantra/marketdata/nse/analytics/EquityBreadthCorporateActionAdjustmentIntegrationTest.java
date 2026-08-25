@@ -1,6 +1,8 @@
 package in.arthayantra.marketdata.nse.analytics;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import in.arthayantra.marketdata.context.EquityContextRepository;
 import in.arthayantra.marketdata.nse.analytics.EquityBreadthDailyRepository.BreadthDay;
@@ -300,6 +302,40 @@ class EquityBreadthCorporateActionAdjustmentIntegrationTest extends MarketDataIn
     assertThat(split.cPrior())
         .as("raw would be 276.0000 — a fabricated -48% over six sessions")
         .isEqualByComparingTo("138.0000");
+  }
+
+  /**
+   * The {@code advDecSeries} lookback is a calendar-day budget, so above the MEASURED bound it would
+   * return a SHORTER series than asked for without failing — success-shaped nothing, in the
+   * reassuring direction. It must throw instead, and the message must name both the bound and the
+   * value passed so the caller can see what happened without reading the source.
+   */
+  @Test
+  void advDecSeriesRefusesASessionCountItsLookbackCannotCover() {
+    assertThatThrownBy(
+            () ->
+                context.advDecSeries(
+                    dateOf(BARS - 1), EquityContextRepository.MAX_SERIES_SESSIONS + 1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining(String.valueOf(EquityContextRepository.MAX_SERIES_SESSIONS))
+        .hasMessageContaining(String.valueOf(EquityContextRepository.MAX_SERIES_SESSIONS + 1));
+  }
+
+  /**
+   * The boundary value itself is IN contract and must still work — a guard that also rejects the
+   * largest legal input is a different bug wearing the same shape. Asserted against the constant
+   * rather than a literal so the test cannot drift from the bound it is checking.
+   */
+  @Test
+  void advDecSeriesAcceptsTheBoundaryValue() {
+    seed();
+
+    assertThatCode(
+            () -> context.advDecSeries(dateOf(BARS - 1), EquityContextRepository.MAX_SERIES_SESSIONS))
+        .doesNotThrowAnyException();
+    assertThat(context.advDecSeries(dateOf(BARS - 1), EquityContextRepository.MAX_SERIES_SESSIONS))
+        .as("the fixture seeds 60 bars, so the boundary request returns a real, non-empty series")
+        .isNotEmpty();
   }
 
   /** One session's advance/decline pair, or zeros when that date is absent from the series. */

@@ -58,6 +58,13 @@ import org.springframework.stereotype.Repository;
  * the window gets no advance/decline verdict — see {@link #PRIOR_BAR_LOOKBACK_DAYS}. Both figures are
  * re-derivable from the live DB, not constants: {@code nse_eod_bhavcopy} is retro-mutable.
  *
+ * <p>⚠️ {@link AdCounts}: {@code advances + declines + unchanged} is NOT an invariant equal to
+ * {@code total}. A symbol trading on the read date with NO prior bar in the lookback window counts
+ * into {@code total} but gets no verdict, so the sum can fall short. Measured 2026-08-25 for session
+ * 2026-08-24: 2 of 2872 EQ+BE symbols, both listings whose first-ever bar was that session. The
+ * digest's own {@code adRatio} divides advances by DECLINES and never by {@code total}, which is why
+ * this is safe — but do not write a new consumer that assumes the sum closes.
+ *
  * <p>Idioms match {@code nse.analytics}: plain {@link JdbcTemplate}, positional {@code ?} params,
  * {@code CashEquityUniverse.SERIES_PREDICATE}, {@code java.sql.Date.valueOf} binds, IST-safe {@code (col AT TIME ZONE
  * 'Asia/Kolkata')::date} casts (never a bare {@code ::date}). Every windowed fold carries a lower
@@ -78,6 +85,42 @@ public class EquityContextRepository {
    * first-ever bar was that session. Re-derivable, not a constant.
    */
   private static final String PRIOR_BAR_LOOKBACK_DAYS = "45";
+
+  /** Calendar-day budget per requested session in {@link #seriesLookbackDays}. */
+  private static final int SERIES_LOOKBACK_MULTIPLIER = 3;
+
+  /** Flat calendar-day pad in {@link #seriesLookbackDays}, absorbing a holiday cluster. */
+  private static final int SERIES_LOOKBACK_PAD = 20;
+
+  /**
+   * The largest {@code sessions} {@link #advDecSeries} accepts. Above this it would return a SHORTER
+   * series than asked for without failing — the reassuring direction, and the exact shape this repo
+   * keeps getting burned by — so it throws instead.
+   *
+   * <p><b>This bound is a MEASUREMENT, not an estimate.</b> Computed 2026-08-25 against the live
+   * {@code nse_eod_bhavcopy} EQ+BE session list: for every {@code n} from 1 to 60, the worst-case
+   * calendar span of {@code n+1} consecutive sessions anywhere in the history was compared to the
+   * {@code n * 3 + 20} budget. 60 of 60 were sufficient; the tightest margin was 19 days (at
+   * {@code n = 1}, budget 23 vs a worst observed span of 4), and margins widen with {@code n}
+   * (at {@code n = 60}, budget 200 vs 95). The bound is set at the edge of what was measured, not at
+   * the edge of what the arithmetic would allow.
+   *
+   * <p>⚠️ The measurement's POPULATION is 292 sessions over 2025-06-20..2026-08-25 — about 14 months.
+   * That covers ordinary weekend and festival clusters; it does NOT contain a rare multi-week
+   * exchange closure, so it bounds the common case rather than proving the worst one. It is also
+   * re-derivable rather than constant: {@code nse_eod_bhavcopy} is retro-mutable, and a MISSING
+   * ingest date inflates an apparent gap — which biases this test toward reporting INsufficiency,
+   * the safe direction. The residual risk the guard cannot close is a future holiday cluster
+   * exceeding the budget at some {@code n} within the bound; that would still truncate silently. An
+   * exact session-count lower bound (a {@code DISTINCT trade_date ... LIMIT sessions + 1} subquery)
+   * would remove the estimate entirely and is the fix if that ever matters.
+   *
+   * <p>Only the UPPER side is guarded. {@code sessions <= 0} does not truncate — it returns exactly
+   * what was asked for (nothing, or a loud {@code LIMIT must not be negative} from Postgres) — and
+   * the caller's window comes from configuration ({@code artha.context.equity.thrust-window}), so
+   * throwing on 0 would turn a harmless misconfiguration into a dead digest.
+   */
+  public static final int MAX_SERIES_SESSIONS = 60;
 
   private final JdbcTemplate jdbc;
 
@@ -140,8 +183,24 @@ public class EquityContextRepository {
   /** One session's advance/decline counts (for the breadth-thrust moving average). */
   public record AdSession(LocalDate tradeDate, int advances, int declines) {}
 
-  /** The last {@code sessions} cash-equity sessions on/before {@code date}, newest first. */
+  /**
+   * The last {@code sessions} cash-equity sessions on/before {@code date}, newest first.
+   *
+   * @throws IllegalArgumentException if {@code sessions} exceeds {@link #MAX_SERIES_SESSIONS}, rather
+   *     than silently returning a shorter series than requested
+   */
   public List<AdSession> advDecSeries(LocalDate date, int sessions) {
+    if (sessions > MAX_SERIES_SESSIONS) {
+      throw new IllegalArgumentException(
+          "advDecSeries sessions must be <= "
+              + MAX_SERIES_SESSIONS
+              + " (the largest value the "
+              + SERIES_LOOKBACK_MULTIPLIER
+              + "x+"
+              + SERIES_LOOKBACK_PAD
+              + "-calendar-day lookback is MEASURED to cover); got "
+              + sessions);
+    }
     return jdbc.query(
         "WITH adj AS ("
             + "  SELECT b.symbol, b.trade_date,"
@@ -170,16 +229,15 @@ public class EquityContextRepository {
   /**
    * Calendar days to scan so a {@code sessions}-long series has a prior bar for EVERY emitted date,
    * including the oldest one — the {@code lag()} of the oldest emitted session comes from a bar
-   * OUTSIDE the emitted range, so the scan must be strictly wider than the output.
+   * OUTSIDE the emitted range, so the scan must be strictly wider than the output. This also
+   * replaces an UNBOUNDED scan: the previous form carried no lower {@code trade_date} bound at all,
+   * against this class's own stated idiom.
    *
-   * <p>{@code 3x + 20}: a trading session costs ~1.4 calendar days, so 3x is already ~2x headroom
-   * for weekends, and the flat +20 absorbs a holiday cluster at small {@code sessions}. Callers pass
-   * {@code sessions} &le; 22 (the digest's breadth-thrust window defaults to 10). This also replaces
-   * an UNBOUNDED scan — the previous form carried no lower {@code trade_date} bound at all, against
-   * this class's own stated idiom.
+   * <p>The multiplier and pad are named constants rather than literals so this arithmetic, {@link
+   * #MAX_SERIES_SESSIONS} and the guard in {@link #advDecSeries} cannot drift apart.
    */
   private static int seriesLookbackDays(int sessions) {
-    return sessions * 3 + 20;
+    return sessions * SERIES_LOOKBACK_MULTIPLIER + SERIES_LOOKBACK_PAD;
   }
 
   /**

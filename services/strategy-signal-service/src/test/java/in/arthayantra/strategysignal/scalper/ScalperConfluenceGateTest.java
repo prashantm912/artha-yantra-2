@@ -21,6 +21,8 @@ import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate.Decision;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Chart;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Macro;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Oi;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -2140,6 +2142,128 @@ class ScalperConfluenceGateTest {
     assertThat(decision.get().neutral()).isFalse();
     assertThat(decision.get().side()).isEqualTo(CE);
     assertThat(decision.get().legs()).hasSize(1);
+  }
+
+  // ---- H34 strike-pick telemetry (MEASUREMENT ONLY — no gate outcome changes) -------------------
+
+  /**
+   * The H34 shape in miniature: NEITHER strike satisfies both bands, so {@code StrikePicker.pick}
+   * returns empty and the {@code strike-pick} rail blocks. 19850 CE is delta-in-band (~0.68) but
+   * priced 80, BELOW the 100 premium floor — the near strike. 20500 CE clears the premium floor at
+   * 200 but its delta (~0.28) is far under 0.6.
+   */
+  private static ChainSnapshot chainWithNoInBandCe() {
+    List<StrikePicker.Candidate> candidates =
+        List.of(
+            new StrikePicker.Candidate("NFO", "NIFTY19850CE", bd("19850"), CE, bd("80"), bd("0.14")),
+            new StrikePicker.Candidate("NFO", "NIFTY20500CE", bd("20500"), CE, bd("200"), bd("0.14")));
+    return new ChainSnapshot(EXPIRY, bd("20000"), bd("20000"), candidates);
+  }
+
+  /** The counter's value on one exact tag-set, 0 when that series was never touched. */
+  private static double strikePicks(
+      SimpleMeterRegistry meters, String underlying, String path, String eval, String result) {
+    Counter c =
+        meters
+            .find(ScalperConfluenceGate.STRIKE_PICK_METRIC)
+            .tags("underlying", underlying, "path", path, "eval", eval, "result", result)
+            .counter();
+    return c == null ? 0.0 : c.count();
+  }
+
+  @Test
+  void anEmptyStrikePickCountsTheAttemptAndRecordsWhichBandFailedAndByHowMuch() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithNoInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), meters);
+
+    ScalperConfluenceGate.Result r =
+        gate.evaluateWithDiagnostic(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+
+    // every other rail passes on this bank+context (confluenceConfirmsAndPicksTheInBandCe fires on
+    // the same inputs), so the chain is the ONLY thing that changed and strike-pick is the blocker.
+    assertThat(r.blocked()).isTrue();
+    assertThat(r.rejection().blockingRail()).isEqualTo("strike-pick");
+    assertThat(strikePicks(meters, "NIFTY 50", "band", "entry", "empty")).isEqualTo(1.0);
+    assertThat(strikePicks(meters, "NIFTY 50", "band", "entry", "picked")).isZero();
+    // the durable half: the check entry's operand/threshold/margin are structurally NULL, so this is
+    // the only place the row can say WHICH band failed and what relaxation would have admitted a strike.
+    StrikeNearMiss.NearMiss nm = r.rejection().strikeNearMiss();
+    assertThat(nm).isNotNull();
+    assertThat(nm.sideCandidates()).isEqualTo(2);
+    assertThat(nm.pastExpiryCutoff()).isFalse();
+    assertThat(nm.tradingsymbol()).isEqualTo("NIFTY19850CE");
+    assertThat(nm.strike()).isEqualByComparingTo("19850");
+    assertThat(nm.premium()).isEqualByComparingTo("80");
+    assertThat(nm.failedBand()).isEqualTo(StrikeNearMiss.Band.PREMIUM);
+    assertThat(nm.premiumGap()).isEqualByComparingTo("-20"); // 20 points of relaxation, no more
+    assertThat(nm.deltaGap()).isEqualByComparingTo("0");
+    assertThat(nm.delta().doubleValue()).isBetween(0.6, 0.7);
+    assertThat(nm.deltaLo()).isEqualByComparingTo("0.6");
+    assertThat(nm.premiumLo()).isEqualByComparingTo("100");
+  }
+
+  @Test
+  void aPickableStrikeCountsPickedAndLeavesTheEmptySeriesAndTheNearMissUntouched() {
+    // The conditional half: without this, a counter that incremented unconditionally would look
+    // identical on a passing bar, and "the counter moved" would prove nothing about empty picks.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), meters);
+
+    ScalperConfluenceGate.Result r =
+        gate.evaluateWithDiagnostic(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+
+    assertThat(r.blocked()).isFalse();
+    assertThat(strikePicks(meters, "NIFTY 50", "band", "entry", "picked")).isEqualTo(1.0);
+    assertThat(strikePicks(meters, "NIFTY 50", "band", "entry", "empty")).isZero();
+    // ...and the near-miss half of the name is OBSERVED, not merely implied: a fired result carries
+    // no rejection at all, so there is nowhere for a near-miss to have been recorded. Without this
+    // line the name claimed coverage no assertion provided (the catalogued "test whose assertion
+    // cannot observe the thing it forbids" shape).
+    assertThat(r.rejection()).isNull();
+  }
+
+  @Test
+  void theExitOracleReadIsTaggedSeparatelyFromAnEntry() {
+    // The E9 D4 confluence-flip EXIT oracle re-runs this same evaluation on every held bar and
+    // persists NO rejection row. Untagged, its picks would inflate a counter that is supposed to
+    // reconcile against strategy.signal_rejections, which is entry-path only.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithNoInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), meters);
+
+    assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
+
+    assertThat(strikePicks(meters, "NIFTY 50", "band", "oracle", "empty")).isEqualTo(1.0);
+    assertThat(strikePicks(meters, "NIFTY 50", "band", "entry", "empty")).isZero();
+  }
+
+  @Test
+  void theStraddlePickIsCountedOnItsOwnPathAndCarriesNoBandNearMiss() {
+    // StraddleLegPicker judges an ATM PAIR, not the delta/premium bands, yet it records the SAME
+    // rail name. Sharing one counter series would report band failures no band caused.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithNoInBandCe())); // CE-only: no pair
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults(), meters);
+
+    ScalperConfluenceGate.Result r =
+        gate.evaluateWithDiagnostic(STRADDLE_CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+
+    assertThat(r.blocked()).isTrue();
+    assertThat(r.rejection().blockingRail()).isEqualTo("strike-pick");
+    assertThat(r.rejection().reason()).isEqualTo("no ATM straddle pair in band");
+    assertThat(strikePicks(meters, "NIFTY 50", "straddle", "entry", "empty")).isEqualTo(1.0);
+    assertThat(strikePicks(meters, "NIFTY 50", "band", "entry", "empty")).isZero();
+    assertThat(r.rejection().strikeNearMiss()).isNull();
   }
 
   // ---- G10 time-of-day volume profile (tag time-of-day-volume-floor, default-OFF) --------------

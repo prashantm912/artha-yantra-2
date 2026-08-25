@@ -121,7 +121,13 @@ public final class StrikePicker {
     return Optional.ofNullable(best);
   }
 
-  private static double yearsToExpiry(Instant now, LocalDate expiry) {
+  /**
+   * ACT/365 to the 15:30 IST cutoff; {@code <= 0} once past it. Package-private (not private) so
+   * {@link StrikeNearMiss} reports its near-miss against the SAME clock {@link #pick} judged on,
+   * rather than re-deriving one that could drift out of step with the decision it explains. Nothing
+   * else about this class changes: {@code pick} stays free of I/O, metrics and wall-clock (§12.9).
+   */
+  static double yearsToExpiry(Instant now, LocalDate expiry) {
     long secondsLeft =
         Duration.between(now, expiry.atTime(EXPIRY_CUTOFF).atOffset(IST).toInstant()).toSeconds();
     return secondsLeft <= 0 ? 0.0 : secondsLeft / SECONDS_PER_YEAR;

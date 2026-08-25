@@ -30,6 +30,7 @@ import in.arthayantra.strategysignal.scalper.ScalperGates;
 import in.arthayantra.strategysignal.scalper.ScalperManualChecks;
 import in.arthayantra.strategysignal.scalper.ScalperRisk;
 import in.arthayantra.strategysignal.scalper.SentimentLevelShadow;
+import in.arthayantra.strategysignal.scalper.StrikeNearMiss;
 import in.arthayantra.strategysignal.scalper.StrikePicker;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
@@ -2705,6 +2706,30 @@ public class SignalEngine {
       leg.put("entryLtp", d.pick().candidate().ltp());
       leg.put("delta", d.pick().delta());
       leg.put("structuralStop", d.structuralStop());
+    }
+    // H34, MEASUREMENT ONLY: why the delta/premium conjunction found nothing. Present ONLY on a
+    // directional `strike-pick` block. At the ROOT rather than inside the checks array on purpose —
+    // this is the number the relaxation decision gets made on, and `diagnostic -> 'strikePickNearMiss'`
+    // is a query anyone can write, where digging a named element out of `checks[]` is not. The bands
+    // ride along because they are TAG-selected at config load, so a row read months later must not
+    // have to guess which floor was armed at the time (H34's own first write-up guessed wrong).
+    if (d.strikeNearMiss() != null) {
+      StrikeNearMiss.NearMiss nm = d.strikeNearMiss();
+      ObjectNode n = root.putObject("strikePickNearMiss");
+      n.put("sideCandidates", nm.sideCandidates());
+      n.put("pastExpiryCutoff", nm.pastExpiryCutoff());
+      n.put("exchange", nm.exchange());
+      n.put("tradingsymbol", nm.tradingsymbol());
+      n.put("strike", nm.strike());
+      n.put("premium", nm.premium());
+      n.put("delta", nm.delta());
+      n.put("failedBand", nm.failedBand() == null ? null : nm.failedBand().name());
+      n.put("deltaGap", nm.deltaGap());
+      n.put("premiumGap", nm.premiumGap());
+      n.put("deltaLo", nm.deltaLo());
+      n.put("deltaHi", nm.deltaHi());
+      n.put("premiumLo", nm.premiumLo());
+      n.put("premiumHi", nm.premiumHi());
     }
     ArrayNode checks = root.putArray("checks");
     for (ScalperConfluenceGate.RailCheck c : d.checks()) {

@@ -1,5 +1,9 @@
 package in.arthayantra.marketdata.upstox;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.composite.CompositeMeterRegistry;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -39,6 +43,14 @@ import java.util.function.BooleanSupplier;
  *
  * <p>Both paths record into the same windows (one honest per-token count) — only the ceiling each
  * checks, the bound, and the guard-window pause differ.
+ *
+ * <p><b>Budget telemetry (ledger H26 step 1).</b> {@link #getUsageStats()} is an instantaneous
+ * SNAPSHOT, and a snapshot cannot answer &quot;did we ever come close to the cap during the
+ * session&quot; — a 15 s scrape samples the wrong instants and a burst between scrapes is invisible.
+ * So the limiter also carries CUMULATIVE counters (monotone, burst-proof) and a per-window HIGH-WATER
+ * MARK that only ever rises. Purely observational: nothing here changes a ceiling, a bound or a
+ * routing decision. The {@link MeterRegistry} is OPTIONAL — with none supplied the meters no-op, so
+ * every existing construction shape still works.
  */
 public final class UpstoxRateLimiter {
 
@@ -69,20 +81,36 @@ public final class UpstoxRateLimiter {
   private final int[] batchCeilings;
   /** True while batch work must pause (the batch-quiet guard window); the live path ignores it. */
   private final BooleanSupplier batchPaused;
+  /**
+   * Per-window high-water mark of in-window usage since boot (H26 step 1). Written under the monitor
+   * in {@link #record}, which is the ONLY place occupancy rises — pruning only ever lowers it — so
+   * this is exactly the peak the token actually reached, not whatever a scrape happened to sample.
+   */
+  private final int[] peakUsed;
+
+  private final Counter liveCalls;
+  private final Counter batchCalls;
+  private final Counter liveRefused;
 
   /** Production limiter with NO guard window (batch never pauses) — the shape existing tests construct. */
   public UpstoxRateLimiter() {
     this(() -> false);
   }
 
-  /** Production limiter: 45/s · 450/min · 1800/30min windows, 20% reserved off-hours, paused in the guard window. */
+  /** Production limiter with NO metrics registry — every meter no-ops; used off the live profile. */
   public UpstoxRateLimiter(BooleanSupplier batchPaused) {
+    this(batchPaused, null);
+  }
+
+  /** Production limiter: 45/s · 450/min · 1800/30min windows, 20% reserved off-hours, paused in the guard window. */
+  public UpstoxRateLimiter(BooleanSupplier batchPaused, MeterRegistry meters) {
     this(
         DEFAULT_LIVE_RESERVE_FRACTION,
         batchPaused,
         new String[] {"1s", "1m", "30m"},
         new long[] {1_000L, 60_000L, 1_800_000L},
-        new int[] {45, 450, 1_800});
+        new int[] {45, 450, 1_800},
+        meters);
   }
 
   /** Test/tuning constructor — explicit windows, reserve fraction, and batch-pause gate. */
@@ -92,12 +120,54 @@ public final class UpstoxRateLimiter {
       String[] labels,
       long[] durationsMs,
       int[] maxes) {
+    this(liveReserveFraction, batchPaused, labels, durationsMs, maxes, null);
+  }
+
+  /** Test/tuning constructor with budget telemetry; a null {@code meters} makes every meter a no-op. */
+  UpstoxRateLimiter(
+      double liveReserveFraction,
+      BooleanSupplier batchPaused,
+      String[] labels,
+      long[] durationsMs,
+      int[] maxes,
+      MeterRegistry meters) {
     this.batchPaused = batchPaused;
     this.windows = new Window[labels.length];
     this.batchCeilings = new int[labels.length];
+    this.peakUsed = new int[labels.length];
     for (int i = 0; i < labels.length; i++) {
       windows[i] = new Window(labels[i], maxes[i], durationsMs[i], new ArrayDeque<>());
       batchCeilings[i] = (int) Math.floor(maxes[i] * (1.0 - liveReserveFraction));
+    }
+    // A childless CompositeMeterRegistry is micrometer's own no-op, so the counters below are never
+    // null and the record path needs no null check inside the monitor.
+    MeterRegistry registry = meters != null ? meters : new CompositeMeterRegistry();
+    this.liveCalls =
+        Counter.builder("ay_upstox_calls_total")
+            .description("Upstox analytics-token calls debited from the shared per-token budget")
+            .tag("path", "live")
+            .register(registry);
+    this.batchCalls =
+        Counter.builder("ay_upstox_calls_total")
+            .description("Upstox analytics-token calls debited from the shared per-token budget")
+            .tag("path", "batch")
+            .register(registry);
+    // The direct evidence of budget exhaustion, and today completely invisible: the live path fails
+    // SOFT on timeout, so a refused slot currently leaves no trace anywhere.
+    this.liveRefused =
+        Counter.builder("ay_upstox_live_refused_total")
+            .description("Live Upstox acquisitions refused — no slot within the bounded wait")
+            .register(registry);
+    for (int i = 0; i < labels.length; i++) {
+      int idx = i;
+      Gauge.builder("ay_upstox_rate_window_peak_used", peakUsed, p -> p[idx])
+          .description("High-water mark of in-window Upstox usage since boot")
+          .tag("window", labels[i])
+          .register(registry);
+      Gauge.builder("ay_upstox_rate_window_max", windows, w -> w[idx].max())
+          .description("Configured cap for the window — the peak gauge denominator")
+          .tag("window", labels[i])
+          .register(registry);
     }
   }
 
@@ -115,12 +185,13 @@ public final class UpstoxRateLimiter {
       synchronized (this) {
         wait = waitFor(ceilings);
         if (wait <= 0) {
-          record();
+          record(true);
           return true;
         }
       }
       long remaining = deadline - System.currentTimeMillis();
       if (remaining <= 0) {
+        recordLiveRefusal();
         return false;
       }
       sleep(Math.min(wait, remaining));
@@ -164,7 +235,7 @@ public final class UpstoxRateLimiter {
         }
         wait = waitFor(batchCeilings);
         if (wait <= 0) {
-          record();
+          record(false);
           return true;
         }
       }
@@ -197,12 +268,32 @@ public final class UpstoxRateLimiter {
     return wait;
   }
 
-  /** Under the monitor: record a hit in every window. */
-  private void record() {
+  /**
+   * Under the monitor: record a hit in every window, raising each window high-water mark and debiting
+   * the cumulative per-path counter. {@link #waitFor} has just pruned under this same monitor, so
+   * {@code size()} here is the true post-prune occupancy.
+   */
+  private void record(boolean live) {
     long now = System.currentTimeMillis();
-    for (Window w : windows) {
-      w.hits().addLast(now);
+    for (int i = 0; i < windows.length; i++) {
+      Deque<Long> hits = windows[i].hits();
+      hits.addLast(now);
+      if (hits.size() > peakUsed[i]) {
+        peakUsed[i] = hits.size();
+      }
     }
+    (live ? liveCalls : batchCalls).increment();
+  }
+
+  /**
+   * Counts a live acquisition that timed out without a slot. Deliberately NOT {@code synchronized}:
+   * {@link Counter#increment()} is already thread-safe, it touches no window state, and this is the
+   * ONE path the live bound exists to keep unparked ({@link #LIVE_ACQUIRE_TIMEOUT_MS} — "never a
+   * parked thread"). Taking the monitor here would queue a just-timed-out caller behind the very
+   * contention that refused it.
+   */
+  private void recordLiveRefusal() {
+    liveRefused.increment();
   }
 
   private static void sleep(long ms) {

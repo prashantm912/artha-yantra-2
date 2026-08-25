@@ -11,9 +11,12 @@ import io.github.resilience4j.ratelimiter.RateLimiterRegistry;
 import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryConfig;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.function.Supplier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
@@ -58,6 +61,16 @@ public class KiteCallExecutor {
   private final RateLimiterRegistry rateLimiters;
   private final CircuitBreakerRegistry circuitBreakers;
   private final Retry retry;
+  /**
+   * Per-family broker-REST call counters (ledger H26 step 1) — resolved once here so {@link #execute}
+   * does an array index, not a map hash, on the call path.
+   *
+   * <p><b>Not every Kite REST call.</b> {@code LiveSessionWireClient} bypasses this executor
+   * entirely — {@code POST /session/token} plus the {@code GET /user/profile} health probe on a
+   * 5-minute fixed delay (~288/day, ~75 per session, ~2.5 per 30-min window). Too small to move the
+   * H26 verdict, but the series is not a complete broker-REST total.
+   */
+  private final Map<Family, Counter> restCalls;
 
   /** Wires the registries (yml-configured instances) + the programmatic retry policy. */
   public KiteCallExecutor(
@@ -86,6 +99,24 @@ public class KiteCallExecutor {
                     })
                 .retryOnException(KiteCallExecutor::isRetryable)
                 .build());
+    // ay_broker_rest_calls_total: the migrating-volume half of the H26 step-1 budget measurement.
+    // Counting Upstox alone would answer the WRONG question — Upstox is not primary today, so its
+    // current draw is remaining HEADROOM, not session demand. Projected demand is what Upstox draws
+    // today PLUS what Kite REST carries today and would migrate, which is this series.
+    EnumMap<Family, Counter> calls = new EnumMap<>(Family.class);
+    for (Family family : Family.values()) {
+      calls.put(
+          family,
+          Counter.builder("ay_broker_rest_calls_total")
+              .description(
+                  "Broker REST attempts dispatched via KiteCallExecutor (post breaker, post"
+                      + " limiter); a transport failure still counts, and Kite session/profile"
+                      + " calls bypass this executor")
+              .tag("family", family.name())
+              .tag("broker", family.breakerName)
+              .register(meterRegistry));
+    }
+    this.restCalls = calls;
     // ay_kite_rate_limiter_saturation: 1 - available/period on the historical bucket
     RateLimiter historical = rateLimiters.rateLimiter(Family.HISTORICAL.limiterName);
     meterRegistry.gauge(
@@ -179,8 +210,23 @@ public class KiteCallExecutor {
   public <T> T execute(Family family, Supplier<T> call) {
     RateLimiter limiter = rateLimiters.rateLimiter(family.limiterName);
     CircuitBreaker breaker = circuitBreakers.circuitBreaker(family.breakerName);
+    // Counted INSIDE both decorators, so the series counts attempts DISPATCHED to the broker: a call
+    // the breaker rejects or the limiter refuses never runs this supplier, and each RETRY attempt
+    // that does reach it counts again — retries draw real budget, so they must.
+    // IMPORTANT: it increments BEFORE call.get(), so this is "dispatched", NOT "reached the
+    // network": a transport failure that never left the host still counts, and since isRetryable()
+    // retries ResourceAccessException/IOException up to 4 attempts, a host-outbound outage (this
+    // box has had four: 08-19 x3, 08-20 x1) inflates it ~4x per logical call. Read it that way.
+    Counter counter = restCalls.get(family);
+    Supplier<T> counted =
+        () -> {
+          counter.increment();
+          return call.get();
+        };
     Supplier<T> attempt =
-        () -> CircuitBreaker.decorateSupplier(breaker, RateLimiter.decorateSupplier(limiter, call)).get();
+        () ->
+            CircuitBreaker.decorateSupplier(breaker, RateLimiter.decorateSupplier(limiter, counted))
+                .get();
     Supplier<T> decorated = family == Family.DUMP ? attempt : Retry.decorateSupplier(retry, attempt);
     try {
       return decorated.get();

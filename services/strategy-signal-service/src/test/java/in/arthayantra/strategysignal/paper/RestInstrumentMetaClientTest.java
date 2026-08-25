@@ -161,4 +161,45 @@ class RestInstrumentMetaClientTest {
     assertThat(client.meta("NSE", "KANORICHEM").lotSize()).isEqualTo(1L);
     server.verify();
   }
+
+  @Test
+  void aTwoHundredWithNoInstrumentTypeOnADerivativeSegmentReportsLotZero() {
+    // Cross-vendor review round 2. The row RESOLVED — 200, no transport failure, non-empty body —
+    // but carries no instrument_type, so classOf falls back to EQUITY by DEFAULT rather than by
+    // evidence. Left alone that made the lot 1 on an NFO ticket: the same fail-open the transport
+    // and empty-body branches already close, reached by a third route.
+    wire("{\"lotSize\":null,\"tickSize\":null}");
+
+    InstrumentMeta meta = client.meta("NFO", "NIFTY26AUG24000CE");
+
+    assertThat(meta.lotSize())
+        .as("an NFO ticket is never a lot-1 instrument, however the row classified")
+        .isZero();
+    server.verify();
+  }
+
+  @Test
+  void aTwoHundredWithAnUnrecognisedInstrumentTypeOnBfoReportsLotZero() {
+    // The other half of the same branch: a token classOf does not know falls to the EQUITY default
+    // exactly as a null does, and BFO is a derivative segment too.
+    wire("{\"instrumentType\":\"XX\",\"lotSize\":null,\"tickSize\":\"0.05\"}");
+
+    InstrumentMeta meta = client.meta("BFO", "SENSEX26AUG76300CE");
+
+    assertThat(meta.instrumentClass())
+        .as("the classification is UNCHANGED — only the lot is decided by the exchange")
+        .isEqualTo(InstrumentClass.EQUITY);
+    assertThat(meta.lotSize()).isZero();
+    server.verify();
+  }
+
+  @Test
+  void aTwoHundredWithNoInstrumentTypeOnACashSegmentStillDefaultsToOne() {
+    // The direction a too-eager fix breaks: on NSE an untyped row is a cash equity and 1 is its
+    // real lot. Unchanged.
+    wire("{\"lotSize\":null,\"tickSize\":null}");
+
+    assertThat(client.meta("NSE", "KANORICHEM").lotSize()).isEqualTo(1L);
+    server.verify();
+  }
 }

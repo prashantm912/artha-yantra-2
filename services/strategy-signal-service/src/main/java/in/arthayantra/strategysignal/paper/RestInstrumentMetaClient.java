@@ -106,13 +106,20 @@ public class RestInstrumentMetaClient implements InstrumentMetaClient {
    * trades in single units, so {@code 1} is the instrument's real lot rather than a substitute for
    * an unknown one. 510 EQ rows carry a NULL lot today and two of them back OPEN paper positions
    * (NSE:KANORICHEM, both computed 2026-08-25) — refusing those would break a live book for no gain.
+   *
+   * <p>But the EQUITY default is only reachable on a CASH segment. Cross-vendor review round 2: on a
+   * 200 whose {@code instrument_type} is NULL or a token {@code classOf} does not recognise, the row
+   * classifies as EQUITY by DEFAULT rather than by evidence — and an NFO/BFO ticket would then have
+   * taken the lot-1 fill this whole change exists to stop, by a third route past the transport and
+   * empty-body ones. The ORDER'S EXCHANGE is the authority the class is not, so it decides: same
+   * {@code isDerivativeSegment} predicate as {@code proxyFor}, one rule, one place to extend.
    */
   private static long lotOf(
       InstrumentClass instrumentClass, Long lotSize, String exchange, String tradingsymbol) {
     if (lotSize != null && lotSize > 0) {
       return lotSize;
     }
-    if (instrumentClass == InstrumentClass.EQUITY) {
+    if (instrumentClass == InstrumentClass.EQUITY && !isDerivativeSegment(exchange)) {
       return 1;
     }
     log.warn(

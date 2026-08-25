@@ -54,3 +54,38 @@ export function useIngestHealth(days = 10): UseQueryResult<BoardReport> {
     refetchInterval: 60_000,
   });
 }
+
+// "Can I shut down yet?" — TODAY's evening-chain status (EveningChainCanary). Deliberately a
+// separate read from the board above: /ingest windows strictly BEFORE today, this is today only.
+
+/** Where one expected evening source's TODAY run stands. */
+export type ChainSourceState = 'PENDING' | 'STUCK' | 'DONE';
+
+/** One expected source's today-progress. */
+export interface ChainSourceProgress {
+  source: string;
+  state: ChainSourceState;
+  status: string | null; // RUNNING | SUCCESS | FAILURE | null (never run today)
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** GET /market/health/evening-chain — today's whole-chain report. */
+export interface ChainReport {
+  generatedAt: string;
+  day: string;
+  tradingDay: boolean;
+  total: number;
+  done: number;
+  complete: boolean;
+  sources: ChainSourceProgress[];
+}
+
+/** Today's evening-chain status. Polls faster than the EOD board — this is a live "keep checking". */
+export function useEveningChainStatus(): UseQueryResult<ChainReport> {
+  return useQuery({
+    queryKey: ['evening-chain'],
+    queryFn: () => apiFetch<ChainReport>('/market/health/evening-chain'),
+    refetchInterval: 30_000,
+  });
+}

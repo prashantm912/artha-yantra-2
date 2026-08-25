@@ -813,7 +813,10 @@ public class IngestCoverageCanary {
    * false-REDding is still visible as late, just no longer reported as missing.
    */
   private SourceCoverage screenerStored(ExpectedSource expected, LocalDate tradingDay) {
-    String table = screenTable(expected.source());
+    // An unmapped source must never read as healthy: a SCREENER whose artifact cannot be located is
+    // a canary that cannot fire, so it reds loudly rather than greening on a count it never took
+    // (catalogue trap #14 — a guard that enumerates zero and reports success).
+    String table = ScreenOutputTables.tableFor(expected.source());
     if (table == null) {
       return red(
           expected,

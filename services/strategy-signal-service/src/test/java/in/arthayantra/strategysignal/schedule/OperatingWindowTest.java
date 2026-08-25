@@ -10,10 +10,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -90,9 +92,49 @@ class OperatingWindowTest {
     // against the shutdown boundary. They must follow the 08:35 entry pass; see the ordering test.
     JOBS.put("artha.paper.reconciliation.cron", SS + "paper/PaperReconciliationScheduler.java");
     JOBS.put("artha.paper.past-expiry-recon.cron", SS + "paper/PaperScheduler.java");
+    // The pre-shutdown "can I shut down yet?" push. It is the LAST job of the window (18:59, one
+    // minute before the machine goes off), so it is also the one with the least margin for a drift
+    // out of it — a cron edit that pushed it to 19:00 would silently never fire.
+    JOBS.put("artha.evening-chain.check-cron", MD + "canary/EveningChainCanary.java");
   }
 
-  private static final int EXPECTED_JOB_COUNT = 19;
+  // ⚠️ MERGE, and the number moved a SECOND time (2026-08-25). Re-derived from the JOBS map
+  // itself — 20 put() calls, 20 distinct keys, no collisions — never carried over from either
+  // side of the merge. Taking one side's number leaves the size assertion GREEN while silently
+  // dropping the other side's jobs out of the parity sweep, which is the trap this PR's earlier
+  // merge already hit at 6 -> 9 and then at 17/18 -> 19. The branch contributes
+  // artha.evening-chain.check-cron; main contributed the H27 swing-settle moves and, on
+  // 2026-08-24, artha.nse.fii-retry-cron (#1454). Recount here on EVERY merge; do not add.
+  private static final int EXPECTED_JOB_COUNT = 20;
+
+  /**
+   * The minutes on which two jobs are allowed to share a trigger, each with its pair spelled out.
+   *
+   * <p>⚠️ This is a DECLARED EXCEPTION, not a relaxation. The default remains "one job per minute",
+   * and every entry here has to name both sides — so a THIRD job landing on 18:59, or either of
+   * these two moving onto some other job's minute, still fails. ⚠️ With the SAME qualification this
+   * file already makes for {@code fii-retry} forty lines up: "a third job" means a third job IN THIS
+   * MAP. A scheduled site nobody catalogued here is invisible to this check, exactly as it is to the
+   * containment check. (Verified 2026-08-25: {@code 0 59 18} appears in exactly two source files, so
+   * the declared pair is complete today.)
+   *
+   * <p>⚠️ Why 18:59 is shared. The evening tail runs one job per minute from 18:45 to 18:59 and the
+   * machine shuts down at 19:00, so there is no free minute left for the pre-shutdown check to move
+   * to — the collision is a symptom of a full tail, and the real remedy is ledger row H37: pull the
+   * whole tail earlier once the bhavcopy anchor measurement establishes how early the 18:45 ingest
+   * can honestly start. That measurement is 1 of >=5 sessions in. Blocking this check on it would
+   * keep the 18:59 shutdown push unbuilt for weeks while the tail stays unobserved, which is the
+   * worse trade: the two jobs genuinely can co-fire (the alert producer reads its own screen output,
+   * the check reads ingest_runs, and they share no writer), whereas an unobserved shutdown boundary
+   * is how a leg goes missing without anyone noticing.
+   *
+   * <p><b>Exit condition:</b> when H37 frees a minute, delete the entry — the assertion below then
+   * fails if it is left behind, so this cannot rot silently.
+   */
+  private static final Map<String, Set<String>> SHARED_MINUTES =
+      Map.of(
+          "18:59",
+          Set.of("artha.minervini.buyable-alerts.cron", "artha.evening-chain.check-cron"));
 
   @Test
   @DisplayName("the catalogue is not silently shrunk")
@@ -187,12 +229,29 @@ class OperatingWindowTest {
     // the same trigger. Spans both services deliberately: they share one machine and one window,
     // and a per-service check would miss exactly the pairs most likely to collide.
     Map<String, String> takenBy = new HashMap<>();
+    Set<String> sharedUsed = new HashSet<>();
     for (Map.Entry<String, String> job : JOBS.entrySet()) {
       for (String at : firings(job.getKey(), codeDefault(job.getKey(), job.getValue()))) {
         String previous = takenBy.putIfAbsent(at, job.getKey());
-        assertThat(previous).as("%s and %s both fire at %s IST", previous, job.getKey(), at).isNull();
+        if (previous == null) {
+          continue;
+        }
+        Set<String> allowed = SHARED_MINUTES.get(at);
+        assertThat(allowed)
+            .as("%s and %s both fire at %s IST, which is not a declared shared minute",
+                previous, job.getKey(), at)
+            .isNotNull();
+        assertThat(Set.of(previous, job.getKey()))
+            .as("%s IST is a declared shared minute, but for a DIFFERENT pair", at)
+            .isEqualTo(allowed);
+        sharedUsed.add(at);
       }
     }
+    // ⚠️ A declared exemption that no longer collides is STALE, and a stale exemption is how a
+    // relaxation outlives the reason for it. Once H37 frees a minute, this is what fails.
+    assertThat(sharedUsed)
+        .as("every declared shared minute must still be a real collision, or be deleted")
+        .containsExactlyInAnyOrderElementsOf(SHARED_MINUTES.keySet());
     assertThat(takenBy).hasSizeGreaterThanOrEqualTo(EXPECTED_JOB_COUNT);
   }
 

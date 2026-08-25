@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.screener.minervini;
 import in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import java.time.LocalDate;
+import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,6 +34,28 @@ public class MinerviniScheduler {
   private final IngestRunLedger ledger;
   private final boolean enabled;
   private final boolean planeDivergenceEnabled;
+
+  /**
+   * Serialises every screen door against the others (ledger H13).
+   *
+   * <p>⚠️ FOUR doors, not three: the two {@code @EventListener}s, the {@code @Scheduled} cron, and
+   * {@code runOnce} behind {@code POST /run}. The lock covers all four.
+   *
+   * <p>⚠️ The dedup below is a READ-then-ACT on {@code latestScreenDate}, and nothing made it
+   * atomic. Measured live on 2026-08-24: the {@code bhavcopy-complete} event ran 18:46:42→18:47:39
+   * on thread {@code eod-bhavcopy-backfill} while the 18:47 cron started at 18:46:57 on
+   * {@code scheduling-1} — the cron read the watermark BEFORE the event run had written it, so the
+   * skip did not fire and the day got two full screens plus two ~290-symbol geometry fan-outs
+   * against a 1 GB Timescale box that has OOM-crashed twice. Both wrote the same 1,800 rows, so it
+   * cost load rather than data, but two concurrent {@code replaceAll} on one screen date is a
+   * delete/insert interleave waiting for a slower evening.
+   *
+   * <p>A JVM lock is sufficient BECAUSE every door is in-process (two {@code @EventListener}, one
+   * {@code @Scheduled}, and {@code runOnce} behind {@code POST /run}) and market-data runs one
+   * container — the same single-writer convention
+   * the rest of the ingest path assumes. It is not a distributed claim and must not be read as one.
+   */
+  private final ReentrantLock screenLock = new ReentrantLock();
 
   /** Wires the screener + screen repository + geometry service + the ops ntfy client + ingest ledger. */
   public MinerviniScheduler(
@@ -90,6 +113,20 @@ public class MinerviniScheduler {
    * what was persisted without a second read.
    */
   public TrendTemplateService.ScreenResult runOnce(LocalDate asOf) {
+    // ⚠️ BLOCKING here, unlike the scheduled doors, and the asymmetry is the point: this runs on an
+    // HTTP request thread where waiting is acceptable, and it deliberately bypasses the dedup skip
+    // — so without the lock it is the ONE door that can still race a scheduled screen into two
+    // concurrent replaceAll on the same date. Skipping would be wrong (a forced recompute that
+    // silently did not recompute), so it waits instead.
+    screenLock.lock();
+    try {
+      return runOnceLocked(asOf);
+    } finally {
+      screenLock.unlock();
+    }
+  }
+
+  private TrendTemplateService.ScreenResult runOnceLocked(LocalDate asOf) {
     TrendTemplateService.ScreenResult r = screener.screen(asOf);
     if (r.screenDate() == null) {
       return r;
@@ -104,6 +141,97 @@ public class MinerviniScheduler {
     if (!enabled) {
       return;
     }
+    // ⚠️ The wait is PER DOOR, and the first cut got this wrong by treating all three the same.
+    //
+    // `scheduled()` has no `scheduler = ...`, so it runs on the DEFAULT taskScheduler — pool size 1,
+    // shared by ~32 scheduled methods. Blocking THAT for the ~60 s a screen takes would starve every
+    // one of them, and skipping costs nothing because the in-flight run is doing its work anyway.
+    //
+    // `bhavcopy-complete` is different in both respects. It runs synchronously on the dedicated
+    // `eod-bhavcopy-backfill` executor, whose own javadoc says nothing queues behind it (the next
+    // cron is a day away), so blocking there is already blessed. And dropping it is NOT free: this
+    // is the trigger that exists to screen the FRESH watermark, added because the old identical
+    // cron raced the backfill and screened yesterday (audit H1). On 2026-08-24 the backfill
+    // published at 18:46:42 — 102 s after its 18:45 start, against a 120 s gap to the 18:47 cron.
+    // Eighteen seconds of margin. Any evening the NSE leg overruns that, the ORDER REVERSES: the
+    // cron takes the lock first, screens the OLD watermark, writes a SUCCESS ingest_runs row, and
+    // a bare tryLock would drop the one door that would have corrected it — deterministically,
+    // where the pre-fix code at least raced its way to the fresh screen. So it waits.
+    if (!acquire(trigger)) {
+      // ⚠️ ERROR for the event door, WARN for the others, and the split is the point. A skipped
+      // cron/boot door is the DESIGNED outcome — the in-flight run is doing its work. A
+      // bhavcopy-complete door that waited three minutes and still could not get in means the screen
+      // is wedged and tonight's fresh watermark may go unscreened, which is the audit-H1 regression
+      // this trigger exists to prevent. Different severities because they are different events.
+      if ("bhavcopy-complete".equals(trigger)) {
+        log.error(
+            "minervini screen still locked after {} ms — the bhavcopy-complete door gave up;"
+                + " tonight's fresh watermark may go unscreened (H13)",
+            EVENT_DOOR_WAIT_MS);
+        // ⚠️ PAGED, not just logged. A container recreate destroys docker logs, so an ERROR line is
+        // volatile evidence for exactly the kind of event nobody is watching at 18:47. This class
+        // already pages on the sibling failure with the same framing, and ntfy is already injected.
+        ntfy.send(
+            "Minervini screen door GAVE UP", "high",
+            "The bhavcopy-complete trigger could not get the screen lock in "
+                + EVENT_DOOR_WAIT_MS
+                + " ms. Tonight's screen may be against a STALE watermark, and the next swing batch"
+                + " would then read a stale funnel (H13).");
+      } else {
+        log.warn(
+            "minervini screen already running — {} trigger skipped (H13: two doors overlapped)",
+            trigger);
+      }
+      return;
+    }
+    try {
+      runLocked(trigger);
+    } finally {
+      screenLock.unlock();
+    }
+  }
+
+  /**
+   * The screen lock, for tests that need to hold it from outside — the only way to exercise the
+   * WAIT path, since every in-process door releases it before returning.
+   *
+   * <p>⚠️ Package-private and test-only. Production code must go through {@link #acquire}; taking
+   * this directly would bypass the per-door policy that is the whole point of H13's fix.
+   */
+  ReentrantLock screenLockForTest() {
+    return screenLock;
+  }
+
+  /** Waits for the screen lock in the way this door can afford — see {@link #runQuietly}. */
+  private boolean acquire(String trigger) {
+    if (!"bhavcopy-complete".equals(trigger)) {
+      return screenLock.tryLock();
+    }
+    try {
+      return screenLock.tryLock(EVENT_DOOR_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return false;
+    }
+  }
+
+  /**
+   * How long the {@code bhavcopy-complete} door waits for the screen lock.
+   *
+   * <p>⚠️ It is NOT waiting for the backfill — the backfill has already finished by the time this
+   * event fires. It waits for the in-flight SCREEN, measured at 52-57 s on 2026-08-24. The worst
+   * realistic wait is one screen plus one barging {@code POST /run} (the lock is unfair), so about
+   * 120 s; 180 s leaves roughly a minute of headroom.
+   *
+   * <p>⚠️ What the wait HOLDS is the {@code eod-bhavcopy-backfill} executor, not a boot thread — and
+   * because both schedulers' listeners run sequentially on that one executor the worst case is
+   * 2 x 180 s. During it {@code BhavcopyBackfillService.running} stays true and a manual backfill
+   * trigger 409s. Harmless, but that is the actual cost, not the one an earlier version of this
+   * comment claimed.
+   */
+  private static final long EVENT_DOOR_WAIT_MS = 180_000;
+
+  private void runLocked(String trigger) {
     // Ingest-run ledger (audit §7.2.3). Opened only after the dedup skip below, so a no-op run
     // records nothing; the id survives into the catch so a screen failure is recorded, not vanished.
     Long runId = null;
@@ -133,11 +261,39 @@ public class MinerviniScheduler {
       int written = repo.replaceAll(r.screenDate(), r.candidates());
       long passing = r.candidates().stream().filter(TrendCandidate::passesAll).count();
       int geo = computeGeometry(r);
-      ledger.succeed(runId, written);
       log.info(
           "minervini screen upserted {} rows for {} ({} pass all 8 gates, {} geometry rows) [{}]",
           written, r.screenDate(), passing, geo, trigger);
-      probePlaneDivergence(r.screenDate(), trigger, false);
+      // Ledger completion is deliberately AFTER the probe, not after the write (review finding,
+      // 2026-08-11): EveningChainCanary reads SOURCE_MINERVINI_SCREEN's ingest_runs row as "this
+      // leg of the evening chain is done" — if the ledger closed right after repo.replaceAll, that
+      // would be true while MINERVINI_PLANE_DIVERGENCE was still running, so the "safe to shut
+      // down" push could fire mid-probe. Safe to move: probePlaneDivergence is fail-soft and never
+      // throws (its own try/catch), so this reordering changes WHEN succeed() is called, never
+      // WHETHER — a probe failure still leaves a clean SUCCESS row, exactly as before.
+      // ⚠️ Ordering AND outcome both matter here, and my first attempt got the second one wrong.
+      //
+      // Ordering: succeed() must come after the probe, because EveningChainCanary reads this
+      // SOURCE_MINERVINI_SCREEN row as "this leg of the evening chain is done" — closing it right
+      // after repo.replaceAll would let the "safe to shut down" push fire mid-probe.
+      //
+      // Outcome: the first fix wrapped the probe in a bare `finally`, which closes the row SUCCESS
+      // even when the probe DIED — contradicting the very boundary the reordering established, and
+      // telling the canary a leg finished that did not. probePlaneDivergence swallows every
+      // EXCEPTION itself, so only an ERROR (OOM and friends) reaches here; that is a real failure
+      // and the row must say so. catch-record-rethrow keeps the row terminal without lying about
+      // which way it ended.
+      //
+      // Note this does NOT repair the container-recreate case (cross-vendor review): a killed
+      // process runs no catch and no finally, so a stranded RUNNING row still needs the reaper that
+      // ledger H12's second half is still open on. Claiming otherwise was overreach on my part.
+      try {
+        probePlaneDivergence(r.screenDate(), trigger, false);
+      } catch (Error fatal) {
+        ledger.fail(runId, "plane-divergence probe died: " + fatal);
+        throw fatal;
+      }
+      ledger.succeed(runId, written);
     } catch (Exception e) {
       // Audit P0-4/H10: a failed screen leaves the NEXT swing batch on yesterday's funnel — the
       // owner must hear about it, not find it in a log next week. NtfyClient never throws.
@@ -172,7 +328,9 @@ public class MinerviniScheduler {
    *
    * <p><b>Durable, and retried.</b> Completion is recorded per screen date by the probe itself, and
    * every door into the scheduler retries a date that has no completion row — including the
-   * dedup-skip path above. Without that, the ordering was silently lossy: the screen persists and
+   * dedup-skip path above. ⚠️ The H13 lock-contention return added 2026-08-25 is the ONE exception:
+   * it leaves before the probe, deliberately, because the run currently holding the lock is already
+   * probing that same date. Without that, the ordering was silently lossy: the screen persists and
    * the ingest ledger succeeds BEFORE the probe runs, so a crash or a probe exception in between
    * left the screen "already current" and every later trigger skipped straight past the missing
    * observation, permanently.

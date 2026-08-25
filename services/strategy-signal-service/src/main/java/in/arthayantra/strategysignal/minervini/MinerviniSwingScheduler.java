@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.minervini;
 
+import in.arthayantra.strategysignal.signals.SwingBatchRunRepository.Pass;
 import in.arthayantra.strategysignal.swing.SwingBatchIntentRepository;
 import in.arthayantra.strategysignal.swing.SwingBatchRecorder;
 import java.time.Clock;
@@ -153,6 +154,11 @@ public class MinerviniSwingScheduler {
     // ops alert instead of a lone log line, and a settle that dies silently means every held stop
     // goes unevaluated with nobody told. The first cut of this change called runAndRecord directly
     // and lost that envelope — caught in cross-vendor review, before merge.
-    recorder.runScheduled(doctrine, false);
+    //
+    // Pass.SETTLE, not a bare `false`. The pass is DECLARED here because the flag cannot
+    // identify it: the catch-up's exits-only recovery also runs entries-disabled, so a derived
+    // pass gave both the same key and the recovery overwrote THIS row (cross-vendor review of
+    // the first cut of V063, 2026-08-25).
+    recorder.runScheduled(doctrine, Pass.SETTLE);
   }
 }

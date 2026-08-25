@@ -4,6 +4,7 @@ import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SwingBatchAlert;
 import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
+import in.arthayantra.strategysignal.signals.SwingBatchRunRepository.Pass;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRetry;
 import java.time.Clock;
@@ -642,6 +643,15 @@ public class SwingBatchCatchUp {
     boolean entriesReady =
         !armingUnknown
             && candidateSnapshot.map(snapshot -> session.equals(snapshot.screenDate())).orElse(false);
+    // ⚠️ THE THIRD ORIGIN, and it is why the run marker's `pass` is declared here rather than
+    // derived from the entries flag inside the repository (cross-vendor review of V063's first
+    // cut, 2026-08-25). When entriesReady is false but the arming IS known, this sweep writes a
+    // marker (markerPolicy stays ON_COMPLETE below — only armingUnknown forces NEVER) for an
+    // exits-only run, exactly like the evening settle. Derived, both got pass='SETTLE', so this
+    // row landed on the settle's key and destroyed it — the very defect V063 exists to fix. And
+    // it is not a one-shot: the branch below marks the session PENDING/SCREEN_NOT_AS_OF_SESSION,
+    // so it stays retryable and would have overwritten the settle again on every later sweep.
+    Pass pass = entriesReady ? Pass.ENTRIES : Pass.RECOVERY_EXITS;
     // ⚠️ NEVER, not ON_COMPLETE, when the arming is unknown: this pass must not leave a marker the
     // NEXT sweep would read as proof of settle-time arming. A catch-up may not vouch for itself.
     SwingBatchRecorder.MarkerPolicy markerPolicy =
@@ -652,7 +662,7 @@ public class SwingBatchCatchUp {
         recorder.runAndRecord(
             doctrine,
             session,
-            entriesReady,
+            pass,
             markerPolicy,
             candidateSnapshot,
             this::marketOpenDeadlinePassed);
@@ -663,7 +673,7 @@ public class SwingBatchCatchUp {
           recorder.runAndRecord(
               doctrine,
               session,
-              entriesReady,
+              pass,
               SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
               candidateSnapshot);
     }
@@ -671,7 +681,7 @@ public class SwingBatchCatchUp {
       // Compatibility for recorder doubles from before the immutable snapshot seam.
       outcome =
           recorder.runAndRecord(
-              doctrine, session, entriesReady, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE);
+              doctrine, session, pass, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE);
     }
     SwingBatchEngine.SwingRun run = outcome.run();
     String summary =

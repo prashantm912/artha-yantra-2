@@ -224,8 +224,14 @@ class ManasAroraSwingEngineTest {
     // from the futures/options universe — measured 2026-08-13, 307 entries, not one an NSE cash
     // equity. So every swing position marked at its own avgEntryPrice and contributed ZERO unrealized
     // (+₹27,213.97 invisible across the two books). This proves the exit pass — which already holds
-    // the right number, since it settles these positions at bar.close() precisely because equities do
-    // not tick — publishes that close through the EmissionGuard port for the paper adapter to cache.
+    // the right number, since it settles these positions at an explicit session price precisely
+    // because equities do not tick — publishes that price through the EmissionGuard port for the
+    // paper adapter to cache.
+    // ⚠️ Since ledger H9 that price is the OFFICIAL NSE close when one was published. This harness
+    // leaves the OfficialCloseClient UNWIRED (the seam default), which is the documented DEGRADED
+    // state — so the mark here is bar.close() via the fallback, and the assertion below is about
+    // WHICH BAR is published, not about the plane. The plane is pinned by
+    // SwingExitOfficialCloseTest#theEquityMarkIsTheSameResolvedPriceAsTheFill.
     ExitHarness h = new ExitHarness();
     when(h.candles.fetch(any(), any(), any(), any(), any())).thenReturn(h.series);
     EmissionGuard guard = mock(EmissionGuard.class);

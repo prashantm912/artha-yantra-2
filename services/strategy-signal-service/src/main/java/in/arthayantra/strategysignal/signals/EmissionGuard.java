@@ -136,7 +136,7 @@ public interface EmissionGuard {
       BigDecimal newStop) {}
 
   /**
-   * Records a CASH EQUITY's latest daily-bar close so book equity can mark the position to market.
+   * Records a CASH EQUITY's session mark so book equity can mark the position to market.
    * IN MEMORY ONLY on the adapter side — never a database write, never a new column, and never read
    * by any exit path (mirrors {@link #cacheManasGoverningStop}'s containment, for the same reason).
    *
@@ -145,9 +145,13 @@ public interface EmissionGuard {
    * are NFO/BFO contracts and not one is an NSE cash-equity symbol. So every swing position marked at
    * its own {@code avgEntryPrice} and contributed exactly ZERO unrealized to book equity, hiding
    * +₹27,213.97 across the two swing books. The swing exit pass already holds the right number — it
-   * settles these positions at {@code bar.close()} precisely because "the equities don't tick" — so
-   * this port captures that same close instead of adding a blocking fetch to a money path that runs
-   * inside a fill transaction and on the thread that drives the 15-second bracket sweep.
+   * settles these positions at an explicit session price precisely because "the equities don't tick"
+   * — so this port captures that same price instead of adding a blocking fetch to a money path that
+   * runs inside a fill transaction and on the thread that drives the 15-second bracket sweep.
+   *
+   * <p>⚠️ {@code close} is the OFFICIAL NSE close since ledger H9, falling back to the daily-bar
+   * close only when the exchange published none. It is the SAME number the exit fills at — one
+   * resolution feeds both — so a mark and a realized fill cannot disagree by the auction delta.
    *
    * <p>Called for every held symbol whose daily series resolved, BEFORE the exit rules are evaluated
    * and independently of their outcome, so the capture cannot vary with an exit decision. Fail-soft

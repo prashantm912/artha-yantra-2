@@ -2,7 +2,11 @@ package in.arthayantra.marketdata.nse;
 
 import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import java.time.LocalDate;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -104,6 +108,119 @@ public class NseEodBhavcopyRepository {
             + CashEquityUniverse.SERIES_PREDICATE,
         rs -> rs.next() ? rs.getObject("d", LocalDate.class) : null,
         java.sql.Date.valueOf(before));
+  }
+
+  /**
+   * The OFFICIAL NSE closing prices for {@code symbols} on one settled {@code date} — at most one
+   * row per symbol. Ledger H9's read seam: the swing settle re-prices its exit FILL against this,
+   * because Kite's daily bar excludes the 15:15–15:30 closing auction (see {@link OfficialClose}).
+   *
+   * <p>⚠️ <b>Scoped to the CASH-EQUITY universe via {@link CashEquityUniverse#SERIES_PREDICATE},
+   * then EQ → BE inside it. Not {@code series = 'EQ'}, and not series-AGNOSTIC either — both are
+   * wrong, in opposite directions.</b>
+   *
+   * <ul>
+   *   <li><b>EQ-only would drop live holdings.</b> Measured 2026-08-25, the swing books hold
+   *       <b>TIRUPATIFL</b> and <b>UNIDT</b> as BE-ONLY names, so an EQ-only filter sends exactly
+   *       those two down the fallback path every night — and it fails in the ALARMING direction, so
+   *       the missing row reads as an outage rather than as a filter artifact (H24; a probe written
+   *       that way once manufactured a "53 symbols have no bar at all" alarm out of nothing).
+   *   <li><b>Series-agnostic would price an exit off a DIFFERENT INSTRUMENT.</b> The first cut of
+   *       this method queried every series and ranked non-cash rows LAST — which ACCEPTS them when
+   *       nothing better exists rather than rejecting them. Measured 2026-08-25: <b>170,950</b>
+   *       {@code (trade_date, symbol)} pairs carry a non-cash series and NO EQ/BE row at all —
+   *       99,565 {@code SM} (SME platform), 27,879 {@code ST}, 14,142 {@code GS} (government
+   *       securities), 13,534 {@code GB}, 9,084 {@code BZ}, and a tail of nine more. Zero of them
+   *       are currently-held swing symbols, so the defect was latent rather than live — but it is
+   *       one holding away from settling a real exit against a government security, and the guard
+   *       is a single predicate that was <em>already written</em>.
+   * </ul>
+   *
+   * <p>⚠️ <b>Use the constant, never a re-spelled literal.</b> {@link CashEquityUniverse} calls
+   * itself "the ONE definition of the cash-equity series predicate" and names the sites that
+   * already follow it ({@code BhavcopyBackfillService:123}, {@code AdjustedEquityDailySql},
+   * {@code TrendTemplateService:81}, {@code ManasScreenService:84}). Re-deriving a weaker rule
+   * beside a canonical constant is the mistake this bullet exists to stop being repeated.
+   *
+   * <p><b>Why the EQ-over-BE precedence is load-bearing rather than a tidy tiebreak.</b> Measured 2026-08-25
+   * over the trailing ~400 days: 497 (trade_date, symbol) pairs carry an EQ row AND a row in some
+   * other series, and <b>327 of those 497 disagree on {@code close_price}</b>. EQ and BE never
+   * collide on the same date (0 pairs) — the collisions are EQ+P1, EQ+T0, EQ+N3 and BE+P1, the
+   * special/trade-for-trade settlement series. So picking the wrong row is a WRONG PRICE, not a
+   * cosmetic choice, and "no rows collide today" would have been a false comfort. The predicate
+   * above already excludes those partners, so the ranking now only ever arbitrates EQ vs BE — but
+   * it stays because the two rules answer different questions and must not be collapsed.
+   *
+   * <p><b>Why the precedence is applied in Java rather than in SQL.</b> The obvious form is
+   * {@code SELECT DISTINCT ON (symbol) … ORDER BY symbol, CASE series WHEN 'EQ' THEN 0 …}. That is
+   * a top-level DISTINCT/ORDER BY on a COMPUTED EXPRESSION over a compressed hypertable — the exact
+   * shape of the TimescaleDB 2.18.2 sorted-merge planner assertion that took all three OI-confluence
+   * dots offline for a session. The bug needs a {@code LIMIT} too, which this query does not have,
+   * so it would probably plan fine — but "probably" is not a reason to write the one shape this repo
+   * has already been burned by, when the alternative is a plain equality scan and a fold over at most
+   * TWO rows per symbol — the cash predicate above admits only {@code EQ} and {@code BE}, and those
+   * two never co-occur on one date (0 pairs measured). The {@code ORDER BY} below is on BARE COLUMNS
+   * only, which is always safe.
+   *
+   * <p>A symbol with no row for the date, or whose only rows carry a NULL {@code close_price}, is
+   * OMITTED rather than returned with a null price — the caller must be able to tell "absent" from
+   * "present and zero", and an omitted symbol is what routes it to the documented fallback.
+   */
+  public List<OfficialClose> officialClosesOn(LocalDate date, Collection<String> symbols) {
+    List<String> distinct =
+        symbols.stream().filter(s -> s != null && !s.isBlank()).distinct().toList();
+    if (distinct.isEmpty()) {
+      return List.of();
+    }
+    String placeholders = String.join(",", Collections.nCopies(distinct.size(), "?"));
+    Object[] args = new Object[distinct.size() + 1];
+    args[0] = java.sql.Date.valueOf(date);
+    for (int i = 0; i < distinct.size(); i++) {
+      args[i + 1] = distinct.get(i);
+    }
+    List<OfficialClose> rows =
+        jdbc.query(
+            "SELECT symbol, trade_date, series, close_price, last_price FROM nse_eod_bhavcopy"
+                + " WHERE trade_date = ? AND "
+                + CashEquityUniverse.SERIES_PREDICATE
+                + " AND close_price IS NOT NULL AND symbol IN ("
+                + placeholders
+                + ") ORDER BY symbol, series",
+            (rs, n) ->
+                new OfficialClose(
+                    rs.getString("symbol"),
+                    rs.getObject("trade_date", LocalDate.class),
+                    rs.getBigDecimal("close_price"),
+                    rs.getBigDecimal("last_price"),
+                    rs.getString("series")),
+            args);
+    Map<String, OfficialClose> best = new LinkedHashMap<>();
+    for (OfficialClose row : rows) {
+      best.merge(
+          row.tradingsymbol(),
+          row,
+          (kept, candidate) ->
+              seriesRank(kept.series()) <= seriesRank(candidate.series()) ? kept : candidate);
+    }
+    return List.copyOf(best.values());
+  }
+
+  /**
+   * EQ before BE — the only arbitration left once {@link CashEquityUniverse#SERIES_PREDICATE} has
+   * already excluded everything else at the SQL level.
+   *
+   * <p>The {@code default} arm is unreachable by construction from {@link #officialClosesOn} and is
+   * kept only because a {@code switch} over a {@code String} needs one. It deliberately ranks LAST
+   * rather than throwing: if the predicate were ever weakened, a loud 500 on a read that feeds a
+   * money path is not obviously better than the caller's own counted, alerted fallback. The
+   * predicate is the guard; this is arithmetic.
+   */
+  private static int seriesRank(String series) {
+    return switch (series) {
+      case "EQ" -> 0;
+      case "BE" -> 1;
+      default -> 2;
+    };
   }
 
   public void upsertAll(List<BhavcopyFetcher.BhavcopyRow> rows) {

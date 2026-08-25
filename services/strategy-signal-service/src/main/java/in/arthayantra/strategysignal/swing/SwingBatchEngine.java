@@ -190,14 +190,58 @@ public class SwingBatchEngine {
    * material for the offline FIFO-vs-RS net-vs-net read ({@code portfolioFifoNet}, which the source spec
    * could only INFER). Computed AFTER the emission passes and fail-soft, so a probe bug can never touch
    * the entries the batch fires.
+   *
+   * <p>{@code openAtStart} is the odd one out and is NOT entry-specific: it is the book size snapshotted
+   * before either pass, so it is measured on an exits-only run too (see {@link #exitsOnly(int)}).
    */
   public record AdmissionProbe(
       int openAtStart, int wouldEnter, int admitted, int capExceedance, boolean capBound,
       List<DroppedCandidate> droppedByCap) {
 
-    /** The degenerate probe for a flag-off / errored run (nothing measured). */
+    /**
+     * The degenerate probe for a run that measured NOTHING — the family flag off, the book disarmed,
+     * the deadline already expired, or no published strategy. Every one of those returns BEFORE the
+     * held-set snapshot, so even {@code openAtStart} is unknown and its zero means "not looked at".
+     *
+     * <p>⚠️ A probe that THREW is deliberately not on that list, though it used to be: by then both
+     * passes have run and {@code heldBefore} is in scope, so the book size IS known — see {@link
+     * #probeFailed(int)}.
+     *
+     * <p>⚠️ <b>An exits-only pass is NOT this</b> (ledger H16). It walks the whole book, so its book
+     * size IS measured — use {@link #exitsOnly(int)}. Reaching for {@code empty()} there is what put
+     * a structurally-zero {@code open_at_start} on every settle row, and once H23 (#1457) gave the
+     * settle its own key that zero stopped being overwritten by the next morning's entries pass and
+     * became the permanent answer to "did the batch see the book?".
+     */
     public static AdmissionProbe empty() {
       return new AdmissionProbe(0, 0, 0, 0, false, List.of());
+    }
+
+    /**
+     * The probe for an EXITS-ONLY pass ({@code SETTLE} / {@code RECOVERY_EXITS}, ledger H16): the
+     * book size the exit pass just walked, and honest zeros for everything else.
+     *
+     * <p>The entry-specific counters are zero because <b>no entry was attempted</b>, not because
+     * nothing was looked at — that is the whole distinction from {@link #empty()}. {@code openAtStart}
+     * is not entry-specific: it is snapshotted before either pass runs and is known on every armed
+     * run, so an exits-only pass must report it rather than claim it measured nothing.
+     */
+    public static AdmissionProbe exitsOnly(int openAtStart) {
+      return new AdmissionProbe(openAtStart, 0, 0, 0, false, List.of());
+    }
+
+    /**
+     * The fail-soft probe for an ENTRIES pass whose measurement THREW: the book size, which was
+     * snapshotted before either pass and so survives the throw, and zeros for the counters the probe
+     * never got to compute.
+     *
+     * <p>Distinct from {@link #exitsOnly(int)} even though the tuple is identical, because the zeros
+     * mean different things — there they mean "no entry was attempted", here they mean "an entry pass
+     * ran and its measurement was lost". Sharing a name would put the same structurally-zero
+     * {@code open_at_start} back on the entries branch that ledger H16 removed from the settle.
+     */
+    public static AdmissionProbe probeFailed(int openAtStart) {
+      return new AdmissionProbe(openAtStart, 0, 0, 0, false, List.of());
     }
   }
 
@@ -437,8 +481,9 @@ public class SwingBatchEngine {
     AnchorResolution resolution = new AnchorResolution(doctrine, swings);
     // Consume the caller-owned funnel snapshot for both the entry pass and the F3 probe. Snapshot the
     // held set BEFORE the entry pass mutates it (the probe partitions would-be entrants into
-    // admitted/dropped by diffing against the held-AFTER set). Entries suppressed → no probe (a
-    // catch-up whose screen is not the session's).
+    // admitted/dropped by diffing against the held-AFTER set). Entries suppressed → no ENTRY probe
+    // (a settle, or a catch-up whose screen is not the session's) — but heldBefore is read on EVERY
+    // armed run and is what the exit pass walks, so the exits-only probe still carries it (H16).
     List<SwingCandidate> candidates =
         entriesEnabled
             ? candidateSnapshot.map(SwingDoctrine.CandidateSnapshot::candidates).orElse(List.of())
@@ -458,7 +503,9 @@ public class SwingBatchEngine {
         entriesEnabled
             ? admissionProbe(
                 doctrine, swings, resolution, seriesCache, candidates, heldBefore, requiredBarDate)
-            : AdmissionProbe.empty();
+            // ⚠️ heldBefore, NOT a re-read here: the exit pass has already closed positions, so a
+            // post-exit count would answer a different question than "how big was the book we walked".
+            : AdmissionProbe.exitsOnly(heldBefore.size());
     log.info(
         "{} swing batch: {} strategies, {} candidates, {} entries, {} exits, {} exit-skipped"
             + " (would-enter {}, admitted {}, cap-exceedance {})",
@@ -843,7 +890,10 @@ public class SwingBatchEngine {
       log.warn(
           "{} swing admission probe failed (measurement-only, ignored): {}",
           doctrine.batchName(), e.getMessage());
-      return AdmissionProbe.empty();
+      // ⚠️ NOT empty() (ledger H16). Both passes have already run and heldBefore is right here, so
+      // the book size is measured — only the funnel walk was lost. empty() here wrote the same
+      // structurally-zero open_at_start on the ENTRIES branch that H16 is about on the settle.
+      return AdmissionProbe.probeFailed(heldBefore.size());
     }
   }
 

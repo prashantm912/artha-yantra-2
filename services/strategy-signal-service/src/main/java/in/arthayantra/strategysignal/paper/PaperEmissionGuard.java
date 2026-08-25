@@ -261,8 +261,9 @@ public class PaperEmissionGuard implements EmissionGuard {
   }
 
   /**
-   * Stores the daily-bar close in the {@link EquityMarkCache} so {@link PaperAccountService#equity}
-   * can mark cash equities to market. No position lookup and no {@code openingSignalId} validation
+   * Stores the session mark — the OFFICIAL NSE close since ledger H9, the daily-bar close only when
+   * the exchange published none — in the {@link EquityMarkCache} so
+   * {@link PaperAccountService#equity} can mark cash equities to market. No position lookup and no {@code openingSignalId} validation
    * here, unlike {@link #cacheManasGoverningStop}: a mark is a property of the SYMBOL, not of a
    * position, so there is no identity to mis-attach it to — every book holding that symbol wants the
    * same number, and a mark for a symbol nobody holds is simply never read (the equity sum iterates

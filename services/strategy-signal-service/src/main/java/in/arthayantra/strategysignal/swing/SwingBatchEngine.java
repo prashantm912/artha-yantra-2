@@ -25,6 +25,8 @@ import in.arthayantra.strategysignal.signals.SignalPublisher;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SwingBatchAlert;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -32,10 +34,13 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -259,6 +264,74 @@ public class SwingBatchEngine {
 
   private record ExitResult(int closed, int skipped, List<String> refusalReasons, boolean deadlineReached) {}
 
+  /**
+   * WHY a held symbol priced off the candle close instead of the official NSE close (ledger H9).
+   *
+   * <p>⚠️ The two are NOT interchangeable and must never share a counter or an alert sentence.
+   * {@link #NOT_PUBLISHED} is a statement about the EXCHANGE FEED — the 18:45 bhavcopy ingest is
+   * the thing to go look at. {@link #STALE_BAR} is a statement about the SYMBOL — it has no daily
+   * bar for the session at all (a halt, or a data gap), and the official close for that session may
+   * well have been published perfectly normally. A page that reported the second as the first would
+   * send an operator to check an ingest that ran fine, which is how a page teaches its reader to
+   * stop believing it.
+   */
+  private enum FallbackReason {
+    NOT_PUBLISHED(
+        "not_published",
+        "no official NSE close published for this session"),
+    STALE_BAR(
+        "stale_bar",
+        "newest daily bar is not the effect session, so the session's official close does not"
+            + " describe the bar being settled");
+
+    private final String tag;
+    private final String description;
+
+    FallbackReason(String tag, String description) {
+      this.tag = tag;
+      this.description = description;
+    }
+  }
+
+  /**
+   * The per-run ledger of symbols that priced off the candle close — WHY each one did, and which
+   * of them went on to become a REAL EXIT FILL rather than only an equity mark.
+   *
+   * <p>⚠️ The distinction cannot be made at resolution time and that is the whole point. The price
+   * is resolved BEFORE the exit rules are evaluated (it has to be — the mark is published for every
+   * held symbol, exiting or not), so a message written there can only honestly describe a MARK. The
+   * exit outcome is stamped in afterwards via {@link #markFilled}, and the aggregate page is written
+   * last, when both facts are known.
+   */
+  private static final class FallbackLedger {
+    private final Map<String, FallbackReason> reasons = new LinkedHashMap<>();
+    private final Set<String> filled = new LinkedHashSet<>();
+
+    void record(String symbol, FallbackReason reason) {
+      reasons.put(symbol, reason);
+    }
+
+    /** Promotes a recorded fallback to a real exit fill; returns its reason, or null if it never fell back. */
+    FallbackReason markFilled(String symbol) {
+      FallbackReason reason = reasons.get(symbol);
+      if (reason != null) {
+        filled.add(symbol);
+      }
+      return reason;
+    }
+
+    boolean isEmpty() {
+      return reasons.isEmpty();
+    }
+
+    List<String> symbolsFor(FallbackReason reason) {
+      return reasons.entrySet().stream()
+          .filter(e -> e.getValue() == reason)
+          .map(Map.Entry::getKey)
+          .toList();
+    }
+  }
+
   private final StrategyRepository registry;
   private final MarketDataCandlesClient candles;
   private final SignalRepository signals;
@@ -271,6 +344,15 @@ public class SwingBatchEngine {
   private final SwingPaperEffectRepository paperEffects;
   private final SwingBatchRefusalRepository refusals;
   private final CoverageGateMode coverageGateMode;
+  /**
+   * The official-NSE-close read (ledger H9). NULLABLE, and a null behaves EXACTLY like a failed
+   * lookup — every exit takes the counted, alerted candle-close fallback. That direction is
+   * deliberate: the seam constructors below leave it null, so a test written against a seam can
+   * only ever prove the DEGRADED path and can never claim the fix works on behaviour the live
+   * stack does not have. Proving the repriced path requires wiring a client explicitly.
+   */
+  private final OfficialCloseClient officialCloses;
+  private final MeterRegistry meters;
 
   /**
    * ABSENT and INVALID are not the same thing, and the first cut of this method conflated them
@@ -317,7 +399,9 @@ public class SwingBatchEngine {
       Clock clock,
       SwingPaperEffectRepository paperEffects,
       SwingBatchRefusalRepository refusals,
-      @Value("${artha.signals.swing-coverage-gate.mode:OBSERVE_ONLY}") String coverageGateMode) {
+      @Value("${artha.signals.swing-coverage-gate.mode:OBSERVE_ONLY}") String coverageGateMode,
+      OfficialCloseClient officialCloses,
+      MeterRegistry meters) {
     this.registry = registry;
     this.candles = candles;
     this.signals = signals;
@@ -330,6 +414,31 @@ public class SwingBatchEngine {
     this.paperEffects = paperEffects;
     this.refusals = refusals;
     this.coverageGateMode = parseGateMode(coverageGateMode);
+    this.officialCloses = officialCloses;
+    this.meters = meters;
+  }
+
+  /**
+   * Ledger + gate-mode seam WITHOUT an official-close client (H9). Leaves the client null, which is
+   * the DEGRADED state — every exit prices off the candle close, counted and paged — so a test
+   * written against this overload can never pass on behaviour the live stack does not have.
+   */
+  public SwingBatchEngine(
+      StrategyRepository registry,
+      MarketDataCandlesClient candles,
+      SignalRepository signals,
+      SignalPublisher publisher,
+      ApplicationEventPublisher events,
+      Optional<EmissionGuard> emissionGuard,
+      TransactionTemplate tx,
+      ObjectMapper objectMapper,
+      Clock clock,
+      SwingPaperEffectRepository paperEffects,
+      SwingBatchRefusalRepository refusals,
+      String coverageGateMode) {
+    this(
+        registry, candles, signals, publisher, events, emissionGuard, tx, objectMapper, clock,
+        paperEffects, refusals, coverageGateMode, null, new SimpleMeterRegistry());
   }
 
   /**
@@ -350,7 +459,7 @@ public class SwingBatchEngine {
       SwingBatchRefusalRepository refusals) {
     this(
         registry, candles, signals, publisher, events, emissionGuard, tx, objectMapper, clock,
-        paperEffects, refusals, CoverageGateMode.OBSERVE_ONLY.name());
+        paperEffects, refusals, CoverageGateMode.OBSERVE_ONLY.name(), null, new SimpleMeterRegistry());
   }
 
   /** Backwards-compatible seam for focused unit tests that do not exercise the V049 ledgers. */
@@ -383,7 +492,7 @@ public class SwingBatchEngine {
       CoverageGateMode coverageGateMode) {
     this(
         registry, candles, signals, publisher, events, emissionGuard, tx, objectMapper, clock,
-        null, null, coverageGateMode.name());
+        null, null, coverageGateMode.name(), null, new SimpleMeterRegistry());
   }
 
   /** Runs one full daily batch for a family: the entry pass over its funnel, then the exit pass. */
@@ -1082,11 +1191,27 @@ public class SwingBatchEngine {
     // and expires every sibling lot. A single-lot symbol is a singleton group — byte-behaviour-
     // identical to the per-anchor loop; a pyramid (add-capable policy) is the only multi-lot source.
     Map<String, List<SignalRepository.SignalRow>> bySymbol = openLotsBySymbol(resolution);
+    // H9 — the OFFICIAL NSE closing prices for this run's held symbols, read ONCE. The exit
+    // DECISION below is byte-untouched (ExitEvaluator still runs on the candle series); only the
+    // FILL is repriced. Kite's daily bar covers the continuous session only and stops at 15:15, so
+    // it misses the 15:15-15:30 closing auction that sets the official close — measured 2026-08-13,
+    // 0 of 22 KITE 1d bars over this book matched nse_eod_bhavcopy.close_price and 22 of 22 were
+    // short on volume. #1418 moved this settle to 18:52, AFTER the 18:45 bhavcopy ingest, which is
+    // what makes a single settle-time read possible at all (the owner's two-phase ruling collapses
+    // into one phase once the settle runs late enough).
+    LocalDate effect = effectSession(requiredBarDate);
+    Map<String, BigDecimal> official =
+        officialCloses == null ? Map.of() : officialCloses.closesOn(EX, effect, bySymbol.keySet());
+    // Symbols priced off the candle close anyway — ONE aggregated, REASON-AWARE page per run,
+    // flushed at every exit from this method (a deadline cut short must still report what it
+    // repriced and what it did not).
+    FallbackLedger fallbacks = new FallbackLedger();
     int closed = 0;
     int skipped = 0;
     List<String> refusalReasons = new ArrayList<>();
     for (Map.Entry<String, List<SignalRepository.SignalRow>> e : bySymbol.entrySet()) {
       if (deadline.expired()) {
+        alertOfficialCloseFallbacks(doctrine, effect, fallbacks);
         return new ExitResult(closed, skipped, refusalReasons, true);
       }
       List<SignalRepository.SignalRow> allLots = e.getValue();
@@ -1137,7 +1262,13 @@ public class SwingBatchEngine {
       // because it sits above the evaluation. Cash equities never appear in the Redis `ticks:last`
       // hash (the WS subscription is the futures/options universe), so without this every swing
       // position marks at its own entry price and contributes ZERO unrealized to equity.
-      cacheEquityMark(primary.tradingsymbol(), series.get(series.size() - 1));
+      EngineCandle lastBar = series.get(series.size() - 1);
+      // ONE resolution per symbol, shared by the mark and the fill. Correcting the fill but not the
+      // mark would leave realized P&L and book equity disagreeing about the same symbol on the same
+      // night by exactly the auction delta, so they must come from one call.
+      BigDecimal fillPrice =
+          resolveFillPrice(doctrine, official, effect, primary.tradingsymbol(), lastBar, fallbacks);
+      cacheEquityMark(primary.tradingsymbol(), lastBar, fillPrice);
       // geometry is irrelevant to the exit rules (percent/ATR stop + trail), so the pivot contexts are
       // seeded neutral (0) — the bank still builds every declared indicator, the exit eval never reads
       // their value.
@@ -1242,6 +1373,7 @@ public class SwingBatchEngine {
           ExitEvaluator.evaluate(strat.definition(), bank, position, series.size() - 1);
       if (exit.isPresent()) {
         if (deadline.expired()) {
+          alertOfficialCloseFallbacks(doctrine, effect, fallbacks);
           return new ExitResult(closed, skipped, refusalReasons, true);
         }
         if (emitExit(
@@ -1249,16 +1381,22 @@ public class SwingBatchEngine {
             strat,
             primary,
             lots,
-            series.get(series.size() - 1),
+            lastBar,
+            fillPrice,
             exit.get(),
-            effectSession(requiredBarDate))) {
+            effect)) {
           closed++;
+          // Only NOW is it true that a fallback price became real money. emitExit can also return
+          // false (the durable effect row refused), in which case nothing was written and this
+          // symbol stays a mark-only fallback.
+          countFallbackFill(doctrine, fallbacks, primary.tradingsymbol());
         }
       } else {
         cacheGoverningStop(
             doctrine, primary, strat.definition(), bank, position, series.size() - 1, entryIndex);
       }
     }
+    alertOfficialCloseFallbacks(doctrine, effect, fallbacks);
     return new ExitResult(closed, skipped, refusalReasons, false);
   }
 
@@ -1311,8 +1449,198 @@ public class SwingBatchEngine {
   }
 
   /**
-   * Publishes a held cash equity's latest daily close through the {@code EmissionGuard} port so
-   * {@code PaperAccountService} can mark the position to market. Pure accounting, exactly like
+   * The price this symbol's exit FILLS at, and the price it MARKS at — the OFFICIAL NSE close when
+   * the exchange has published one for the effect session, else the candle close (ledger H9).
+   *
+   * <p><b>This does not touch the exit DECISION.</b> {@link ExitEvaluator#evaluate} still runs on the
+   * candle series, against stop and trail levels computed from candle bars, exactly as before. That
+   * split is the owner's 2026-08-14 ruling: "the exit DECISION stays off the Kite bar (unchanged exit
+   * doctrine), the FILL is re-priced to NSE close_price". A stop that fires on the candle close still
+   * fires when the official close sits above the stop level — it just fills at the official close.
+   *
+   * <p><b>Fallback doctrine — never refuse, never silent.</b> An absent official close prices at the
+   * candle close, counts, logs ERROR naming the symbol and session, and joins ONE aggregated page for
+   * the run. This is the #694 settle shape: entries need fresh truth (you can always NOT enter),
+   * exits need the best available truth (you cannot refuse to leave forever), so stale-or-missing is
+   * COUNTED and ALERTED, never refused. On the measured worst case — NSE publishing at 19:31 on 1 of
+   * 4 measured nights — every exit that night falls back, which is bounded, paged, and exactly the
+   * behaviour that preceded H9.
+   *
+   * <p><b>Three counters, each meaning exactly one thing.</b>
+   *
+   * <ul>
+   *   <li>{@code ay_swing_exit_official_close_resolved_total{batch}} — resolutions that used the
+   *       official close. Not decoration: a fallback counter ALONE cannot tell "0 fallbacks because
+   *       everything resolved" from "0 fallbacks because the exit pass never ran", the
+   *       structurally-zero-operand trap. The RATIO is the readable signal.
+   *   <li>{@code ay_swing_exit_official_close_fallback_total{batch, reason}} — resolutions that used
+   *       the candle close, split by {@link FallbackReason}. The two reasons point at different
+   *       systems (the ingest vs the symbol), so folding them into one number would make the metric
+   *       unable to answer the only question anyone asks it.
+   *   <li>{@code ay_swing_exit_official_close_fallback_fill_total{batch, reason}} — the SUBSET of
+   *       those that became a real EXIT FILL. Everything else moved only the equity mark.
+   * </ul>
+   *
+   * <p>⚠️ The fill counter is a strict subset and is stamped LATER, from {@link #countFallbackFill},
+   * because the exit decision has not been made yet at this point in the pass. Reading the fallback
+   * total as "wrong fills" over-states the money impact — most fallbacks on a quiet night are marks.
+   *
+   * <p>A bar whose own IST session is not the effect session (a halted symbol, or an unpinned run
+   * whose newest bar is stale) takes the fallback outright rather than a second per-date lookup: the
+   * official close for a session the position is not being settled against is the wrong number, and
+   * fetching it would only make the wrong number look authoritative. Note this case is NOT evidence
+   * that the ingest failed — the session's official close may exist and simply not describe this
+   * symbol's bar.
+   */
+  private BigDecimal resolveFillPrice(
+      SwingDoctrine doctrine,
+      Map<String, BigDecimal> official,
+      LocalDate effect,
+      String symbol,
+      EngineCandle bar,
+      FallbackLedger fallbacks) {
+    LocalDate barDate = bar.bucketStart().withOffsetSameInstant(IST).toLocalDate();
+    boolean onSession = barDate.equals(effect);
+    BigDecimal resolved = onSession ? official.get(symbol) : null;
+    if (resolved != null) {
+      meters
+          .counter("ay_swing_exit_official_close_resolved_total", "batch", doctrine.batchName())
+          .increment();
+      return resolved;
+    }
+    FallbackReason reason = onSession ? FallbackReason.NOT_PUBLISHED : FallbackReason.STALE_BAR;
+    meters
+        .counter(
+            "ay_swing_exit_official_close_fallback_total",
+            "batch", doctrine.batchName(),
+            "reason", reason.tag)
+        .increment();
+    fallbacks.record(symbol, reason);
+    // ⚠️ This line is written BEFORE the exit rules run, so it may NOT claim a fill. At this moment
+    // the only thing that is certainly true is that the equity MARK is on the candle plane; whether
+    // this also becomes an exit fill is decided further down and reported by the run's aggregate.
+    log.error(
+        "{} swing exit: {} priced off the CANDLE close for {} — {}{} — the candle close excludes the"
+            + " 15:15-15:30 closing auction. This is the equity MARK; it becomes the exit FILL only if"
+            + " this position exits this run (the run's aggregate page says which did)",
+        doctrine.batchName(), symbol, effect, reason.description,
+        onSession ? "" : " (bar dated " + barDate + ")");
+    return bar.close();
+  }
+
+  /**
+   * Stamps a fallback that has just become a REAL EXIT FILL, on its own counter, keeping the reason
+   * tag. Called only after {@link #emitExit} has returned true — i.e. after the durable effect row,
+   * the signals row, the publisher fan-out and the {@code SignalExited} event have all been written
+   * at the candle price. A symbol that fell back but never exited is deliberately NOT counted here:
+   * it moved the equity mark and nothing else.
+   */
+  private void countFallbackFill(SwingDoctrine doctrine, FallbackLedger fallbacks, String symbol) {
+    FallbackReason reason = fallbacks.markFilled(symbol);
+    if (reason == null) {
+      return; // this symbol priced at the official close — the ordinary, correct path
+    }
+    meters
+        .counter(
+            "ay_swing_exit_official_close_fallback_fill_total",
+            "batch", doctrine.batchName(),
+            "reason", reason.tag)
+        .increment();
+  }
+
+  /**
+   * ONE aggregated, REASON-AWARE ops page per run for every symbol that priced off the candle close
+   * (owner ruling: aggregated, no threshold). Per-symbol pages were considered and rejected — the
+   * measured worst case is that NSE has not published yet and EVERY held symbol falls back at once,
+   * which as per-symbol pages would be a burst nobody reads.
+   *
+   * <p>⚠️ <b>The page states what actually happened, not what usually happens.</b> Two earlier
+   * shapes of this message were wrong in the same way and it is worth naming both, because a page
+   * that misattributes a cause trains its reader to distrust every page:
+   *
+   * <ul>
+   *   <li>It said "the exits still settled" for symbols that <b>never exited</b>. Resolution runs
+   *       before the exit decision, so most fallbacks on an ordinary night move only the equity mark.
+   *       The counts below separate the two.
+   *   <li>It told the operator to "check whether the 18:45 bhavcopy ingest ran" for a
+   *       {@link FallbackReason#STALE_BAR} symbol, where the ingest is very likely fine and the
+   *       problem is a halt or a gap on that SYMBOL. That advice is now attached ONLY to the
+   *       {@link FallbackReason#NOT_PUBLISHED} group.
+   * </ul>
+   *
+   * <p>Fail-soft, like every other alert on this path: this batch is a swing position's only exit
+   * evaluator, so an alerting failure must never propagate.
+   */
+  private void alertOfficialCloseFallbacks(
+      SwingDoctrine doctrine, LocalDate sessionDate, FallbackLedger fallbacks) {
+    if (fallbacks.isEmpty()) {
+      return;
+    }
+    try {
+      int total = fallbacks.reasons.size();
+      int fills = fallbacks.filled.size();
+      StringBuilder message = new StringBuilder();
+      message
+          .append(sessionDate)
+          .append(": ")
+          .append(total)
+          .append(" held symbol(s) priced off the Kite daily bar, which excludes the 15:15-15:30")
+          .append(" closing auction. ")
+          .append(fills)
+          .append(" of these became a REAL EXIT FILL")
+          .append(
+              fills == 0
+                  ? " — the rest moved the equity MARK only (no position exited on a fallback price)."
+                  : "; the other " + (total - fills) + " moved the equity MARK only.");
+      for (FallbackReason reason : FallbackReason.values()) {
+        List<String> symbols = fallbacks.symbolsFor(reason);
+        if (symbols.isEmpty()) {
+          continue;
+        }
+        message
+            .append("\n  - ")
+            .append(reason.description)
+            .append(" (")
+            .append(symbols.size())
+            .append("): ")
+            .append(String.join(", ", symbols))
+            .append(
+                reason == FallbackReason.NOT_PUBLISHED
+                    ? " — check whether the 18:45 bhavcopy ingest ran for " + sessionDate + "."
+                    : " — this is a halt or a data gap on the SYMBOL; the bhavcopy ingest for "
+                        + sessionDate
+                        + " may well have run normally, so do not read this as an ingest failure.");
+      }
+      if (fills > 0) {
+        message.append(
+            "\nThe exits that fired still settled (an exit may never refuse); only their FILL"
+                + " plane is wrong.");
+      }
+      // ⚠️ The TITLE is branched, not just the body. Notification clients commonly surface the
+      // title on its own — a lock screen, a list row, a push preview — so a title that claims an
+      // exit is read by an operator who may never open the body that corrects it. The mark-only
+      // path (proven to exist by SwingExitOfficialCloseTest) settles NOTHING: no signals row, no
+      // SignalExited, no money. Its title must not contain a claim the body then has to walk back.
+      // This is the same defect as the one fixed one level down in the message text; the title is
+      // simply the copy of it that reaches the most eyes.
+      String title =
+          doctrine.alertLabel()
+              + (fills > 0
+                  ? " official-close fallback - EXIT FILLED off the candle close"
+                  : " official-close fallback - equity MARK only, no exit");
+      events.publishEvent(new SwingBatchAlert(doctrine.batchName(), title, message.toString()));
+    } catch (RuntimeException e) {
+      log.warn("{} swing official-close fallback alert failed: {}", doctrine.batchName(), e.getMessage());
+    }
+  }
+
+  /**
+   * Publishes a held cash equity's session mark through the {@code EmissionGuard} port so
+   * {@code PaperAccountService} can mark the position to market. ⚠️ Since H9 that is
+   * {@code markPrice} — the OFFICIAL NSE close when one was published, else the candle close —
+   * NOT {@code bar.close()}. It is the SAME number {@link #emitExit} fills at, resolved once by
+   * {@link #resolveFillPrice}, because a mark and a realized fill that disagree about one symbol
+   * on one night by the auction delta would make book equity and realized P&L irreconcilable. Pure accounting, exactly like
    * {@link #cacheGoverningStop}: nothing here closes a position, changes an exit decision, or writes
    * to the database — the adapter holds it in memory only, and no exit path reads it.
    *
@@ -1320,8 +1648,8 @@ public class SwingBatchEngine {
    * ONLY daily exit evaluator, so an accounting failure must never propagate and cost a LATER
    * position its stop evaluation this run.
    */
-  private void cacheEquityMark(String tradingsymbol, EngineCandle bar) {
-    if (emissionGuard.isEmpty() || bar == null) {
+  private void cacheEquityMark(String tradingsymbol, EngineCandle bar, BigDecimal markPrice) {
+    if (emissionGuard.isEmpty() || bar == null || markPrice == null) {
       return;
     }
     try {
@@ -1330,7 +1658,7 @@ public class SwingBatchEngine {
           .cacheEquityMark(
               EX,
               tradingsymbol,
-              bar.close(),
+              markPrice,
               // IST, never the raw offset: daily buckets arrive as 18:30+00, so a bare toLocalDate()
               // yields the PREVIOUS calendar day and the mark would claim a session it is not from.
               bar.bucketStart().withOffsetSameInstant(IST).toLocalDate());
@@ -1509,12 +1837,29 @@ public class SwingBatchEngine {
     return List.of();
   }
 
+  /**
+   * Persists and fans out one exit at {@code fillPrice} — the OFFICIAL NSE close when the exchange
+   * published one for this session, else the candle close (ledger H9, resolved by
+   * {@link #resolveFillPrice}).
+   *
+   * <p>⚠️ {@code fillPrice} replaces {@code bar.close()} at ALL FOUR money surfaces and nowhere
+   * else: the durable {@code swing_paper_effects} decision row (which the crash-retry path
+   * REPLAYS, so a candle price left here would silently re-price the retry onto the wrong plane),
+   * the {@code signals} row, the publisher fan-out, and the {@link SignalExited} event the paper
+   * module settles on. {@code bar} is still the argument for the exit's TIMESTAMP — the session it
+   * belongs to has not changed, only the plane its price came from.
+   *
+   * <p>⚠️ This method does not decide anything. Whether an exit happens at all was settled by
+   * {@link ExitEvaluator#evaluate} on the candle series before this was called, and repricing the
+   * fill must never be allowed to leak backwards into that.
+   */
   private boolean emitExit(
       SwingDoctrine doctrine,
       SwingStrategy strat,
       SignalRepository.SignalRow primary,
       List<SignalRepository.SignalRow> lots,
       EngineCandle bar,
+      BigDecimal fillPrice,
       ExitEvaluator.ExitDecision exit,
       LocalDate effectSession) {
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(IST);
@@ -1543,13 +1888,13 @@ public class SwingBatchEngine {
                       effectSession,
                       primary.id(),
                       reason,
-                      bar.close(),
+                      fillPrice,
                       targetPositionIds)) {
                 return -1L;
               }
               long newId =
                   signals.insert(
-                      strat.versionId(), EX, primary.tradingsymbol(), IV, "EXIT", "SELL", bar.close(),
+                      strat.versionId(), EX, primary.tradingsymbol(), IV, "EXIT", "SELL", fillPrice,
                       null, null, primary.compositeScore(), primary.scoreBreakdown().toString(),
                       generatedAt, generatedAt.plusMinutes(doctrine.ttlMinutes()), reason);
               // A pyramided position closes ALL lots at once (§3.5.D): expire every lot of the symbol
@@ -1568,18 +1913,20 @@ public class SwingBatchEngine {
     }
     publisher.publish(
         id, strat.versionId(), strat.name(), strat.slug(), strat.version(), strat.checksum(),
-        doctrine.book(), EX, primary.tradingsymbol(), IV, "EXIT", "SELL", bar.close(), null, null,
+        doctrine.book(), EX, primary.tradingsymbol(), IV, "EXIT", "SELL", fillPrice, null, null,
         primary.compositeScore(), primary.scoreBreakdown(), generatedAt);
-    // Settle the paper position at the fresh DAILY-BAR close — the equities don't tick, so an LTP
-    // close would book breakeven. Fire a close for EACH lot's linked signal so the shared averaged
-    // position closes regardless of which lot's order opened it (closeForSignal is a CAS: first wins,
-    // the rest no-op). A single-lot symbol fires exactly one.
+    // Settle the paper position at the resolved SESSION FILL PRICE — the OFFICIAL NSE close since
+    // H9, the daily-bar close only when the exchange published nothing. An explicit price is
+    // required either way because the equities don't tick, so an LTP close would book breakeven.
+    // Fire a close for EACH lot's linked signal so the shared averaged position closes regardless
+    // of which lot's order opened it (closeForSignal is a CAS: first wins, the rest no-op). A
+    // single-lot symbol fires exactly one.
     for (SignalRepository.SignalRow lot : lots) {
-      events.publishEvent(new SignalExited(lot.id(), id, reason, bar.close()));
+      events.publishEvent(new SignalExited(lot.id(), id, reason, fillPrice));
     }
     log.info(
         "{} swing EXIT #{} {} {} at {} ({}{})",
-        doctrine.batchName(), id, strat.slug(), primary.tradingsymbol(), bar.close(), reason,
+        doctrine.batchName(), id, strat.slug(), primary.tradingsymbol(), fillPrice, reason,
         lots.size() > 1 ? " — " + lots.size() + " lots" : "");
     return true;
   }

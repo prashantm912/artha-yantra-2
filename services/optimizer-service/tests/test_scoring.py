@@ -543,8 +543,20 @@ _WINDOW_FROM = "2026-06-01T00:00:00+05:30"
 _WINDOW_TO = "2026-06-29T00:00:00+05:30"
 
 
-def _recon(gap_z, verdict, *, mode="swing", floor=True, paired=25, diagnosis=None) -> dict:
+def _recon(
+    gap_z, verdict, *, mode="swing", floor=True, paired=25, diagnosis=None, cross_basis=False
+) -> dict:
     """A reconciliation row in the repo read-envelope shape — only the fields scoring reads."""
+    gap: dict = {"mode": mode}
+    if cross_basis:
+        # The ledger-H9 stamp, exactly as reconciliation._compute_and_persist writes it.
+        gap["crossBasis"] = {
+            "fenced": True,
+            "reason": "cross-basis: live fills at the official NSE close (bhavcopy close_price), "
+                      "replay fills at the candle close",
+            "liveFillBasis": "official_nse_close",
+            "replayFillBasis": "candle_close",
+        }
     return {
         "id": f"recon-{verdict}",
         "verdict": verdict,
@@ -553,9 +565,47 @@ def _recon(gap_z, verdict, *, mode="swing", floor=True, paired=25, diagnosis=Non
         "evidenceFloorMet": floor,
         "windowFrom": _WINDOW_FROM,
         "windowTo": _WINDOW_TO,
-        "gap": {"mode": mode},
+        "gap": gap,
         "diagnosis": diagnosis,
     }
+
+
+def test_cross_basis_fence_is_read_from_the_machine_readable_twin_not_the_caveat_text():
+    assert scoring.cross_basis_fence(_recon(-6.0, "INSUFFICIENT", cross_basis=True)) is not None
+    # An ORDINARY insufficient — thin evidence, not a fence. These are DIFFERENT operator states.
+    assert scoring.cross_basis_fence(_recon(None, "INSUFFICIENT")) is None
+    assert scoring.cross_basis_fence(_recon(0.0, "ALIGNED", mode="scalper")) is None
+    assert scoring.cross_basis_fence(None) is None
+    assert scoring.cross_basis_fence({"gap": {"crossBasis": {"fenced": False}}}) is None
+
+
+def test_a_fenced_verdict_names_the_reason_on_every_operator_surface():
+    # ⚠️ The fence must never read as a silent skip. An operator seeing INSUFFICIENT with no reason
+    # concludes "not enough live evidence yet" and waits — but no amount of waiting clears a
+    # fill-basis
+    # mismatch. All three surfaces must say so.
+    recon = _recon(-6.0, "INSUFFICIENT", cross_basis=True)
+
+    gate = scoring._live_gap_gate(recon)
+    assert gate["status"] == "SKIPPED"
+    assert "FENCED" in gate["note"] and "cross-basis" in gate["note"]
+
+    card = scoring._live_gap_card(recon)
+    assert card["crossBasis"]["fenced"] is True
+    assert card["counted"] is False
+
+    caveats = scoring._live_caveats({"reconciliation": recon}, cohort_has_live=False)
+    assert len(caveats) == 1
+    assert "fenced" in caveats[0] and "NOT thin" in caveats[0]
+
+
+def test_an_ordinary_insufficient_still_reads_as_thin_evidence_not_as_a_fence():
+    # The control for the test above: without the stamp, nothing may claim a fence.
+    recon = _recon(None, "INSUFFICIENT")
+    assert "FENCED" not in scoring._live_gap_gate(recon)["note"]
+    assert "crossBasis" not in scoring._live_gap_card(recon)
+    caveats = scoring._live_caveats({"reconciliation": recon}, cohort_has_live=True)
+    assert caveats and "z drops out" in caveats[0] and "fenced" not in caveats[0]
 
 
 def _live_gap(card) -> dict:

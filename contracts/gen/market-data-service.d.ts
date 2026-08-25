@@ -1940,6 +1940,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/eod-close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["eodClose"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/eod-backfill/status": {
         parameters: {
             query?: never;
@@ -4585,6 +4601,17 @@ export interface components {
             from: string;
             to: string;
             symbol: string;
+        };
+        OfficialClose: {
+            tradingsymbol: string;
+            /** Format: date */
+            tradeDate: string;
+            closePrice: string;
+            lastPrice: string | null;
+            series: string;
+        };
+        OfficialCloseResponse: {
+            items: components["schemas"]["OfficialClose"][];
         };
         BhavcopyBackfillStatus: {
             jobId: string | null;
@@ -9575,6 +9602,39 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["AnnouncementsResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    eodClose: {
+        parameters: {
+            query: {
+                exchange: string;
+                date: string;
+                symbols: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["OfficialCloseResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

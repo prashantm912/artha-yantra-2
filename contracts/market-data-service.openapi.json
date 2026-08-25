@@ -6088,6 +6088,60 @@
         }
       }
     },
+    "/api/v1/market/eod-close" : {
+      "get" : {
+        "tags" : [ "official-close-controller" ],
+        "operationId" : "eodClose",
+        "parameters" : [ {
+          "name" : "exchange",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "symbols",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OfficialCloseResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/eod-backfill/status" : {
       "get" : {
         "tags" : [ "eod-backfill-controller" ],
@@ -13379,6 +13433,40 @@
           }
         },
         "required" : [ "from", "items", "symbol", "to" ]
+      },
+      "OfficialClose" : {
+        "type" : "object",
+        "properties" : {
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "closePrice" : {
+            "type" : "string"
+          },
+          "lastPrice" : {
+            "type" : [ "string", "null" ]
+          },
+          "series" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "closePrice", "lastPrice", "series", "tradeDate", "tradingsymbol" ]
+      },
+      "OfficialCloseResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OfficialClose"
+            }
+          }
+        },
+        "required" : [ "items" ]
       },
       "BhavcopyBackfillStatus" : {
         "type" : "object",

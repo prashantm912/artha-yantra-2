@@ -1375,7 +1375,7 @@ public class PaperService {
 
   /**
    * Audit V3 / research-fidelity P1-6: NO breakeven fabrication. The exit reference is an explicit
-   * price (manual close, swing daily-close, expiry intrinsic/spot) or the last known REAL tick at
+   * price (manual close, the swing session settle price, expiry intrinsic/spot) or the last known REAL tick at
    * ANY age — NEVER {@code avgEntryPrice}, which booked a fictional 0-P&amp;L exit for a leg that
    * never ticked. The freshness asymmetry with {@code openOrder} is deliberate: <b>entries need
    * fresh truth (you can always NOT enter), exits need the best available truth (you cannot refuse
@@ -1742,9 +1742,10 @@ public class PaperService {
 
   /**
    * Closes every OPEN position linked to a signal at an EXPLICIT settlement price ({@code null} → the
-   * live-LTP fallback in {@code doSettle}). The Phase-9 Minervini swing batch passes the fresh
-   * daily-bar close: its equities do not tick, so the LTP fallback would otherwise settle every swing
-   * close at the entry price (breakeven) and lose the real daily-close exit.
+   * live-LTP fallback in {@code doSettle}). The swing batch passes the session settle price — the
+   * OFFICIAL NSE close since ledger H9, its daily-bar close only when the exchange published none:
+   * its equities do not tick, so the LTP fallback would otherwise settle every swing close at the
+   * entry price (breakeven) and lose the real session exit.
    */
   @Transactional
   public int closeForSignal(long signalId, String closeReason, BigDecimal price) {

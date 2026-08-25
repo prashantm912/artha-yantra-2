@@ -606,6 +606,8 @@ services:
       # Total-response timeout (ms) for the eval-loop candle warm-up fetch — a slow market-data must
       # fail fast, never park signal generation (2026-07-14 incident). Default 10s.
       ARTHA_MARKETDATA_CANDLES_FETCH_TIMEOUT_MS: ${ARTHA_MARKETDATA_CANDLES_FETCH_TIMEOUT_MS:-10000}
+      # H9: total-response timeout (ms) for the swing settle's official-NSE-close read. Default 5s.
+      ARTHA_MARKETDATA_EOD_CLOSE_TIMEOUT_MS: ${ARTHA_MARKETDATA_EOD_CLOSE_TIMEOUT_MS:-5000}
       # Subscriber watchdog knobs (retro-fitted from @Value defaults; #653).
       ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_ENABLED: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_ENABLED:-true}
       ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_BAR_GAP_MS: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_BAR_GAP_MS:-180000}

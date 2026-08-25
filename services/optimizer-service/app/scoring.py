@@ -441,6 +441,24 @@ def _is_scalper_whitelisted(recon: dict[str, Any]) -> bool:
     return isinstance(gap, dict) and gap.get("mode") == "scalper"
 
 
+def cross_basis_fence(recon: Any) -> dict[str, Any] | None:
+    """The ledger-H9 cross-basis fence stamped on a reconciliation's gap vector, or None.
+
+    Public because ``proposals`` reads it too, and because both consumers must agree on what a
+    fenced row looks like. Reads the machine-readable ``gap.crossBasis`` twin rather than
+    string-matching the caveat text: a FENCED INSUFFICIENT ("we deliberately withheld this verdict
+    because the two sides price fills differently") and an ORDINARY INSUFFICIENT ("we have not
+    lived enough of this yet") are different facts, and an operator who cannot tell them apart will
+    read the first as the second and wait for evidence that is never coming."""
+    if not isinstance(recon, dict):
+        return None
+    gap = recon.get("gap")
+    if not isinstance(gap, dict):
+        return None
+    fence = gap.get("crossBasis")
+    return fence if isinstance(fence, dict) and fence.get("fenced") else None
+
+
 def _component_z(
     subsignals: list[tuple[str, list[float | None]]], n: int
 ) -> tuple[list[float], list[dict[str, Any]]]:
@@ -636,6 +654,11 @@ def _live_gap_gate(recon: Any) -> dict[str, Any]:
     if verdict in ("ALIGNED", "PENALIZED"):
         return {"id": "live_gap", "status": PASS, "value": gap_z,
                 "note": f"§7.2 {verdict} — gapZ={gap_z} > −1.5 (not divergent)"}
+    fence = cross_basis_fence(recon)
+    if fence is not None:
+        return {"id": "live_gap", "status": SKIPPED, "value": gap_z,
+                "note": f"§7.2 INSUFFICIENT — FENCED (ledger H9): {fence.get('reason')}; "
+                        "not gate-eligible while the two sides price fills differently"}
     # INSUFFICIENT (or, defensively, a verdict outside the V012 CHECK set): not gate-eligible.
     return {"id": "live_gap", "status": SKIPPED, "value": gap_z,
             "note": "§7.2 INSUFFICIENT — no live evidence, no fold-return σ, or the evidence floor "
@@ -773,6 +796,17 @@ def _live_caveats(cand: dict[str, Any], cohort_has_live: bool) -> list[str]:
     yet" component caveat already covers the whole sim-only cohort, and adding a per-candidate note
     would be redundant noise."""
     recon = cand.get("reconciliation")
+    # H9 fence first: it is NOT conditional on ``cohort_has_live``, unlike the ordinary
+    # no-evidence-yet note below. That note is suppressed for a sim-only cohort because it would be
+    # redundant noise; this one never is -- the verdict was deliberately withheld, and a silent skip
+    # is exactly what the fence must not become.
+    fence = cross_basis_fence(recon)
+    if fence is not None:
+        return [
+            "live_gap: reconciliation fenced to INSUFFICIENT (ledger H9) - "
+            f"{fence.get('reason')} - z drops out (0); this is a deliberate withholding, NOT thin "
+            "evidence, and more lived weeks will not resolve it"
+        ]
     if isinstance(recon, dict) and _is_scalper_whitelisted(recon):
         return [
             "live_alignment: scalper raw backtest-vs-live is §7.2-whitelisted (structural "
@@ -818,6 +852,11 @@ def _live_gap_card(recon: Any) -> dict[str, Any] | None:
         "mode": gap.get("mode"),
         "reconciliationId": recon.get("id"),
     }
+    # H9: an INSUFFICIENT that was FENCED, not merely thin. Surfaced on the card so the operator
+    # tile says why, instead of showing a verdict that looks like missing data.
+    fence = cross_basis_fence(recon)
+    if fence is not None:
+        card["crossBasis"] = fence
     # The §7.2.1-5 checklist attaches only when the DIVERGENT actually hard-gates (a whitelisted
     # scalper is SKIPPED, not failed — its structural divergence is not promotion-blocking).
     if (recon.get("verdict") == "DIVERGENT" and not _is_scalper_whitelisted(recon)

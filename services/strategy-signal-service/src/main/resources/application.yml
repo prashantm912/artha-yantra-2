@@ -42,6 +42,10 @@ artha:
     # Total-response timeout (ms) for the eval-loop candle warm-up fetch — a slow market-data must
     # fail fast so it can never park signal generation for the session (2026-07-14 incident).
     candles-fetch-timeout-ms: ${ARTHA_MARKETDATA_CANDLES_FETCH_TIMEOUT_MS:10000}
+    # H9: total-response timeout (ms) for the swing settle's official-NSE-close read. Shorter than
+    # the candle bound because the settle races a run deadline and its failure mode is BENIGN — an
+    # empty answer routes every exit to the counted, alerted candle-close fallback, never a refusal.
+    eod-close-timeout-ms: ${ARTHA_MARKETDATA_EOD_CLOSE_TIMEOUT_MS:5000}
   openalgo:
     # §18.1 order-READ surface (orderbook/positions/tradebook/funds). Default OFF — the
     # DisabledOrderGateway then returns empty lists + a NOT_CONFIGURED funds row, so a mock or

@@ -285,9 +285,15 @@ def test_dispatch_caveats_swing_has_no_fill_timing_degradation():
     # the exit-TRIGGER axis (sim exit_intrabar vs live daily-close eval — review F1). Scalper stays
     # STRUCTURAL.
     swing = _dispatch_caveats("swing")
-    assert len(swing) == 1 and "exit-TRIGGER" in swing[0]
+    # Ledger H9 added the cross-basis fence AHEAD of the residual, so swing now carries two.
+    assert len(swing) == 2
+    assert "cross-basis" in swing[0] and "official NSE close" in swing[0]
+    assert "exit-TRIGGER" in swing[1]
     assert not any("NEXT_OPEN" in c or "could NOT be pinned" in c for c in swing)
-    assert any("STRUCTURAL" in c for c in _dispatch_caveats("scalper"))
+    # SCALPER IS UNTOUCHED BY H9 -- one entry, still the structural note, no fence.
+    scalper = _dispatch_caveats("scalper")
+    assert len(scalper) == 1 and "STRUCTURAL" in scalper[0]
+    assert not any("cross-basis" in c for c in scalper)
 
 
 # ================================================================================================
@@ -383,8 +389,11 @@ def _swing_live_version(
 # ================================================================================================
 
 
-def test_reconcile_champion_vs_itself_is_aligned():
-    # live return == sim return (10%) over a 30-day window → returnGap 0 → gapZ 0 → ALIGNED.
+def test_reconcile_swing_champion_vs_itself_is_fenced_though_the_gap_is_still_computed():
+    # PRE-H9 this asserted ALIGNED. The fence withholds the VERDICT, and deliberately withholds
+    # nothing else: every gap-vector number below is still computed and persisted exactly as before,
+    # so the §7.2 arithmetic stays covered end-to-end and the fence can be lifted by changing one
+    # boolean. live return == sim return (10%) over a 30-day window → returnGap 0 → gapZ 0.
     live_trades = [_live("RELIANCE", "2026-06-01T15:20:00+05:30", 100.0, pnl=50_000.0),
                    _live("TCS", "2026-06-02T15:20:00+05:30", 200.0, pnl=50_000.0)]
     sim_trades = [_sim("RELIANCE", "2026-06-01T09:15:00+05:30", 100.0),
@@ -399,7 +408,11 @@ def test_reconcile_champion_vs_itself_is_aligned():
     assert receipt["liveTrades"] == 2
     _wait(lambda: len(repo.rows) == 1)
     row = repo.rows[0]
-    assert row["verdict"] == "ALIGNED"
+    assert row["verdict"] == "INSUFFICIENT"                     # fenced, not thin (H9)
+    assert row["gap"]["crossBasis"]["fenced"] is True
+    assert row["gap"]["crossBasis"]["liveFillBasis"] == "official_nse_close"
+    assert row["gap"]["crossBasis"]["replayFillBasis"] == "candle_close"
+    assert any("cross-basis" in c for c in row["gap"]["caveats"])
     assert row["gapZ"] == pytest.approx(0.0)
     assert row["gap"]["returnGap"] == pytest.approx(0.0)        # annualized 0 too
     assert row["gap"]["tradeSetOverlap"] == pytest.approx(1.0)
@@ -417,8 +430,12 @@ def test_reconcile_champion_vs_itself_is_aligned():
 
 def test_reconcile_divergent_explicit_universe_keeps_upstream_note():
     # EXPLICIT universe: live 0% vs sim 10% over 30 days (== the 30d fold base → scale 1) →
-    # gapZ = −10/σ ≈ −6.1 ≤ −1.5; window ≥ 4 weeks → floor met → DIVERGENT. Disjoint trade sets →
-    # LOW overlap → the legit upstream-divergence signal (screener/CA/feed) stays on the checklist.
+    # gapZ = −10/σ ≈ −6.1 ≤ −1.5; window ≥ 4 weeks → floor met. PRE-H9 that was DIVERGENT; the swing
+    # fence now withholds it, which is the whole point — a −6.1 gapZ built from two different fill
+    # bases is not evidence of anything. gapZ and the evidence floor are still computed and
+    # asserted. The DIVERGENT diagnosis checklist (UPSTREAM vs STRUCTURAL) keeps its coverage
+    # at the unit level
+    # in test_diagnosis_flags_low_overlap_and_status / _single_pick_suppresses_upstream_inference.
     live_trades = [_live("ALPHA", "2026-06-01T15:20:00+05:30", 100.0, pnl=0.0),
                    _live("BETA", "2026-06-02T15:20:00+05:30", 100.0, pnl=0.0)]
     sim_trades = [_sim("GAMMA", "2026-06-10T09:15:00+05:30", 100.0)]
@@ -430,15 +447,12 @@ def test_reconcile_divergent_explicit_universe_keeps_upstream_note():
     svc.create({"versionId": _VERSION, "from": "2026-06-01", "to": "2026-07-01"})
     _wait(lambda: len(repo.rows) == 1)
     row = repo.rows[0]
-    assert row["verdict"] == "DIVERGENT"
-    assert row["gapZ"] == pytest.approx(-10.0 / _SIGMA)
+    assert row["verdict"] == "INSUFFICIENT"                    # fenced (H9), was DIVERGENT
+    assert row["gap"]["crossBasis"]["fenced"] is True
+    assert row["gapZ"] == pytest.approx(-10.0 / _SIGMA)        # the arithmetic is unchanged
     assert row["evidenceFloorMet"] is True
-    assert row["diagnosis"] is not None
-    overlap_item = next(
-        i for i in row["diagnosis"]["checklist"] if i["id"] == "trade_set_overlap"
-    )
-    assert overlap_item["value"] == 0.0                        # disjoint trade sets
-    assert "UPSTREAM" in overlap_item["note"]
+    # No diagnosis: the checklist is built for DIVERGENT only, which swing can no longer reach.
+    assert row["diagnosis"] is None
 
 
 def test_reconcile_divergent_funnel_mode_replaces_upstream_with_structural_note():
@@ -455,15 +469,49 @@ def test_reconcile_divergent_funnel_mode_replaces_upstream_with_structural_note(
 
     receipt = svc.create({"versionId": _VERSION, "from": "2026-06-01", "to": "2026-07-01"})
     assert any("single-pick sim vs multi-name live" in c for c in receipt["caveats"])
+    assert any("cross-basis" in c for c in receipt["caveats"])  # the fence is on the RECEIPT too
     _wait(lambda: len(repo.rows) == 1)
     row = repo.rows[0]
-    assert row["verdict"] == "DIVERGENT"
-    overlap_item = next(
-        i for i in row["diagnosis"]["checklist"] if i["id"] == "trade_set_overlap"
-    )
-    assert "UPSTREAM" not in overlap_item["note"]              # the false inference is suppressed
-    assert "STRUCTURAL" in overlap_item["note"]
+    assert row["verdict"] == "INSUFFICIENT"                    # fenced (H9), was DIVERGENT
+    assert row["diagnosis"] is None                            # DIVERGENT-only, now unreachable
+    # The single-pick distortion note is verdict-INDEPENDENT and must survive the fence.
     assert any("single-pick sim vs multi-name live" in c for c in row["gap"]["caveats"])
+
+
+def test_verdict_cross_basis_overrides_every_rung_of_the_ladder():
+    # The fence is checked BEFORE the gapZ ladder because it says the INPUTS are incomparable, which
+    # is upstream of every threshold. Each of these would otherwise be a DIFFERENT verdict;
+    # asserting
+    # the whole ladder (not just one rung) is what proves the override is not a coincidence of one
+    # threshold. The unfenced column is the control.
+    for gap_z, unfenced in ((0.0, "ALIGNED"), (-1.0, "PENALIZED"), (-9.0, "DIVERGENT")):
+        assert _verdict(gap_z, True, True) == unfenced                       # control
+        assert _verdict(gap_z, True, True, cross_basis=True) == "INSUFFICIENT"
+    # ...and it cannot accidentally UPGRADE an already-insufficient row into something countable.
+    assert _verdict(None, False, False, cross_basis=True) == "INSUFFICIENT"
+
+
+def test_reconcile_scalper_is_not_fenced_and_keeps_its_verdict():
+    # ⚠️ NARROWNESS PROOF. H9 changed the SWING fill plane only; scalper legs are options settled off
+    # the live tick and are untouched. If the fence ever widened to scalper it would silently disarm
+    # the scalper reconciliation surface, so this test exists to fail loudly if that happens.
+    # Same numbers as the swing champion-vs-itself case, only the session style differs.
+    live_trades = [_live("RELIANCE", "2026-06-01T15:20:00+05:30", 100.0, pnl=50_000.0),
+                   _live("TCS", "2026-06-02T15:20:00+05:30", 200.0, pnl=50_000.0)]
+    sim_trades = [_sim("RELIANCE", "2026-06-01T09:15:00+05:30", 100.0),
+                  _sim("TCS", "2026-06-02T09:15:00+05:30", 200.0)]
+    repo = FakeReconRepo(walkforward_run_ids={_VERSION: "wf-1"})
+    live = _swing_live_version(live_trades, config={"risk": {"session": {"style": "intraday"}}})
+    backtest = FakeReconBacktest(sim_total_return=10.0, sim_trades=sim_trades, folds=_WF_FOLDS)
+    svc = _svc(repo, live, backtest)
+
+    receipt = svc.create({"versionId": _VERSION, "from": "2026-06-01", "to": "2026-07-01"})
+    assert receipt["mode"] == "scalper"
+    _wait(lambda: len(repo.rows) == 1)
+    row = repo.rows[0]
+    assert row["verdict"] == "ALIGNED"                       # the pre-H9 verdict, unchanged
+    assert "crossBasis" not in row["gap"]                    # not even a null key
+    assert not any("cross-basis" in c for c in row["gap"]["caveats"])
 
 
 def test_reconcile_no_fold_history_is_insufficient():

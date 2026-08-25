@@ -76,7 +76,54 @@ public record ScalperGateContext(
       // {@link SentimentLevelShadow}, which records the counterfactual on the diagnostic JSONB.
       // Null whenever market-data omits the field (older deploy / monthly-expiry suppression), which
       // degrades to "no shadow verdict" — never to an exception or a changed live decision.
-      BigDecimal sentimentLevelPct) {
+      BigDecimal sentimentLevelPct,
+      // PROVENANCE, never an operand: true iff this snapshot came from the S24 monthly-index-expiry
+      // branch of MarketOiClient#oi, which returns inert defaults WITHOUT calling any OI endpoint.
+      // No gate and no dot reads it. Its sole purpose is to let SentimentLevelShadow say WHY the
+      // sentiment operands are null, because the resulting record is otherwise byte-identical to one
+      // produced by four failed reads — the ambiguity that cost two investigations on 2026-08-25.
+      // It is RECORDED here rather than re-derived downstream on purpose: the diagnostics carry the
+      // option EXPIRY, not the trade date, so any downstream re-derivation would have to feed the
+      // wrong date into the calendar and would silently disagree with what actually happened.
+      boolean monthlyExpirySuppressed) {
+
+    /**
+     * The S24 monthly-index-expiry snapshot: every OI input at its inert, non-confirming default,
+     * only the price-derived {@code futuresBasis} kept, and the suppression flag SET. The one
+     * production site that may set that flag, so "suppressed" and "inert" can never drift apart.
+     */
+    public static Oi monthlyExpirySuppressed(BigDecimal futuresBasis) {
+      return new Oi(
+          OiQuadrant.NEUTRAL, OiQuadrant.NEUTRAL, null, null, futuresBasis, null, null, null,
+          false, false, null, null, null, null, null, true);
+    }
+
+    /**
+     * Pre-reason-code 15-arg form: {@code monthlyExpirySuppressed} defaults to false. Correct for
+     * every non-suppressed caller — the suppression branch builds its snapshot through {@link
+     * #monthlyExpirySuppressed} instead, so no ordinary literal can claim suppression by accident.
+     */
+    public Oi(
+        OiQuadrant underlying,
+        OiQuadrant futures,
+        BigDecimal sentimentPct,
+        BigDecimal trendingPeMinusCePct,
+        BigDecimal futuresBasis,
+        BigDecimal ceOiDelta,
+        BigDecimal peOiDelta,
+        BigDecimal callPutDeltaImbalancePct,
+        boolean crossedThisWindow,
+        boolean gapWidening,
+        BigDecimal sentimentSlope,
+        BigDecimal spurtOiPct,
+        BigDecimal spurtPricePct,
+        BigDecimal oiDivergencePct,
+        BigDecimal sentimentLevelPct) {
+      this(
+          underlying, futures, sentimentPct, trendingPeMinusCePct, futuresBasis, ceOiDelta, peOiDelta,
+          callPutDeltaImbalancePct, crossedThisWindow, gapWidening, sentimentSlope, spurtOiPct,
+          spurtPricePct, oiDivergencePct, sentimentLevelPct, false);
+    }
 
     /**
      * Pre-shadow 14-arg form: {@code sentimentLevelPct} defaults to null (keeps existing literals

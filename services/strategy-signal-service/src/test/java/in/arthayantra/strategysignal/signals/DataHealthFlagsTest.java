@@ -504,7 +504,16 @@ class DataHealthFlagsTest {
               Coverage.exempt("measurement-only shadow operand; no dot or gate reads it")),
           // Primitive booleans — cannot be absent.
           Map.entry("crossedThisWindow", Coverage.exempt("primitive boolean, cannot be absent")),
-          Map.entry("gapWidening", Coverage.exempt("primitive boolean, cannot be absent")));
+          Map.entry("gapWidening", Coverage.exempt("primitive boolean, cannot be absent")),
+          // PROVENANCE, not an input: it records that MarketOiClient took the S24 monthly-expiry
+          // branch. A primitive boolean, so it cannot be absent — and flagging it would invert the
+          // meaning of a data-health flag, since `true` reports that the OI block is inert BY
+          // DESIGN. That day's genuine absences are already covered by the suppressedFlag entries
+          // above, which is exactly why they are marked suppressed rather than flagged.
+          Map.entry(
+              "monthlyExpirySuppressed",
+              Coverage.exempt("primitive boolean provenance; the S24 skip it records is why the"
+                  + " OI operands above are suppressedFlag rather than flagged")));
 
   private static List<String> componentNames(Class<?> record) {
     return Arrays.stream(record.getRecordComponents()).map(RecordComponent::getName).toList();

@@ -1,17 +1,24 @@
 package in.arthayantra.strategysignal.scalper;
 
+import static in.arthayantra.black76.Black76.OptionType.CE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Macro;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Oi;
 import java.time.LocalDate;
+import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.ExpectedCount;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -30,6 +37,10 @@ class MarketOiClientTest {
   // 2026-06-30 is the June MONTHLY index expiry (the last June weekly expiry); 2026-06-23 is weekly-only.
   private static final LocalDate MONTHLY_EXPIRY = LocalDate.of(2026, 6, 30);
   private static final LocalDate NON_MONTHLY = LocalDate.of(2026, 6, 23);
+  /** 2026-07-28 is the July NSE monthly index expiry — a SECOND key for the once-per-day log guard. */
+  private static final LocalDate JULY_MONTHLY = LocalDate.of(2026, 7, 28);
+  private static final String BASIS_JSON =
+      "{\"contracts\":[{\"expiry\":\"2026-06-25\",\"basisAbsolute\":\"10.5\"}]}";
 
   private MockRestServiceServer server;
   private MarketOiClient client;
@@ -119,7 +130,145 @@ class MarketOiClientTest {
     assertThat(oi.gapWidening()).isFalse();
     // The price-derived basis is KEPT so the basis dot still works.
     assertThat(oi.futuresBasis()).isEqualByComparingTo("10.5");
+    // PROVENANCE: the snapshot records that it came from the suppression branch. Everything above
+    // is byte-identical to a four-failed-reads snapshot, so without this flag nothing downstream
+    // can tell a by-design suppression from an outage (see the pair test below).
+    assertThat(oi.monthlyExpirySuppressed()).isTrue();
     server.verify(); // only the one basis request fired
+  }
+
+  /**
+   * ⚠️ THE AMBIGUITY, AND ITS RESOLUTION, in one test — both halves through the real producer.
+   *
+   * <p>First half: a monthly-expiry suppression and a NON-expiry day on which all four OI reads
+   * fail produce {@code Oi} records equal in every operand field. That is not incidental; it is the
+   * documented S24 design ("exactly as if the OI endpoints were unavailable"), and it is why two
+   * readers built a live-regression theory out of 2026-08-25's rows.
+   *
+   * <p>Second half: the two therefore reach {@link SentimentLevelShadow} identical, and must still
+   * come out carrying DIFFERENT reason codes. A reason derived from the operands — rather than from
+   * recorded provenance — cannot pass this, because there is nothing in the operands to derive it
+   * from.
+   */
+  @Test
+  void aSuppressedDayAndAFailedReadDayAreOperandIdenticalButReasonDistinct() {
+    wire();
+    stub("/api/v1/market/futures/term-structure", BASIS_JSON);
+    Oi suppressed = client.oi(UNDERLYING, EXPIRY, MONTHLY_EXPIRY);
+    server.verify();
+
+    // A normal trading day on which every OI endpoint 500s. The basis read still succeeds, so the
+    // two snapshots differ in nothing an operand-reader could see.
+    wire();
+    for (String path :
+        new String[] {
+          "/api/v1/market/options/spurt",
+          "/api/v1/market/futures/banks",
+          "/api/v1/market/options/active-strikes",
+          "/api/v1/market/options/trending"
+        }) {
+      server
+          .expect(ExpectedCount.once(), requestTo(containsString(path)))
+          .andRespond(withServerError());
+    }
+    stub("/api/v1/market/futures/term-structure", BASIS_JSON);
+    Oi failedReads = client.oi(UNDERLYING, EXPIRY, NON_MONTHLY);
+    server.verify();
+
+    // The two are indistinguishable on every operand — asserted, not assumed.
+    assertThat(withoutProvenance(suppressed)).isEqualTo(withoutProvenance(failedReads));
+    assertThat(suppressed.monthlyExpirySuppressed()).isTrue();
+    assertThat(failedReads.monthlyExpirySuppressed()).isFalse();
+
+    // …and that one recorded bit is what lets the persisted row say which world it came from.
+    assertThat(SentimentLevelShadow.of(suppressed, CE).reason())
+        .isEqualTo(SentimentLevelShadow.Reason.MONTHLY_EXPIRY_SUPPRESSED);
+    assertThat(SentimentLevelShadow.of(failedReads, CE).reason())
+        .isEqualTo(SentimentLevelShadow.Reason.LEVEL_UNAVAILABLE);
+  }
+
+  /** The same snapshot with the provenance bit cleared — so record equality compares OPERANDS only. */
+  private static Oi withoutProvenance(Oi oi) {
+    return new Oi(
+        oi.underlying(), oi.futures(), oi.sentimentPct(), oi.trendingPeMinusCePct(),
+        oi.futuresBasis(), oi.ceOiDelta(), oi.peOiDelta(), oi.callPutDeltaImbalancePct(),
+        oi.crossedThisWindow(), oi.gapWidening(), oi.sentimentSlope(), oi.spurtOiPct(),
+        oi.spurtPricePct(), oi.oiDivergencePct(), oi.sentimentLevelPct());
+  }
+
+  /**
+   * The suppression must be AUDIBLE. It was {@code log.debug}, and nothing configures this service
+   * above the Spring default of INFO, so the branch fired ~1,100 times on 2026-08-25 and {@code
+   * docker logs | grep monthly-expiry} returned 0 on the very day two people were hunting for it.
+   *
+   * <p>Two properties, and the test needs both: the line is INFO (a DEBUG line is never emitted in
+   * production at all), and it fires ONCE per (day, underlying) rather than per call — {@code oi()}
+   * runs per strategy per bar, so an unguarded line would bury every other INFO under four figures
+   * of identical text and would be turned off again by the next person to read the logs.
+   */
+  @Test
+  void theSuppressionIsAnnouncedAtInfoOncePerDayAndUnderlying() {
+    wire();
+    server
+        .expect(
+            ExpectedCount.manyTimes(),
+            requestTo(containsString("/api/v1/market/futures/term-structure")))
+        .andRespond(withSuccess(BASIS_JSON, MediaType.APPLICATION_JSON));
+
+    Logger oiLog = (Logger) LoggerFactory.getLogger(MarketOiClient.class);
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.start();
+    oiLog.addAppender(logs);
+    try {
+      client.oi(UNDERLYING, EXPIRY, MONTHLY_EXPIRY); // announced
+      client.oi(UNDERLYING, EXPIRY, MONTHLY_EXPIRY); // same key — silent
+      client.oi(UNDERLYING, EXPIRY, JULY_MONTHLY); // a new day — announced again
+
+      List<ILoggingEvent> announced =
+          logs.list.stream()
+              .filter(e -> e.getFormattedMessage().contains("monthly-expiry"))
+              .toList();
+
+      // No appender filtering is configured for unit tests, so a DEBUG line WOULD be captured here
+      // — which is what makes the level assertion meaningful rather than vacuous.
+      assertThat(announced)
+          .as("the suppression line must be INFO; at DEBUG it is never emitted in production")
+          .isNotEmpty()
+          .allMatch(e -> e.getLevel() == Level.INFO);
+      assertThat(announced)
+          .as("once per (day, underlying): 2 keys over 3 calls")
+          .hasSize(2);
+      assertThat(announced.get(0).getFormattedMessage())
+          .contains("2026-06-30")
+          .contains(UNDERLYING)
+          .contains("MONTHLY_EXPIRY_SUPPRESSED");
+    } finally {
+      oiLog.detachAppender(logs);
+    }
+  }
+
+  /**
+   * The ordinary mapping path leaves the provenance bit CLEAR. Without this, a flag hard-wired to
+   * true would pass every suppression assertion above and quietly relabel every normal session as a
+   * monthly expiry.
+   */
+  @Test
+  void anOrdinaryDayIsNotMarkedSuppressed() {
+    wire();
+    stub("/api/v1/market/options/spurt", "{\"summary\":{\"interpretation\":\"SHORT_COVERING\"}}");
+    stub("/api/v1/market/futures/banks", "{\"items\":[]}");
+    stub(
+        "/api/v1/market/options/active-strikes",
+        "{\"sentimentPct\":\"12.5\",\"sentimentLevelPct\":\"-33.33\",\"items\":[]}");
+    stub("/api/v1/market/options/trending", "{\"items\":[]}");
+    stub("/api/v1/market/futures/term-structure", BASIS_JSON);
+
+    Oi oi = client.oi(UNDERLYING, EXPIRY, NON_MONTHLY);
+
+    assertThat(oi.monthlyExpirySuppressed()).isFalse();
+    assertThat(SentimentLevelShadow.of(oi, CE).reason())
+        .isEqualTo(SentimentLevelShadow.Reason.COMPUTED);
+    server.verify();
   }
 
   @Test

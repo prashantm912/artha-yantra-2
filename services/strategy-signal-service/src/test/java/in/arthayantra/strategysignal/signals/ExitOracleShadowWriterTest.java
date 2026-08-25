@@ -49,7 +49,9 @@ class ExitOracleShadowWriterTest {
    * how the round-4 Major survived a green suite.
    */
   private static final SentimentLevelShadow SHADOW =
-      new SentimentLevelShadow(new BigDecimal("0.00"), new BigDecimal("30"), true, false);
+      new SentimentLevelShadow(
+          new BigDecimal("0.00"), new BigDecimal("30"), true, false,
+          SentimentLevelShadow.Reason.COMPUTED);
   /** The level operand would have fired a CE — against a held PE that is a flip. */
   private static final SentimentCounterfactual WOULD_FIRE_CE =
       new SentimentCounterfactual(
@@ -215,7 +217,10 @@ class ExitOracleShadowWriterTest {
     try {
       writer.record(
           7L, "slug", BAR, "CE", "CE", null, false,
-          new SentimentLevelShadow(new BigDecimal("1.5"), null, null, null), null);
+          new SentimentLevelShadow(
+              new BigDecimal("1.5"), null, null, null,
+              SentimentLevelShadow.Reason.LEVEL_UNAVAILABLE),
+          null);
       verify(repo, timeout(5_000))
           .insert(
               7L, "slug", BAR, "CE", "CE", null, false, new BigDecimal("1.5"), null,

@@ -48,7 +48,9 @@ public class UpstoxAnalyticsConfig {
    * is treated as NOT quiet (batch runs), which is safe because live capture is also halted then. Bound
    * whenever ANY analytics-token client can bind — analytics enabled, OR the quote / chain / ticker
    * source flipped to Upstox, OR the canary enabled — so the injected dependency always exists; absent
-   * on the mock stack (non-live profile) so the B4 quota widget reports {@code configured=false}.
+   * on the mock stack (non-live profile) so the B4 quota widget reports {@code configured=false}. The
+   * {@link MeterRegistry} carries the H26 step-1 budget telemetry (cumulative per-path call counters
+   * + a per-window high-water mark); it changes no limiter behaviour.
    */
   @Bean
   @ConditionalOnExpression(
@@ -57,8 +59,9 @@ public class UpstoxAnalyticsConfig {
           + "or '${artha.marketdata.source.quotes:kite}' == 'upstox' "
           + "or '${artha.marketdata.source.ticker:kite}' == 'upstox' "
           + "or '${artha.upstox.canary-enabled:false}' == 'true'")
-  public UpstoxRateLimiter upstoxRateLimiter(MarketCalendar calendar, Clock clock) {
-    return new UpstoxRateLimiter(() -> isBatchQuiet(calendar, clock));
+  public UpstoxRateLimiter upstoxRateLimiter(
+      MarketCalendar calendar, Clock clock, MeterRegistry meterRegistry) {
+    return new UpstoxRateLimiter(() -> isBatchQuiet(calendar, clock), meterRegistry);
   }
 
   /** One full 30-min rate-window of lead time, so the deque fully drains of batch hits before the open. */

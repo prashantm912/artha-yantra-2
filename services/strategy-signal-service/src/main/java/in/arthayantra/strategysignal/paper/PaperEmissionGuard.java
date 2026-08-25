@@ -287,7 +287,25 @@ public class PaperEmissionGuard implements EmissionGuard {
       String side) {
     try {
       InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
-      long lot = Math.max(1, meta.lotSize());
+      // A ZERO_SIZE row means "we priced this entry and could not afford one lot". An unknown lot is
+      // a DIFFERENT FACT — we never knew what a lot was — and the old `Math.max(1, ...)` here turned
+      // it into the first one, persisting `lot=1` and a `computed_lots` derived from a lot that does
+      // not exist. The forensic row then answered "why did this entry not happen?" with something
+      // false, on the one surface built to answer it (cross-vendor review Major 4). Recorded under
+      // its own reason so the two are separable in the ledger, never one value meaning two things.
+      if (meta.lotSize() <= 0) {
+        String gapDetail =
+            "strategy=" + strategySlug
+                + "; premium=" + premium.toPlainString()
+                + "; lot=unknown (instrument master carries no lot_size)"
+                + "; instrument_class=" + meta.instrumentClass();
+        log.warn(
+            "paper ENTRY refused, unknown lot: strategy={} book={} symbol={}:{} premium={} class={}",
+            strategySlug, book, exchange, tradingsymbol, premium, meta.instrumentClass());
+        rejections.recordUnknownLot(signalId, book, exchange, tradingsymbol, side, gapDetail);
+        return;
+      }
+      long lot = meta.lotSize();
       long computedQty =
           PositionSizer.size(
               sizing,
@@ -332,26 +350,34 @@ public class PaperEmissionGuard implements EmissionGuard {
   }
 
   /**
-   * True when a derivatives symbol did not resolve as an OPTION — i.e. the instrument-meta lookup
-   * fell back to the EQUITY_PROXY (lot 1) because market-data was unreachable or the master has not
-   * picked the contract up yet.
+   * True when a derivatives symbol did not resolve to a SIZABLE option — either it did not resolve
+   * as an OPTION at all (the instrument-meta lookup fell back to the EQUITY_PROXY because market-data
+   * was unreachable or the master has not picked the contract up yet), or it resolved as an OPTION
+   * whose lot size the master does not know ({@code lotSize == 0}).
    *
    * <p>FAIL CLOSED (cross-vendor review C2). Before the option-leg sizing fix this state produced
    * 0 lots and no position; with it, a lot-1 proxy yields a NON-LOT-ALIGNED quantity — 15000/776 =
    * 19 units of a 20-lot SENSEX option — auto-taken and silently wrong, which is the exact defect
    * that fix exists to remove. Refusing costs one missed entry; filling costs a position that cannot
    * be traded and that a live broker would reject.
+   *
+   * <p>The lot arm is the half the class check alone could NOT see: a {@code tools/historical-import}
+   * placeholder row carries a POPULATED {@code instrument_type} with a NULL {@code lot_size}, so it
+   * classifies as a real OPTION and sailed straight past the original {@code instrumentClass} test.
+   * {@code RestInstrumentMetaClient} now reports lot {@code 0} there instead of fabricating {@code 1};
+   * this is where that {@code 0} becomes the refusal. Note the arm must be read BEFORE the
+   * {@code Math.max(1, meta.lotSize())} in both callers, which would otherwise re-fabricate the 1.
    */
   private boolean unresolvedDerivative(String exchange, String tradingsymbol, InstrumentMeta meta) {
     if (!"NFO".equals(exchange) && !"BFO".equals(exchange)) {
       return false;
     }
-    if (meta.instrumentClass() == InstrumentClass.OPTION) {
+    if (meta.instrumentClass() == InstrumentClass.OPTION && meta.lotSize() > 0) {
       return false;
     }
     log.warn(
-        "refusing to size {}:{} — derivatives symbol did not resolve as an OPTION (class={}, lot={});"
-            + " instrument meta is unavailable or stale",
+        "refusing to size {}:{} — derivatives symbol is not sizable (class={}, lot={}); it did not"
+            + " resolve as an OPTION, or the instrument master carries no lot size for it",
         exchange, tradingsymbol, meta.instrumentClass(), meta.lotSize());
     return true;
   }

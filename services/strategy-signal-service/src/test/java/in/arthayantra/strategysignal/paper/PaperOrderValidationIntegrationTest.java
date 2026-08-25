@@ -1,11 +1,14 @@
 package in.arthayantra.strategysignal.paper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.common.web.error.ApiException;
+import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
@@ -54,15 +57,23 @@ class PaperOrderValidationIntegrationTest extends StrategySignalIntegrationTestB
     @Bean
     @Primary
     InstrumentMetaClient stubInstrumentMetaClient() {
-      // 'LOT75-…' symbols resolve as a 75-lot option (an F&O lot); everything else is plain equity (lot 1).
-      return (exchange, tradingsymbol) ->
-          tradingsymbol != null && tradingsymbol.startsWith("LOT75-")
-              ? new InstrumentMeta(InstrumentClass.OPTION, new BigDecimal("0.05"), 75)
-              : new InstrumentMeta(InstrumentClass.EQUITY, new BigDecimal("0.05"), 1);
+      // 'LOT75-…' symbols resolve as a 75-lot option (an F&O lot); 'NOLOT-…' as an option whose lot
+      // the instrument master does not know (lot 0, the placeholder-row shape); everything else is
+      // plain equity (lot 1).
+      return (exchange, tradingsymbol) -> {
+        if (tradingsymbol != null && tradingsymbol.startsWith("LOT75-")) {
+          return new InstrumentMeta(InstrumentClass.OPTION, new BigDecimal("0.05"), 75);
+        }
+        if (tradingsymbol != null && tradingsymbol.startsWith("NOLOT-")) {
+          return new InstrumentMeta(InstrumentClass.OPTION, new BigDecimal("0.05"), 0);
+        }
+        return new InstrumentMeta(InstrumentClass.EQUITY, new BigDecimal("0.05"), 1);
+      };
     }
   }
 
   @Autowired private MockMvc mockMvc;
+  @Autowired private PaperService paper;
   @Autowired private RiskService risk;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private ObjectMapper objectMapper;
@@ -197,11 +208,109 @@ class PaperOrderValidationIntegrationTest extends StrategySignalIntegrationTestB
     assertThat(openCount(sym)).isEqualTo(1);
   }
 
+  // ─── unknown lot on a derivative ─────────────────────────────────────────────────────────────────
+
+  /**
+   * A derivative whose lot the instrument master does not know is REFUSED at the writer, not filled
+   * at an assumed lot of 1. The V4 input check above cannot catch it — with lot 0 there is no lot to
+   * be a multiple of, so {@code qty % lot} has nothing to say — which is exactly why the rule lives
+   * in {@code PaperService#openOrder}, the sole writer every door funnels through.
+   *
+   * <p>422 DATA_GAP, not 400: the caller's ticket is well-formed; our master data is not. The two
+   * tests above are the control — an option with a KNOWN lot and an equity both still fill 201.
+   */
+  @Test
+  void derivativeWithNoLotInTheMasterIsRefusedAndNeverFills() throws Exception {
+    // On the REAL derivative segments, not NSE — the earlier revision of this test used the NSE-only
+    // order helper and so could not have distinguished a derivative refusal from an equity one
+    // (cross-vendor review Major 5, second half).
+    for (String exchange : new String[] {"NFO", "BFO"}) {
+      String sym = "NOLOT-" + UUID.randomUUID();
+
+      mockMvc
+          .perform(
+              post("/api/v1/paper/orders")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(order(exchange, sym, null, 50)))
+          .andExpect(status().isUnprocessableEntity())
+          .andExpect(jsonPath("$.code").value("DATA_GAP"))
+          .andExpect(jsonPath("$.details.exchange").value(exchange))
+          .andExpect(jsonPath("$.details.tradingsymbol").value(sym))
+          .andExpect(jsonPath("$.details.instrumentClass").value("OPTION"));
+
+      assertThat(openCount(sym)).isZero();
+      assertThat(orderCount(sym)).isZero(); // refused BEFORE the fill row, not rolled back after it
+    }
+  }
+
+  @Test
+  void aKnownLotOnADerivativeSegmentStillFills() throws Exception {
+    // The control for the two above: the refusal is about the MISSING lot, not about NFO/BFO.
+    String sym = "LOT75-" + UUID.randomUUID();
+
+    mockMvc
+        .perform(
+            post("/api/v1/paper/orders")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(order("NFO", sym, null, 150)))
+        .andExpect(status().isCreated());
+
+    assertThat(openCount(sym)).isEqualTo(1);
+  }
+
+  // ─── Critical 2: alignment is enforced at the WRITER, not only at the controller ─────────────────
+
+  /**
+   * {@code openOrder} refuses a non-lot-multiple quantity on its OWN metadata read.
+   *
+   * <p>Called directly, deliberately. Through MockMvc the controller and the service share this
+   * test's stub bean, so they can never disagree and the controller's 400 would always land first —
+   * which is exactly the blind spot the review found: in production they are TWO lookups that can
+   * return different lots (a proxy/zero first response, a recovered 75 next), and the signal-take and
+   * pair-entry paths never pass the controller at all. Calling the writer directly is what proves the
+   * writer itself holds the line.
+   */
+  @Test
+  void openOrderRefusesANonLotMultipleQuantityOnItsOwnLookup() {
+    String sym = "LOT75-" + UUID.randomUUID();
+    PaperService.OrderRequest request =
+        new PaperService.OrderRequest(
+            null, "NFO", sym, "BUY", 50, new BigDecimal("100.00"), null, null, null, BOOK, null);
+
+    assertThatThrownBy(() -> paper.openOrder(request))
+        .isInstanceOfSatisfying(
+            ApiException.class,
+            e -> {
+              assertThat(e.httpStatus()).isEqualTo(422);
+              assertThat(e.code()).isEqualTo(ErrorCodes.VALIDATION_FAILED);
+              assertThat(e.details()).containsEntry("lotSize", 75L).containsEntry("qty", 50L);
+            });
+
+    assertThat(openCount(sym)).isZero();
+    assertThat(orderCount(sym)).isZero();
+  }
+
+  @Test
+  void openOrderAcceptsALotMultipleQuantityOnItsOwnLookup() {
+    // The weakening control: the writer check must not refuse an ALIGNED quantity.
+    String sym = "LOT75-" + UUID.randomUUID();
+    PaperService.OrderRequest request =
+        new PaperService.OrderRequest(
+            null, "NFO", sym, "BUY", 150, new BigDecimal("100.00"), null, null, null, BOOK, null);
+
+    assertThat(paper.openOrder(request).status()).isEqualTo("OPEN");
+    assertThat(openCount(sym)).isEqualTo(1);
+  }
+
   // ─── helpers ─────────────────────────────────────────────────────────────────────────────────────
 
   private String order(String sym, String clientOrderId, long qty) throws Exception {
+    return order("NSE", sym, clientOrderId, qty);
+  }
+
+  private String order(String exchange, String sym, String clientOrderId, long qty) throws Exception {
     Map<String, Object> body = new HashMap<>();
-    body.put("exchange", "NSE");
+    body.put("exchange", exchange);
     body.put("tradingsymbol", sym);
     body.put("side", "BUY");
     body.put("qty", qty);

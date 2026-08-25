@@ -66,6 +66,24 @@ public class PaperOrderRejectionRecorder {
         signalId, book, exchange, tradingsymbol, side, qty, "DEPLOYMENT_BLOCKED", detail, null);
   }
 
+  /**
+   * DATA_GAP_LOT_SIZE: the instrument master carries no lot size for this DERIVATIVE, so the entry
+   * was refused rather than sized against a fabricated lot of 1. Distinct from {@code ZERO_SIZE},
+   * which means the entry WAS priced against a known lot and could not afford one — conflating them
+   * makes the forensic row answer "why did this entry not happen?" with the wrong cause.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void recordUnknownLot(
+      Long signalId,
+      String book,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      String detail) {
+    repo.insert(
+        signalId, book, exchange, tradingsymbol, side, 0L, "DATA_GAP_LOT_SIZE", detail, null);
+  }
+
   /** ZERO_SIZE: the emitted entry was unaffordable at its option premium and opened no order. */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public void recordZeroSize(

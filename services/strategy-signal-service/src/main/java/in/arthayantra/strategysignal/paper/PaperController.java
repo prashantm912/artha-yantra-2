@@ -244,8 +244,10 @@ public class PaperController {
     }
     // Audit V4: a hand ticket for an F&O instrument whose qty is not a whole multiple of the contract
     // lot would be broker-rejected live (Upstox UDAPI1104). Validate only when the instrument is given
-    // explicitly (a signal-derived symbol is resolved deeper in openOrder). Equity / unknown instruments
-    // resolve to lot 1 (RestInstrumentMetaClient's equity proxy), so qty % 1 == 0 always passes.
+    // explicitly (a signal-derived symbol is resolved deeper in openOrder). Equities resolve to lot 1,
+    // so qty % 1 == 0 always passes. A DERIVATIVE the master has no lot for resolves to lot 0 and is
+    // NOT rejected here — there is no lot to be a multiple of, so this input check has nothing to say;
+    // openOrder refuses it with 422 DATA_GAP instead (one rule, at the writer, not two).
     if (body.exchange() != null && body.tradingsymbol() != null) {
       long lotSize = instruments.meta(body.exchange(), body.tradingsymbol()).lotSize();
       if (lotSize > 1 && body.qty() % lotSize != 0) {

@@ -868,6 +868,45 @@ public class PaperService {
                     .strategyIdForSignal(request.signalId())
                     .orElse(PaperPositionRepository.UNATTRIBUTED_SCOPE);
     InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
+    // A lot size we do not KNOW must never be filled as if it were 1. `lotSize == 0` is
+    // RestInstrumentMetaClient reporting "the instrument master has no lot for this DERIVATIVE"
+    // (182,491 placeholder rows carry a populated instrument_type with a NULL lot_size, so they
+    // classify as a genuine CE/PE and answer 200); an equity is always >= 1 there, so this refuses
+    // exactly the derivative case. Placed HERE, at the sole writer, for the same reason the
+    // deployment cap below is: openManualOrder, openPair and the taken path all funnel through this
+    // method, so one check closes all four doors, while PaperEmissionGuard's zero-size refusal
+    // covers only the sized/advisory ones. Filling anyway yields a NON-LOT-ALIGNED quantity that a
+    // live broker rejects outright (Upstox UDAPI1104) and that paper books as a position which
+    // cannot be traded. 422 DATA_GAP, not 400: the caller's input is fine, our master data is not.
+    if (meta.lotSize() <= 0) {
+      throw new ApiException(
+          422,
+          ErrorCodes.DATA_GAP,
+          "no lot size in the instrument master for " + exchange + ":" + tradingsymbol
+              + " — refusing to fill a derivative at an unknown lot rather than assume 1",
+          Map.of(
+              "exchange", exchange,
+              "tradingsymbol", tradingsymbol,
+              "instrumentClass", meta.instrumentClass().name()));
+    }
+    // ALIGNMENT is decided HERE too, from the SAME `meta` above — cross-vendor review Critical 2.
+    // PaperController runs its own qty % lot check on its OWN lookup, and two lookups that must agree
+    // is not a check, it is a race: a first response that proxies (lot 0/1) followed by a recovered
+    // lot of 75 let a non-multiple quantity through the controller and fill here. The controller's
+    // check is kept — it 400s a malformed hand ticket before the service, which is where input
+    // validation belongs — but it is now an EARLY convenience, not the authority. This is the
+    // authority, and it is the only one the signal-take and pair-entry paths pass through at all
+    // (they never touch the controller). Same code + same details shape as the controller so ONE fact
+    // reads as one fact wherever it surfaces; the sole difference is the status, because a take that
+    // is well-formed until our own master data moves under it is not the caller's bad request.
+    if (request.qty() % meta.lotSize() != 0) {
+      throw new ApiException(
+          422,
+          ErrorCodes.VALIDATION_FAILED,
+          "qty " + request.qty() + " is not a multiple of the lot size " + meta.lotSize() + " for "
+              + exchange + ":" + tradingsymbol,
+          Map.of("lotSize", meta.lotSize(), "qty", request.qty()));
+    }
     Fill fill = fills.fill(Side.valueOf(side), request.qty(), reference, meta);
     // The deployment cap, projected against what this fill ACTUALLY costs. Placed here — at the sole
     // writer, after the fill is struck — because this is the first and only point where all three

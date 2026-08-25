@@ -32,6 +32,13 @@ import org.springframework.test.web.servlet.MockMvc;
 @AutoConfigureMockMvc
 class EquityBreadthDailyIntegrationTest extends MarketDataIntegrationTestBase {
 
+  // D0 is a WARM-UP session, never asserted on. The fold's prior close is now a lag() over the
+  // CA-adjusted series rather than the exchange's `prev_close` column (which is NOT on the adjusted
+  // basis), so a symbol needs a preceding in-window bar to get an advance/decline verdict at all.
+  // Production always has one — compute() warms 400 calendar days before `from`. D0 gives the
+  // fixture the same, at the SAME closes the old prev_close column carried, so every assertion below
+  // is byte-identical to the pre-adjustment expectations.
+  private static final LocalDate D0 = LocalDate.of(2019, 2, 1);
   private static final LocalDate D1 = LocalDate.of(2019, 2, 4);
   private static final LocalDate D2 = LocalDate.of(2019, 2, 5);
   private static final List<String> SYMS = List.of("BRDX1", "BRDX2", "BRDX3", "BRDXBE", "BRDXSM");
@@ -44,8 +51,8 @@ class EquityBreadthDailyIntegrationTest extends MarketDataIntegrationTestBase {
     for (String s : SYMS) {
       jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE symbol = ?", s);
     }
-    jdbc.update("DELETE FROM equity_breadth_daily WHERE trade_date IN (?,?)",
-        java.sql.Date.valueOf(D1), java.sql.Date.valueOf(D2));
+    jdbc.update("DELETE FROM equity_breadth_daily WHERE trade_date IN (?,?,?)",
+        java.sql.Date.valueOf(D0), java.sql.Date.valueOf(D1), java.sql.Date.valueOf(D2));
   }
 
   @AfterEach
@@ -56,6 +63,10 @@ class EquityBreadthDailyIntegrationTest extends MarketDataIntegrationTestBase {
   @BeforeEach
   void seed() {
     purge();
+    // D0 warm-up bars only (BRDX3's D0 close is its D2 lag — it has no D1 row, so D1's total stays 2).
+    bhav(D0, "BRDX1", "95", "95", null);
+    bhav(D0, "BRDX2", "205", "205", null);
+    bhav(D0, "BRDX3", "50", "50", null);
     // D1: BRDX1 advancer, BRDX2 decliner  (total 2)
     bhav(D1, "BRDX1", "95", "100", "40");
     bhav(D1, "BRDX2", "205", "200", "50");
@@ -72,6 +83,8 @@ class EquityBreadthDailyIntegrationTest extends MarketDataIntegrationTestBase {
    */
   @Test
   void foldCountsTheCashUniverseAndNothingWider() {
+    bhav(D0, "BRDXBE", "BE", "100", "100", null); // warm-up bar (see D0)
+    bhav(D0, "BRDXSM", "SM", "100", "100", null);
     bhav(D2, "BRDXBE", "BE", "100", "90", null); // BE decliner: real cash equity, must count
     bhav(D2, "BRDXSM", "SM", "100", "110", "99"); // SME: must not count, and must not lift avg
 

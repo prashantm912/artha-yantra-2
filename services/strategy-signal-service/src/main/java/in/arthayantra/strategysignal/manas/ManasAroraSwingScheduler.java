@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.manas;
 
+import in.arthayantra.strategysignal.signals.SwingBatchRunRepository.Pass;
 import in.arthayantra.strategysignal.swing.SwingBatchIntentRepository;
 import in.arthayantra.strategysignal.swing.SwingBatchRecorder;
 import java.time.Clock;
@@ -91,7 +92,8 @@ public class ManasAroraSwingScheduler {
           e.getMessage());
     }
     // runScheduled, not a bare runAndRecord — it keeps the FAILED-alert envelope, and it gates
-    // execution on doctrine.enabled(). See the Minervini twin for why both matter.
-    recorder.runScheduled(doctrine, false);
+    // execution on doctrine.enabled(). See the Minervini twin for why both matter, and for why
+    // the pass is DECLARED Pass.SETTLE rather than derived from the entries flag.
+    recorder.runScheduled(doctrine, Pass.SETTLE);
   }
 }

@@ -45,22 +45,32 @@ class SwingCatchUpStateRepositoryIntegrationTest extends StrategySignalIntegrati
   @Test
   void anExitsOnlyMarkerIsStillSeeded_butACompleteRunIsNot() {
     String exitsOnly = "cu-it-exits-" + System.nanoTime();
+    String recoveryExits = "cu-it-recovery-" + System.nanoTime();
     String full = "cu-it-full-" + System.nanoTime();
     String legacy = "cu-it-legacy-" + System.nanoTime();
 
     // The 16:00 settle's marker: ran, but owes its entries.
     insertMarker(exitsOnly, SESSION, Boolean.FALSE);
+    // ⚠️ The THIRD pass V063 added (cross-vendor review 2026-08-25): the catch-up's own exits-only
+    // RECOVERY row. This gate still reads entries_enabled rather than `pass`, which is correct —
+    // both exits passes write false, so the predicate is unchanged — but "correct by reasoning" is
+    // what the class-level comment above says a SQL guard may never rely on, so it is measured.
+    insertMarker(recoveryExits, SESSION, Boolean.FALSE, "RECOVERY_EXITS");
     // A complete run — nothing left to do for this session.
     insertMarker(full, SESSION, Boolean.TRUE);
     // A pre-V060 row: NULL reads as "entries ran", so it must NOT be re-seeded.
     insertMarker(legacy, SESSION, null);
 
     state.seedMissing(exitsOnly, java.util.List.of(SESSION));
+    state.seedMissing(recoveryExits, java.util.List.of(SESSION));
     state.seedMissing(full, java.util.List.of(SESSION));
     state.seedMissing(legacy, java.util.List.of(SESSION));
 
     assertThat(seeded(exitsOnly))
         .as("an exits-only session still owes its entries and MUST be seeded")
+        .isTrue();
+    assertThat(seeded(recoveryExits))
+        .as("a RECOVERY_EXITS row is exits-only too — that session still owes its entries")
         .isTrue();
     assertThat(seeded(full))
         .as("a complete run must not be re-seeded")
@@ -81,6 +91,15 @@ class SwingCatchUpStateRepositoryIntegrationTest extends StrategySignalIntegrati
   }
 
   private void insertMarker(String batch, LocalDate session, Boolean entriesEnabled) {
+    // V063 made `pass` NOT NULL and part of the key. Derived here with the SAME rule as the
+    // migration's BACKFILL — which is a rule about EXISTING rows, not about new writes; production
+    // declares the pass at the call site (SwingBatchRunRepository.Pass). `entries_enabled IS FALSE`
+    // backfills to SETTLE and everything else INCLUDING NULL to ENTRIES, because a pre-V060 row was
+    // written by a 20:00 batch that did both halves.
+    insertMarker(batch, session, entriesEnabled, Boolean.FALSE.equals(entriesEnabled) ? "SETTLE" : "ENTRIES");
+  }
+
+  private void insertMarker(String batch, LocalDate session, Boolean entriesEnabled, String pass) {
     jdbc.update(
         """
         INSERT INTO swing_batch_runs
@@ -90,10 +109,7 @@ class SwingCatchUpStateRepositoryIntegrationTest extends StrategySignalIntegrati
         """,
         batch,
         java.sql.Date.valueOf(session),
-        // V063 made `pass` NOT NULL and part of the key. Derived with the SAME rule as the
-        // migration's backfill — `entries_enabled IS FALSE` is SETTLE, and everything else INCLUDING
-        // NULL is ENTRIES, because a pre-V060 row was written by a batch that did both halves.
-        Boolean.FALSE.equals(entriesEnabled) ? "SETTLE" : "ENTRIES",
+        pass,
         entriesEnabled);
   }
 

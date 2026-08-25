@@ -32,6 +32,16 @@ import org.springframework.stereotype.Repository;
  * the P&L are correct and complete; what was destroyed is the batch-run AUDIT TRAIL, which is the
  * surface a forward-paper reliability verdict reads.
  *
+ * <p>⚠️ <b>There are THREE origins, not two, and the first cut of V063 DERIVED {@link Pass} from
+ * {@code entriesEnabled} — which cannot tell two of them apart</b> (cross-vendor review of this PR).
+ * The evening settle and the catch-up's exits-only RECOVERY (arming authoritative, funnel not as-of
+ * the session — {@code SwingBatchCatchUp:643-645}) BOTH run with entries disabled, so both derived
+ * to {@code SETTLE} and the recovery went on destroying the settle's row exactly as before. Worse,
+ * that branch leaves the session PENDING ({@code SCREEN_NOT_AS_OF_SESSION}), so it could overwrite
+ * the settle again on every later sweep. The pass is therefore DECLARED by the call site and never
+ * inferred from a flag that means something else, and {@code entries_enabled} is written FROM the
+ * declared pass so the two can no longer disagree.
+ *
  * <p>Since V034 (ledger F3) the same row also carries the batch's admission PROBE — the slot-cap
  * exceedance + the RS-ordered names the cap dropped ({@link #recentProbes}); the probe columns are
  * NULLABLE, so a pre-V034 row (or a flag-off no-op run) reads as "not probed".
@@ -60,7 +70,7 @@ public class SwingBatchRunRepository {
   public boolean record(
       String batch, LocalDate runDate, int strategies, int candidates, int entries, int exits,
       int exitSkipped, int openAtStart, int wouldEnter, int admitted, int capExceedance,
-      boolean capBound, List<DroppedCandidate> droppedByCap, boolean entriesEnabled) {
+      boolean capBound, List<DroppedCandidate> droppedByCap, Pass pass) {
     int rows =
         jdbc.update(
             """
@@ -80,26 +90,81 @@ public class SwingBatchRunRepository {
                 -- purpose (V063 / ledger H23). That OR existed because the two passes shared one row:
                 -- the exits pass wrote entries_enabled=false, the catch-up wrote true for the SAME
                 -- key, and a later exits-only re-run could take the row back to false and re-open a
-                -- session whose entries had already run. With `pass` in the primary key the two
-                -- passes no longer share a row at all, so an ENTRIES row's flag is always true and a
-                -- SETTLE row's always false. Keeping the OR here would be dead logic that reads as
-                -- if the collision were still possible.
+                -- session whose entries had already run. With `pass` in the primary key they no
+                -- longer share a row, and entries_enabled is now written FROM the declared pass
+                -- (Pass#takesEntries), so within one key it is a CONSTANT: an ENTRIES row's flag is
+                -- always true, a SETTLE or RECOVERY_EXITS row's always false. There is nothing left
+                -- for an OR to protect, and keeping it would read as if the collision still existed.
                 entries_enabled = EXCLUDED.entries_enabled
             """,
-            batch, java.sql.Date.valueOf(runDate), pass(entriesEnabled), strategies, candidates,
+            batch, java.sql.Date.valueOf(runDate), pass.name(), strategies, candidates,
             entries, exits, exitSkipped, openAtStart, wouldEnter, admitted, capExceedance, capBound,
-            writeDropped(droppedByCap), entriesEnabled);
+            writeDropped(droppedByCap), pass.takesEntries());
     return rows > 0;
   }
 
   /**
-   * Which pass a run belongs to — the discriminator V063 added to the primary key (ledger H23).
+   * WHICH pass wrote a row — the discriminator V063 added to the primary key (ledger H23), DECLARED
+   * by the call site. {@link #name()} IS the {@code pass} column value, and V063's CHECK constraint
+   * pins the same three strings, so adding a constant here without a migration fails the INSERT
+   * rather than writing an unreadable label.
    *
-   * <p>Derived from {@code entriesEnabled} rather than passed in, so there is exactly ONE place that
-   * decides it and a caller cannot label a run's pass inconsistently with what it actually did.
+   * <p>⚠️ <b>Declared, never derived.</b> The first cut derived this from {@code entriesEnabled},
+   * and two of the three origins run with entries disabled — so {@link #SETTLE} and {@link
+   * #RECOVERY_EXITS} collapsed onto one key and the recovery pass kept destroying the settle's row,
+   * which is the whole defect V063 exists to fix. The rule it encodes: a discriminator must record
+   * WHERE a run came from, not what it happened to do, because two different origins can do the
+   * same thing.
    */
-  private static String pass(boolean entriesEnabled) {
-    return entriesEnabled ? "ENTRIES" : "SETTLE";
+  public enum Pass {
+    /**
+     * A run that took ENTRIES: the 08:35 catch-up on a session whose own screen has landed, or a
+     * manual {@code POST /api/v1/signals/<batch>-swing/run}.
+     *
+     * <p>The manual path folds in here deliberately rather than taking a fourth constant. {@link
+     * SwingBatchRunRepository#hasRunWithEntries} is a money gate — it is what stops the catch-up
+     * re-entering names already on the book — and a separate MANUAL value would have to be
+     * remembered in its predicate (and in {@link SwingBatchRunRepository#recentProbes}, and in
+     * {@code SwingCatchUpStateRepository.seedMissing}) forever, where forgetting it double-enters a
+     * session.
+     *
+     * <p>⚠️ <b>The tempting justification is FALSE, so do not rest on it:</b> "a manual run
+     * stamps TODAY while the catch-up only ever reaches a PAST session". {@code sessionWindow}
+     * bounds only the {@code seedWindow} call ({@code SwingBatchCatchUp:307}); {@code
+     * pendingSessions} carries no date bound at all ({@code SwingPaperEffectRepository:402-408}),
+     * {@code seedPending} applies no run-marker gate ({@code SwingBatchCatchUp:309-311}), and the
+     * sweep then iterates EVERY retryable row ({@code :447-451}). The catch-up CAN reach today, so
+     * a test asserting otherwise would pin a falsehood.
+     *
+     * <p>The correct argument needs none of that and holds in all three orders. If the manual run
+     * recorded its marker it already OWNS today's ENTRIES key, and {@code hasRunWithEntries}
+     * short-circuits the catch-up at {@code SwingBatchCatchUp:490} before it can write. If that
+     * marker write fail-softed there is no key to overwrite. And if the catch-up gets there first,
+     * a later manual run re-stamps the SAME key — two genuinely entries-taking runs on one
+     * session, which is the documented same-date re-stamp, not a cross-origin loss.
+     */
+    ENTRIES(true),
+    /** The scheduled evening exits-only settle (18:52 minervini / 18:53 manas-arora). */
+    SETTLE(false),
+    /**
+     * The catch-up's exits-only RECOVERY: the arming is authoritative but the funnel is not this
+     * session's screen, so the exits ran and the entries were withheld ({@code
+     * SwingBatchCatchUp:643-645}, reason {@code SCREEN_NOT_AS_OF_SESSION}). Distinct from {@link
+     * #SETTLE} because that branch leaves the session RETRYABLE — sharing SETTLE's key, it would
+     * overwrite the evening settle's counters on every subsequent sweep.
+     */
+    RECOVERY_EXITS(false);
+
+    private final boolean takesEntries;
+
+    Pass(boolean takesEntries) {
+      this.takesEntries = takesEntries;
+    }
+
+    /** Whether this pass runs the ENTRY half — and so the value written to {@code entries_enabled}. */
+    public boolean takesEntries() {
+      return takesEntries;
+    }
   }
 
   /** The latest recorded run date for a batch — empty when the batch has never recorded. */
@@ -132,9 +197,14 @@ public class SwingBatchRunRepository {
    * hasRun}. The catch-up asks a different question, "does this session still owe its entries", and
    * a bare row-exists answered it wrongly the moment an exits-only run could write one.
    *
-   * <p>A pre-V060 row has {@code entries_enabled} NULL and is read as TRUE: every historical row was
-   * written by a full batch, and treating those as owing entries would hand the catch-up every past
-   * session at once.
+   * <p>A pre-V060 row has {@code entries_enabled} NULL, and that rule now lives in V063's backfill
+   * rather than in this query: every historical row was written by a full 20:00 batch that did both
+   * halves, so it backfills to {@code ENTRIES}. Treating those as owing entries would hand the
+   * catch-up every past session at once.
+   *
+   * <p>⚠️ Reads {@code pass}, so it excludes BOTH exits-flavoured passes — {@link Pass#SETTLE} and
+   * {@link Pass#RECOVERY_EXITS}. Under the derived form it could not have: the recovery row simply
+   * overwrote the settle row and there was only ever one to exclude.
    */
   public boolean hasRunWithEntries(String batch, LocalDate sessionDate) {
     return Boolean.TRUE.equals(
@@ -158,10 +228,11 @@ public class SwingBatchRunRepository {
                cap_exceedance, cap_bound, dropped_by_cap
         FROM swing_batch_runs
         -- ⚠️ pass = 'ENTRIES' is REQUIRED since V063, not a refinement. The admission probe is a
-        -- property of the entry pass; the exits-only settle writes would_enter = 0 (not null), so
-        -- before the key split it was indistinguishable here, and after the split BOTH rows exist
-        -- for the same date — without this predicate a LIMIT n would silently return roughly half
-        -- as many probed sessions as it used to, padded with settle rows carrying zeros.
+        -- property of the entry pass; an exits-only pass writes would_enter = 0 (not null), so
+        -- before the key split it was indistinguishable here, and after the split up to THREE rows
+        -- exist for the same date (ENTRIES + SETTLE + RECOVERY_EXITS) — without this predicate a
+        -- LIMIT n would silently return as little as a third as many probed sessions as it used to,
+        -- padded with exits rows carrying zeros.
         WHERE batch = ? AND pass = 'ENTRIES' AND would_enter IS NOT NULL
         ORDER BY run_date DESC
         LIMIT ?

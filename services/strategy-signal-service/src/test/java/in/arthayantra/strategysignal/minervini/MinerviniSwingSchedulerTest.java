@@ -9,6 +9,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import in.arthayantra.strategysignal.signals.SwingBatchRunRepository.Pass;
 import in.arthayantra.strategysignal.swing.SwingBatchIntentRepository;
 import in.arthayantra.strategysignal.swing.SwingBatchRecorder;
 import java.time.Clock;
@@ -71,7 +72,7 @@ class MinerviniSwingSchedulerTest {
     run();
 
     verify(intents).recordSettled("minervini", SESSION, true);
-    verify(recorder).runScheduled(doctrine, false);
+    verify(recorder).runScheduled(doctrine, Pass.SETTLE);
   }
 
   /**
@@ -86,7 +87,7 @@ class MinerviniSwingSchedulerTest {
 
     run();
 
-    verify(recorder, never()).runScheduled(any(), eq(true));
+    verify(recorder, never()).runScheduled(any(), eq(Pass.ENTRIES));
     verify(recorder, never()).runScheduled(any());
   }
 
@@ -120,7 +121,7 @@ class MinerviniSwingSchedulerTest {
 
     run();
 
-    verify(recorder).runScheduled(doctrine, false);
+    verify(recorder).runScheduled(doctrine, Pass.SETTLE);
   }
 
   /**
@@ -140,7 +141,7 @@ class MinerviniSwingSchedulerTest {
     run();
 
     verify(intents, never()).recordSettled(any(), any(), anyBoolean());
-    verify(recorder, never()).runScheduled(any(), anyBoolean());
+    verify(recorder, never()).runScheduled(any(), any());
     verify(recorder, never()).runScheduled(any());
   }
 

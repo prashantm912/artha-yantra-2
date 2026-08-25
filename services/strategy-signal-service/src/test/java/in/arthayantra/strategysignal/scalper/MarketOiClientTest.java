@@ -241,7 +241,9 @@ class MarketOiClientTest {
       assertThat(announced.get(0).getFormattedMessage())
           .contains("2026-06-30")
           .contains(UNDERLYING)
-          .contains("MONTHLY_EXPIRY_SUPPRESSED");
+          // Assert against the ENUM, not a hardcoded twin of the production string — otherwise the
+          // test and the log line drift together and a rename silently breaks the operator grep.
+          .contains(SentimentLevelShadow.Reason.MONTHLY_EXPIRY_SUPPRESSED.name());
     } finally {
       oiLog.detachAppender(logs);
     }

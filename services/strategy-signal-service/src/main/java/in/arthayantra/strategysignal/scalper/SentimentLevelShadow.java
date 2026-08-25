@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.black76.Black76.OptionType;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Oi;
 import java.math.BigDecimal;
+import java.util.Objects;
 
 /**
  * MEASUREMENT ONLY — the per-bar counterfactual for the active-strike sentiment OPERAND. Nothing on
@@ -63,6 +64,18 @@ public record SentimentLevelShadow(
     Reason reason) {
 
   /**
+   * Fail LOUD on a null {@code reason}. The class javadoc above says the legacy state "cannot be
+   * forged"; until this constructor existed that was PROSE, not code — the canonical constructor is
+   * public and {@link #appendTo} writes {@code "reason": null}, which under {@code ->>'reason'} is
+   * SQL NULL and therefore indistinguishable from an absent key, i.e. from a genuine legacy row.
+   * No production path can reach this (all four sites in {@link #of} pass a constant), so this is a
+   * guard against a future programming error, never a data path. Review finding, 2026-08-25.
+   */
+  public SentimentLevelShadow {
+    Objects.requireNonNull(reason, "reason must never be null — an ABSENT key is the legacy marker");
+  }
+
+  /**
    * Why the counterfactual is, or is not, computable on this bar — the discriminator the four nulls
    * lacked. Serialized by {@link #appendTo} as its {@code name()}.
    *
@@ -78,8 +91,11 @@ public record SentimentLevelShadow(
     /**
      * No OI snapshot reached this measurement at all: the bar was blocked before {@code
      * MarketOiClient.context()} resolved, so neither operand was ever read. Ordinary and frequent:
-     * 4,048 of the 18,080 live rejection rows carrying this block (22.4%, measured 2026-08-25 over
-     * 2026-08-04..25). That alone is why a bare "all four null" carried no information — the common
+     * 4,048 of the 18,080 live rejection ROWS carrying this block (22.4%, measured 2026-08-25 over
+     * 2026-08-04..25). ROWS, NOT INDEPENDENT BARS — this book's slugs fan out, so one bar can
+     * contribute many rows; the share is honest as a share OF ROWS and must not be promoted into
+     * an observation count. The argument it supports (the common case and the by-design case wrote
+     * the identical block) does not depend on independence. That alone is why a bare "all four null" carried no information — the common
      * case and the by-design case wrote the identical block.
      */
     NO_OI_CONTEXT,

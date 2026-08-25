@@ -445,11 +445,14 @@ public class MarketOiClient {
    */
   private void logSuppressionOnce(String underlying, LocalDate tradeDate) {
     if (suppressionLogged.add(tradeDate + "|" + underlying)) {
+      // The enum NAME is interpolated, never spelled out: an operator greps this line and then
+      // greps `diagnostic->'sentimentLevelShadow'->>'reason'` for the same token, so a rename of the
+      // constant must move BOTH or the line becomes a quiet lie. Review finding, 2026-08-25.
       log.info(
           "scalper OI suppressed for monthly-expiry day {} ({}) — chain-OI is corrupted (S24); every"
-              + " OI dot/gate reads non-confirming today and sentimentLevelShadow.reason is"
-              + " MONTHLY_EXPIRY_SUPPRESSED. This is BY DESIGN, not an outage.",
-          tradeDate, underlying);
+              + " OI dot/gate reads non-confirming today and sentimentLevelShadow.reason is {}."
+              + " This is BY DESIGN, not an outage.",
+          tradeDate, underlying, SentimentLevelShadow.Reason.MONTHLY_EXPIRY_SUPPRESSED);
     }
   }
 

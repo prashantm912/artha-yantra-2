@@ -485,7 +485,7 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   (`ay_instrument_be_suffix_inactive_fallback_total`) so the two halves stay separable. `sourced`:
   `TokenResolverAdapter.resolve` gates on `direct.isPresent() && directRow.get().active()`. `computed`
   2026-08-25 from the live DB: `DIACABS` and `MENONBE` are exactly this shape — bare row inactive WITH a
-  token, active `-BE` twin carrying a different one. ⚠️ **The population is TWELVE symbols, not the two
+  token, active `-BE` twin carrying a different one. ⚠️ **The population is **140** symbols, not twelve and not the two
   this bullet used to name** (measured 2026-08-21, and recorded in `TokenResolverAdapter`'s own javadoc):
   every one is `is_active = false` with a token. The two named above are examples, not the set. ⚠️ Still **strictly additive by design**: an inactive
   bare row with NO twin returns its own (rejected) token rather than a 404, so ~389 such NSE rows are
@@ -758,8 +758,9 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   closes** — the disagreement was entirely in a 50-bar mean computed over retro-mutated history.
 - ⚠️ **`nse_eod_bhavcopy` is MULTI-SERIES — filtering `series='EQ'` silently drops real screen
   symbols** (measured 2026-08-04, and it manufactured a false "the guard FAILED" reading). The screen
-  universe spans **`EQ` AND `BE`** (13 series exist overall: EQ, BE, BZ, E1, GB, GS, IV, MF, N1, RR,
-  SM, ST, SZ). A staleness probe written as `series='EQ'` reported **53 screen symbols with no bar at
+  universe spans **`EQ` AND `BE`** (⚠️ **18** series exist as of 2026-08-25: EQ, BE, BZ, E1, GB, GS,
+  IV, MF, N1, N3, P1, RR, SF, SM, ST, SZ, T0, X1 — this said 13 until then and the set GROWS, so
+  re-derive it rather than quoting it). A staleness probe written as `series='EQ'` reported **53 screen symbols with no bar at
   all and 76 more stale** — BODALCHEM, AUTOIND, BGRENERGY and 50 others trade `BE`, so their bars
   were simply outside the filter. Series-agnostic (`series IN ('EQ','BE')`) the same probe returns
   **0 / 0 / 1772 fresh**. **Tell: a "missing data" result that includes liquid, obviously-trading

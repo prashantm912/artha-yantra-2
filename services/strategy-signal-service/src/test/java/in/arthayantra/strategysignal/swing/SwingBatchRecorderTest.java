@@ -16,6 +16,7 @@ import in.arthayantra.strategysignal.signals.DroppedCandidate;
 import in.arthayantra.strategysignal.signals.FlagSnapshotService;
 import in.arthayantra.strategysignal.signals.SwingBatchAlert;
 import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
+import in.arthayantra.strategysignal.signals.SwingBatchRunRepository.Pass;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -74,7 +75,7 @@ class SwingBatchRecorderTest {
             .runAndRecord(
                 doctrine,
                 LocalDate.of(2026, 7, 17),
-                false,
+                Pass.RECOVERY_EXITS,
                 SwingBatchRecorder.MarkerPolicy.NEVER,
                 Optional.of(
                     new SwingDoctrine.CandidateSnapshot(LocalDate.of(2026, 7, 17), List.of())));
@@ -85,7 +86,7 @@ class SwingBatchRecorderTest {
     verify(runs, never())
         .record(
             any(), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
-            anyInt(), anyInt(), anyBoolean(), any(), anyBoolean());
+            anyInt(), anyInt(), anyBoolean(), any(), any());
   }
 
   /**
@@ -104,7 +105,7 @@ class SwingBatchRecorderTest {
   @Test
   void anEntriesDisabledRunAnnouncesAnExitsPassNotACompletedBatch() {
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
-    runOnce(events, false);
+    runOnce(events, Pass.SETTLE);
 
     ArgumentCaptor<SwingBatchAlert> captor = ArgumentCaptor.forClass(SwingBatchAlert.class);
     verify(events).publishEvent(captor.capture());
@@ -114,26 +115,44 @@ class SwingBatchRecorderTest {
         .doesNotContain("batch done");
   }
 
+  /**
+   * The THIRD origin, and the one the comment above already claimed to cover while the boolean
+   * parameter could not express it: the catch-up's exits-only RECOVERY must announce the same
+   * "exits pass complete", never "batch done". Same reasoning, different call site — and now it is
+   * a distinct pass value rather than a second spelling of {@code false}.
+   */
+  @Test
+  void aRecoveryExitsRunAlsoAnnouncesAnExitsPassNotACompletedBatch() {
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    runOnce(events, Pass.RECOVERY_EXITS);
+
+    ArgumentCaptor<SwingBatchAlert> captor = ArgumentCaptor.forClass(SwingBatchAlert.class);
+    verify(events).publishEvent(captor.capture());
+    assertThat(captor.getValue().title())
+        .contains("exits pass complete")
+        .doesNotContain("batch done");
+  }
+
   /** The other half: a real both-passes run must still say what it always said. */
   @Test
   void anEntriesEnabledRunStillAnnouncesTheBatchDone() {
     // ⚠️ Without this the fix could have relabelled EVERY run and the test above would still pass.
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
-    runOnce(events, true);
+    runOnce(events, Pass.ENTRIES);
 
     ArgumentCaptor<SwingBatchAlert> captor = ArgumentCaptor.forClass(SwingBatchAlert.class);
     verify(events).publishEvent(captor.capture());
     assertThat(captor.getValue().title()).contains("batch done");
   }
 
-  /** A clean run — no refusals, no skipped exits — with entries on or off. */
-  private static void runOnce(ApplicationEventPublisher events, boolean entriesEnabled) {
+  /** A clean run — no refusals, no skipped exits — for whichever pass the caller declares. */
+  private static void runOnce(ApplicationEventPublisher events, Pass pass) {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);
     SwingDoctrine doctrine = manasDoctrine();
     when(engine.runDaily(eq(doctrine), any(), anyBoolean(), any(), anyBoolean()))
         .thenReturn(
             new SwingBatchEngine.SwingRun(
-                1, 0, entriesEnabled ? 1 : 0, 2, 0, SwingBatchEngine.AdmissionProbe.empty()));
+                1, 0, pass.takesEntries() ? 1 : 0, 2, 0, SwingBatchEngine.AdmissionProbe.empty()));
     new SwingBatchRecorder(
             engine,
             mock(SwingBatchRunRepository.class),
@@ -145,7 +164,7 @@ class SwingBatchRecorderTest {
         .runAndRecord(
             doctrine,
             LocalDate.of(2026, 7, 17),
-            entriesEnabled,
+            pass,
             SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
             Optional.of(new SwingDoctrine.CandidateSnapshot(LocalDate.of(2026, 7, 17), List.of())));
   }
@@ -190,7 +209,7 @@ class SwingBatchRecorderTest {
     when(engine.runDaily(eq(doctrine), any(), anyBoolean()))
         .thenReturn(new SwingBatchEngine.SwingRun(1, 0, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty()));
 
-    recorderWith(engine, at(2026, 8, 19)).runScheduled(doctrine, false);
+    recorderWith(engine, at(2026, 8, 19)).runScheduled(doctrine, Pass.SETTLE);
 
     assertThat(sessionPassedTo(engine, doctrine))
         .as("a null session means 'settle off the newest bar, whatever day it is' — the H27 defect")
@@ -247,7 +266,7 @@ class SwingBatchRecorderTest {
     when(engine.runDaily(eq(doctrine), any(), anyBoolean()))
         .thenReturn(new SwingBatchEngine.SwingRun(1, 0, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty()));
 
-    recorderWith(engine, at(2026, 5, 28)).runScheduled(doctrine, false);
+    recorderWith(engine, at(2026, 5, 28)).runScheduled(doctrine, Pass.SETTLE);
 
     assertThat(sessionPassedTo(engine, doctrine))
         .as("never 2026-05-27 — reaching back is what corrupts the previous session's marker")
@@ -356,7 +375,7 @@ class SwingBatchRecorderTest {
     verify(runs)
         .record(
             "manas-arora", LocalDate.of(2026, 7, 12), 3, 12, 6, 1, 0, 5, 8, 6, 2, true, dropped,
-            true);
+            Pass.ENTRIES);
     // The batch also persists the sell-decision snapshot for the family it ran.
     verify(sellDecisions).persist(doctrine);
   }
@@ -384,7 +403,7 @@ class SwingBatchRecorderTest {
     verify(runs)
         .record(
             eq("manas-arora"), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
-            anyInt(), anyInt(), anyInt(), anyBoolean(), any(), anyBoolean());
+            anyInt(), anyInt(), anyInt(), anyBoolean(), any(), any());
   }
 
   @Test
@@ -402,7 +421,7 @@ class SwingBatchRecorderTest {
         .thenReturn(result);
     when(runs.record(
             any(), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
-            anyInt(), anyInt(), anyBoolean(), any(), anyBoolean()))
+            anyInt(), anyInt(), anyBoolean(), any(), any()))
         .thenReturn(true);
 
     SwingBatchRecorder recorder =
@@ -411,18 +430,20 @@ class SwingBatchRecorderTest {
             new SwingRunMutex(), events, Clock.systemUTC());
     SwingBatchRecorder.RunOutcome failed =
         recorder.runAndRecord(
-            doctrine, LocalDate.of(2026, 7, 17), true, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
+            doctrine, LocalDate.of(2026, 7, 17), Pass.ENTRIES,
+            SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
             Optional.empty());
     SwingBatchRecorder.RunOutcome emptyScreen =
         recorder.runAndRecord(
-            doctrine, LocalDate.of(2026, 7, 17), true, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
+            doctrine, LocalDate.of(2026, 7, 17), Pass.ENTRIES,
+            SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
             Optional.of(new SwingDoctrine.CandidateSnapshot(LocalDate.of(2026, 7, 17), List.of())));
 
     assertThat(failed.markerRecorded()).isFalse();
     assertThat(emptyScreen.markerRecorded()).isTrue();
     verify(runs).record(
         any(), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
-        anyInt(), anyBoolean(), any(), anyBoolean());
+        anyInt(), anyBoolean(), any(), any());
   }
 
   @Test
@@ -475,7 +496,7 @@ class SwingBatchRecorderTest {
             new SwingRunMutex(), mock(ApplicationEventPublisher.class), Clock.systemUTC());
 
     SwingBatchRecorder.RunOutcome outcome =
-        recorder.runAndRecord(doctrine, null, true, SwingBatchRecorder.MarkerPolicy.ALWAYS);
+        recorder.runAndRecord(doctrine, null, Pass.ENTRIES, SwingBatchRecorder.MarkerPolicy.ALWAYS);
 
     assertThat(outcome.markerRecorded()).isFalse();
     org.mockito.Mockito.verifyNoInteractions(runs);

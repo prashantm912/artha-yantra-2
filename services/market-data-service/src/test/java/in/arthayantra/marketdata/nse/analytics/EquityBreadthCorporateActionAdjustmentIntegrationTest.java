@@ -277,7 +277,11 @@ class EquityBreadthCorporateActionAdjustmentIntegrationTest extends MarketDataIn
         context.indexMemberChange(dateOf(EX_INDEX), List.of(SPLIT, CTRL));
     assertThat(rows).hasSize(2);
     assertThat(changeFor(rows, SPLIT).close())
-        .as("a bind-order slip would read some other session's close")
+        // NOT a bind-ORDER control, and saying so matters: both callers pass the SAME date for all
+        // three date binds, so any permutation of them is a no-op today, and a member/date swap dies
+        // on the text->date cast rather than reading a wrong session. What this pins is ARITY — that
+        // the IN binds land INSIDE the windowed CTE. Review finding, 2026-08-25.
+        .as("the IN binds must land inside the windowed CTE, not after it")
         .isEqualByComparingTo("140.0000");
     assertThat(changeFor(rows, SPLIT).prevClose())
         .as("raw would be 278.0000")
@@ -333,9 +337,13 @@ class EquityBreadthCorporateActionAdjustmentIntegrationTest extends MarketDataIn
     assertThatCode(
             () -> context.advDecSeries(dateOf(BARS - 1), EquityContextRepository.MAX_SERIES_SESSIONS))
         .doesNotThrowAnyException();
+    // isNotEmpty() cannot see the failure this bound EXISTS to prevent: a silent truncation would
+    // still return a non-empty series, just a shorter one than asked for. Size it. The earliest
+    // seeded bar has no prior bar, so it legitimately yields no verdict — hence MAX - 1, not MAX.
+    // Review suggestion, 2026-08-25.
     assertThat(context.advDecSeries(dateOf(BARS - 1), EquityContextRepository.MAX_SERIES_SESSIONS))
-        .as("the fixture seeds 60 bars, so the boundary request returns a real, non-empty series")
-        .isNotEmpty();
+        .as("a truncating lookback would return far fewer than the requested sessions")
+        .hasSizeGreaterThanOrEqualTo(EquityContextRepository.MAX_SERIES_SESSIONS - 1);
   }
 
   /** One session's advance/decline pair, or zeros when that date is absent from the series. */

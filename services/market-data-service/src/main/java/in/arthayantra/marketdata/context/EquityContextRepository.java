@@ -65,6 +65,18 @@ import org.springframework.stereotype.Repository;
  * digest's own {@code adRatio} divides advances by DECLINES and never by {@code total}, which is why
  * this is safe — but do not write a new consumer that assumes the sum closes.
  *
+ * <p>⚠️ <b>THE FOLDS NO LONGER AGREE ON WHICH SYMBOLS GET A VERDICT, and that is new.</b> Before the
+ * CA move every fold read the same {@code prev_close} column, so a symbol was eligible everywhere or
+ * nowhere. Each now carries its OWN prior-bar window: {@code advanceDecline} /
+ * {@code sectorSessionChange} / {@code indexMemberChange} use {@link #PRIOR_BAR_LOOKBACK_DAYS} (45
+ * calendar days), {@code advDecSeries} uses {@code sessions * 3 + 20} (50 at the default window), and
+ * {@code EquityBreadthDailyRepository.COMPUTE_SQL} warms up over 400. So a symbol whose prior bar is
+ * 46–400 days back can get a verdict from one fold and not another — and {@code EquityDigestService}
+ * puts two of them in ONE payload while the breadth page renders the digest A/D above the
+ * {@code equity_breadth_daily} chart. This is a SECOND axis of the same "two planes in one payload"
+ * problem the CA move exists to remove; it is display-only and measured small (2 of 2872 on
+ * 2026-08-24), which is why it is recorded rather than fixed here. Review finding, 2026-08-25.
+ *
  * <p>Idioms match {@code nse.analytics}: plain {@link JdbcTemplate}, positional {@code ?} params,
  * {@code CashEquityUniverse.SERIES_PREDICATE}, {@code java.sql.Date.valueOf} binds, IST-safe {@code (col AT TIME ZONE
  * 'Asia/Kolkata')::date} casts (never a bare {@code ::date}). Every windowed fold carries a lower

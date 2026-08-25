@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.context;
 
+import in.arthayantra.marketdata.equitydaily.AdjustedEquityDailySql;
 import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -99,17 +100,33 @@ public class EquityContextRepository {
    * above their 20- and 50-session simple moving average. Only symbols with a full window count into
    * the respective universe (n20 &ge; 20 / n50 &ge; 50). The 110-calendar-day lower bound comfortably
    * covers 50 trading sessions and chunk-prunes the scan.
+   *
+   * <p>⚠️ Closes are CORPORATE-ACTION-ADJUSTED via {@link AdjustedEquityDailySql#factorLateral} — the
+   * SINGLE definition of that rule (ledger §9-02), CALLED rather than pasted. On raw bhavcopy closes a
+   * split or bonus inside the window collapses the post-ex bars against the pre-ex ones, so the name
+   * reads below its own MA for the next 20/50 sessions and is counted out of {@code above20}/{@code
+   * above50} — a data artifact, not breadth. Same defect class as audit H6 / §9-02. The factor is 1 for
+   * every symbol with no action after the bar, i.e. almost the whole universe, so this is inert there.
+   *
+   * <p>⚠️ The other bhavcopy folds in this class still read RAW closes and were deliberately left
+   * alone — each carries its own basis question and none was in this change's scope. The four that
+   * compare {@code close_price} to the {@code prev_close} COLUMN ({@link #advanceDecline}, {@link
+   * #advDecSeries}, {@link #sectorSessionChange}, {@link #indexMemberChange}) share this fold's
+   * defect: measured 2026-08-25 on the live DB, {@code prev_close} equals the prior session's RAW
+   * close on all 21 ex-dates in 2026-06-01..2026-08-25 that carry a bhavcopy row, so an ex-date reads
+   * as a crash there too. Do not read this fold's adjustment as a claim about them.
    */
   public record AboveMaCounts(int universe20, int above20, int universe50, int above50) {}
 
   public AboveMaCounts aboveMa(LocalDate date) {
     return jdbc.queryForObject(
         "WITH windowed AS ("
-            + "  SELECT symbol, close_price,"
-            + "         ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn"
-            + "  FROM nse_eod_bhavcopy"
-            + "  WHERE " + CashEquityUniverse.SERIES_PREDICATE
-            + "    AND trade_date <= ? AND trade_date > (?::date - INTERVAL '110 days')),"
+            + "  SELECT b.symbol, round(b.close_price * caf.factor, 4) AS close_price,"
+            + "         ROW_NUMBER() OVER (PARTITION BY b.symbol ORDER BY b.trade_date DESC) AS rn"
+            + "  FROM nse_eod_bhavcopy b "
+            + AdjustedEquityDailySql.factorLateral("b", "trade_date")
+            + "  WHERE " + CashEquityUniverse.qualified("b")
+            + "    AND b.trade_date <= ? AND b.trade_date > (?::date - INTERVAL '110 days')),"
             + " per_symbol AS ("
             + "  SELECT symbol,"
             + "         max(close_price) FILTER (WHERE rn = 1) AS last_close,"

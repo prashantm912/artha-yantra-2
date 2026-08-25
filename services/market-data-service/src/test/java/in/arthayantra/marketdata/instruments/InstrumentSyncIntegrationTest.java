@@ -23,6 +23,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ContextConfiguration;
 
 /**
@@ -55,6 +56,7 @@ class InstrumentSyncIntegrationTest extends MarketDataIntegrationTestBase {
   @Autowired private InstrumentSyncService syncService;
   @Autowired private InstrumentRepository repository;
   @Autowired private InstrumentRegistry registry;
+  @Autowired private JdbcTemplate jdbc;
 
   @BeforeEach
   void fullFixture() {
@@ -114,6 +116,87 @@ class InstrumentSyncIntegrationTest extends MarketDataIntegrationTestBase {
     var strikes = repository.strikes("NIFTY 50", expiries.get(0));
     assertThat(strikes).isNotEmpty();
     assertThat(strikes).isSorted();
+  }
+
+  /**
+   * Ledger H30: the by-key read answers 200 for any row that exists, so a caller had no way to
+   * tell a real instrument from a bare key the historical importer created to hang candles off.
+   * {@code masterMetadataMissing} is that distinction — and the three FALSE cases are the
+   * load-bearing half: a flag hardwired true, or defined as {@code !active}, would pass the
+   * placeholder assertion alone.
+   *
+   * <p>⚠️ The SYN-CONT case is the only one of the four that separates the CONJUNCTION from
+   * {@code instrumentToken == null} alone — the simplification a future editor is most likely to
+   * reach for, since the other three fixtures are "all three null" and "all three present". A
+   * synthetic continuous-future row is tokenless BY DESIGN yet named and segmented, it is
+   * {@code is_active = true} and live, and it is returned by this endpoint — so a token-only
+   * regression would ship {@code NIFTY-FUT-CONT} on the wire claiming we know nothing about it.
+   */
+  @Test
+  void byKeyFlagsRowsThatCarryNoMasterMetadata() {
+    syncService.runSync();
+
+    // The importer's exact shape (tools/historical-import/ingest.py, _UPSERT_INSTRUMENT):
+    // a bare key, is_active=false, no token / name / segment.
+    jdbc.update(
+        """
+        INSERT INTO instruments
+          (exchange, tradingsymbol, instrument_type, underlying_exchange,
+           underlying_tradingsymbol, expiry, strike, is_active,
+           first_seen_at, last_seen_at, updated_at)
+        VALUES ('NFO', 'H30IMPORTED25000CE', 'CE', 'NSE', 'NIFTY 50',
+                DATE '2024-01-25', 25000, false, now(), now(), now())
+        ON CONFLICT (exchange, tradingsymbol) DO NOTHING
+        """);
+    // A row the master sync DID know and has since tombstoned: inactive, but fully populated.
+    jdbc.update(
+        """
+        INSERT INTO instruments
+          (exchange, tradingsymbol, instrument_token, exchange_token, name, segment,
+           instrument_type, is_active, first_seen_at, last_seen_at, updated_at)
+        VALUES ('NSE', 'H30DELISTEDCO', 930001, 3633, 'H30 Delisted Co', 'NSE', 'EQ',
+                false, now(), now(), now())
+        ON CONFLICT (exchange, tradingsymbol) DO NOTHING
+        """);
+
+    var placeholder = repository.findByKey("NFO", "H30IMPORTED25000CE").orElseThrow();
+    assertThat(placeholder.masterMetadataMissing())
+        .as("importer placeholder — the master has never populated this row")
+        .isTrue();
+
+    var live = repository.findByKey("NSE", "RELIANCE").orElseThrow();
+    assertThat(live.active()).isTrue();
+    assertThat(live.masterMetadataMissing())
+        .as("a real, fully-populated instrument must read FALSE")
+        .isFalse();
+
+    var delisted = repository.findByKey("NSE", "H30DELISTEDCO").orElseThrow();
+    assertThat(delisted.active()).isFalse();
+    assertThat(delisted.masterMetadataMissing())
+        .as("inactive but fully populated — the flag is NOT a synonym for !active")
+        .isFalse();
+
+    // B-19 synthetic continuous future, seeded through the real writer. A unique symbol: the ITs
+    // share one DB with no per-method cleanup, and the real NIFTY-FUT-CONT belongs to
+    // ContinuousFuturesIntegrationTest.
+    repository.upsertSyntheticCont("NFO", "H30SYNTH-FUT-CONT", "H30SYNTH", "NSE", "H30SYNTH");
+    try {
+      var synthetic = repository.findByKey("NFO", "H30SYNTH-FUT-CONT").orElseThrow();
+      assertThat(synthetic.instrumentToken())
+          .as("guards the case below: this row must stay TOKENLESS or it discriminates nothing")
+          .isNull();
+      assertThat(synthetic.masterMetadataMissing())
+          .as("tokenless by design but named — the rule is the CONJUNCTION, not token-only")
+          .isFalse();
+    } finally {
+      // The ONLY fixture in this method that is is_active=true, and SYN-CONT rows are exempt from
+      // tombstoning by design — so left behind it would survive every later sync and break
+      // syncPersistsFixtureWithStableKeysAndExactDecimals' exact countActive() equality whenever
+      // that method happened to run after this one. In a finally block because IT state also
+      // persists across surefire reruns: a failing assertion must not poison the next run.
+      jdbc.update(
+          "DELETE FROM instruments WHERE exchange = 'NFO' AND tradingsymbol = 'H30SYNTH-FUT-CONT'");
+    }
   }
 
   @Test

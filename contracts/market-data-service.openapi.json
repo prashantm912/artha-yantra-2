@@ -15218,9 +15218,13 @@
           },
           "active" : {
             "type" : "boolean"
+          },
+          "masterMetadataMissing" : {
+            "type" : "boolean",
+            "description" : "True when the row carries no instrument-master metadata at all — the master sync has never populated it, so token/name/segment are unknown rather than merely absent. Purely derived from the three fields above it; a consumer can recompute it from this same response."
           }
         },
-        "required" : [ "active", "exchange", "expiry", "instrumentToken", "instrumentType", "lotSize", "name", "segment", "strike", "tickSize", "tradingsymbol", "underlyingExchange", "underlyingTradingsymbol" ]
+        "required" : [ "active", "exchange", "expiry", "instrumentToken", "instrumentType", "lotSize", "masterMetadataMissing", "name", "segment", "strike", "tickSize", "tradingsymbol", "underlyingExchange", "underlyingTradingsymbol" ]
       },
       "PageInstrument" : {
         "type" : "object",

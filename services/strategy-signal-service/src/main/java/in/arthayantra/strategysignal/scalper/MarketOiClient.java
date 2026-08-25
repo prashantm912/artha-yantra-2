@@ -452,7 +452,7 @@ public class MarketOiClient {
           "scalper OI suppressed for monthly-expiry day {} ({}) — chain-OI is corrupted (S24); every"
               + " OI dot/gate reads non-confirming today and sentimentLevelShadow.reason is {}."
               + " This is BY DESIGN, not an outage.",
-          tradeDate, underlying, SentimentLevelShadow.Reason.MONTHLY_EXPIRY_SUPPRESSED);
+          tradeDate, underlying, SentimentLevelShadow.Reason.MONTHLY_EXPIRY_SUPPRESSED.name());
     }
   }
 

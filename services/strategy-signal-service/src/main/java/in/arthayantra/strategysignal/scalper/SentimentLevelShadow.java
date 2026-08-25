@@ -94,9 +94,9 @@ public record SentimentLevelShadow(
      * 4,048 of the 18,080 live rejection ROWS carrying this block (22.4%, measured 2026-08-25 over
      * 2026-08-04..25). ROWS, NOT INDEPENDENT BARS — this book's slugs fan out, so one bar can
      * contribute many rows; the share is honest as a share OF ROWS and must not be promoted into
-     * an observation count. The argument it supports (the common case and the by-design case wrote
-     * the identical block) does not depend on independence. That alone is why a bare "all four null" carried no information — the common
-     * case and the by-design case wrote the identical block.
+     * an observation count. The argument it supports does not depend on independence: the common
+     * case and the by-design case wrote the identical block, which is why a bare "all four null"
+     * carried no information.
      */
     NO_OI_CONTEXT,
 

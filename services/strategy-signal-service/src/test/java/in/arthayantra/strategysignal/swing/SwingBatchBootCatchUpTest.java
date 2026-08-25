@@ -3,7 +3,6 @@ package in.arthayantra.strategysignal.swing;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
@@ -14,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
+import in.arthayantra.strategysignal.signals.SwingBatchRunRepository.Pass;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -222,7 +222,7 @@ class SwingBatchBootCatchUpTest {
     when(effects.allConfirmed(any(), any())).thenReturn(true);
     when(effects.repairable(any(), any())).thenReturn(List.of());
     when(effects.pendingSessions(any())).thenReturn(List.of());
-    when(recorder.runAndRecord(any(), any(), anyBoolean(), any(), any(), any()))
+    when(recorder.runAndRecord(any(), any(), any(), any(), any(), any()))
         .thenReturn(
             new SwingBatchRecorder.RunOutcome(
                 new SwingBatchEngine.SwingRun(
@@ -370,18 +370,19 @@ class SwingBatchBootCatchUpTest {
                 + " do and forfeits the entries exactly as the bug did")
         .contains(MISSED);
     ArgumentCaptor<LocalDate> session = ArgumentCaptor.forClass(LocalDate.class);
-    ArgumentCaptor<Boolean> entriesReady = ArgumentCaptor.forClass(Boolean.class);
+    ArgumentCaptor<Pass> pass = ArgumentCaptor.forClass(Pass.class);
     verify(recorder)
         .runAndRecord(
-            any(), session.capture(), entriesReady.capture(), any(), any(), any());
+            any(), session.capture(), pass.capture(), any(), any(), any());
     assertThat(session.getValue())
         .as("the sweep must be PINNED to the missed session, not run against today's funnel")
         .isEqualTo(MISSED);
-    assertThat(entriesReady.getValue())
+    assertThat(pass.getValue())
         .as(
             "the whole point of H18 — the 16:00 pass is exits-only, so a boot sweep that does not"
-                + " take ENTRIES recovers nothing that matters")
-        .isTrue();
+                + " take ENTRIES recovers nothing that matters. Naming the PASS rather than a"
+                + " boolean also pins that it is not the exits-only RECOVERY_EXITS origin")
+        .isEqualTo(Pass.ENTRIES);
   }
 
   @Test
@@ -399,7 +400,7 @@ class SwingBatchBootCatchUpTest {
         .as("the boot door must not even SEED while its own flag is off")
         .isEmpty();
     verify(ledger.repo, never()).claim(any(), any(), anyInt());
-    verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+    verify(recorder, never()).runAndRecord(any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -418,7 +419,7 @@ class SwingBatchBootCatchUpTest {
     swingCatchUp(CRON_0906, CRON, doctrine).catchUp();
 
     verify(recorder)
-        .runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+        .runAndRecord(any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -440,7 +441,7 @@ class SwingBatchBootCatchUpTest {
 
     verify(ledger.repo).releaseClaimsFrom(any());
     verify(ledger.repo).claim(BATCH, MISSED, 30);
-    verify(recorder).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+    verify(recorder).runAndRecord(any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -456,7 +457,7 @@ class SwingBatchBootCatchUpTest {
     assertThat(ledger.seeded)
         .as("the cron sweep still seeds its window with the boot door disarmed")
         .contains(MISSED);
-    verify(recorder).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+    verify(recorder).runAndRecord(any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -469,7 +470,7 @@ class SwingBatchBootCatchUpTest {
     assertThat(ledger.seeded)
         .as("07:00 is before the 08:35 fire — nothing has been missed, so the boot door must not run")
         .isEmpty();
-    verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+    verify(recorder, never()).runAndRecord(any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -489,7 +490,7 @@ class SwingBatchBootCatchUpTest {
             + " original boot-catch-up rejection was reasoned from, arriving on the one day type"
             + " where the trading-day-conditional deadline gate is structurally inert")
         .isEmpty();
-    verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+    verify(recorder, never()).runAndRecord(any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -511,7 +512,7 @@ class SwingBatchBootCatchUpTest {
 
     ArgumentCaptor<LocalDate> ran = ArgumentCaptor.forClass(LocalDate.class);
     verify(recorder, atLeastOnce())
-        .runAndRecord(any(), ran.capture(), anyBoolean(), any(), any(), any());
+        .runAndRecord(any(), ran.capture(), any(), any(), any(), any());
     assertThat(ran.getAllValues())
         .as("a weekday holiday inside the cron's own window must actually RUN the prior session's"
             + " pass, pinned to that session, exactly as the holiday-blind 08:35 cron would")
@@ -537,7 +538,7 @@ class SwingBatchBootCatchUpTest {
     assertThat(ledger.seeded)
         .as("an END-OF-DAY batch may not price off a session's partial daily bar")
         .isEmpty();
-    verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+    verify(recorder, never()).runAndRecord(any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -561,7 +562,7 @@ class SwingBatchBootCatchUpTest {
         .as("a sweep without one session run's worth of clear air must not START — a partial entry"
             + " set with the exit pass skipped is strictly worse than not running")
         .isEmpty();
-    verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+    verify(recorder, never()).runAndRecord(any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -578,7 +579,7 @@ class SwingBatchBootCatchUpTest {
     bootCatchUp(BOOTED_0859, CRON, doctrine).onStartup();
 
     assertThat(ledger.seeded).contains(MISSED);
-    verify(recorder).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+    verify(recorder).runAndRecord(any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -603,7 +604,7 @@ class SwingBatchBootCatchUpTest {
         .as("a boot with a full session run's reserve in hand must sweep — refusing it forfeits the"
             + " session's entries permanently")
         .contains(MISSED);
-    verify(recorder).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+    verify(recorder).runAndRecord(any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -621,7 +622,7 @@ class SwingBatchBootCatchUpTest {
     // The sweep's own work is what spends the reserve. One long session run puts the clock at 09:09
     // — past the 09:05 cutoff but still before the 09:15 open, which is exactly the band the old
     // trading-day-conditional deadline gate waved through.
-    when(recorder.runAndRecord(any(), any(), anyBoolean(), any(), any(), any()))
+    when(recorder.runAndRecord(any(), any(), any(), any(), any(), any()))
         .thenAnswer(
             call -> {
               clock.wind(Duration.ofMinutes(10));
@@ -635,7 +636,7 @@ class SwingBatchBootCatchUpTest {
 
     ArgumentCaptor<LocalDate> ran = ArgumentCaptor.forClass(LocalDate.class);
     verify(recorder, atLeastOnce())
-        .runAndRecord(any(), ran.capture(), anyBoolean(), any(), any(), any());
+        .runAndRecord(any(), ran.capture(), any(), any(), any(), any());
     assertThat(ran.getAllValues())
         .as("only the OLDEST owed session may run: after it the clock reads 09:09, so the reserve is"
             + " spent and no NEW session run may start")
@@ -658,7 +659,7 @@ class SwingBatchBootCatchUpTest {
     bootCatchUp(BOOTED_SATURDAY, CRON, doctrine).onStartup();
 
     assertThat(ledger.seeded).isEmpty();
-    verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+    verify(recorder, never()).runAndRecord(any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -678,7 +679,7 @@ class SwingBatchBootCatchUpTest {
         .as("a sweep that cannot emit must not report itself as having run")
         .isFalse();
     assertThat(ledger.seeded).isEmpty();
-    verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+    verify(recorder, never()).runAndRecord(any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -691,14 +692,14 @@ class SwingBatchBootCatchUpTest {
     assertThat(ledger.seeded)
         .as("a schedule that never fires cannot have been missed")
         .isEmpty();
-    verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any(), any(), any());
+    verify(recorder, never()).runAndRecord(any(), any(), any(), any(), any(), any());
   }
 
   @Test
   @DisplayName("a sweep that throws cannot take the service's startup down with it")
   void aFailingSweepIsFailSoft() {
     SwingDoctrine doctrine = armedFamilyMissingThursdaysEntries();
-    when(recorder.runAndRecord(any(), any(), anyBoolean(), any(), any(), any()))
+    when(recorder.runAndRecord(any(), any(), any(), any(), any(), any()))
         .thenThrow(new IllegalStateException("funnel exploded"));
 
     bootCatchUp(BOOTED_0838, CRON, doctrine).onStartup();

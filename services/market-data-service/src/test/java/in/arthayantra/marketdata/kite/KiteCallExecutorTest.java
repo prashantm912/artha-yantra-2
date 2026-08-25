@@ -39,6 +39,85 @@ class KiteCallExecutorTest {
     return CircuitBreakerConfig.custom().minimumNumberOfCalls(1_000).build();
   }
 
+  private static double restCalls(SimpleMeterRegistry meters, KiteCallExecutor.Family family) {
+    return meters.get("ay_broker_rest_calls_total").tag("family", family.name()).counter().count();
+  }
+
+  private static KiteCallExecutor meteredExecutor(
+      RateLimiterConfig limiter, SimpleMeterRegistry meters) {
+    return new KiteCallExecutor(
+        RateLimiterRegistry.of(limiter), CircuitBreakerRegistry.of(lenientBreaker()), meters);
+  }
+
+  /**
+   * H26 step 1: per-family broker-REST volume, the MIGRATING half of the Upstox budget measurement.
+   * Counting Upstox alone would measure remaining headroom, not session demand — projected demand is
+   * what Upstox draws today PLUS what Kite REST carries today. Every attempt that reaches the network
+   * counts, retries included, because a retry draws real budget.
+   */
+  @Test
+  void restCallCounterCountsEveryNetworkAttemptPerFamily() {
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    KiteCallExecutor exec =
+        meteredExecutor(
+            RateLimiterConfig.custom()
+                .limitForPeriod(100)
+                .limitRefreshPeriod(Duration.ofSeconds(1))
+                .timeoutDuration(Duration.ofSeconds(5))
+                .build(),
+            meters);
+
+    AtomicInteger attempts = new AtomicInteger();
+    String result =
+        exec.execute(
+            KiteCallExecutor.Family.HISTORICAL,
+            () -> {
+              if (attempts.incrementAndGet() < 3) {
+                throw new KiteCallExecutor.KiteRateLimitedException(1);
+              }
+              return "ok";
+            });
+    exec.execute(KiteCallExecutor.Family.OPENALGO_QUOTE, () -> "quote");
+
+    assertThat(result).isEqualTo("ok");
+    assertThat(attempts.get()).isEqualTo(3);
+    assertThat(restCalls(meters, KiteCallExecutor.Family.HISTORICAL))
+        .as("3 network attempts (1 + 2 retries), not 1 logical call")
+        .isEqualTo(3.0);
+    assertThat(restCalls(meters, KiteCallExecutor.Family.OPENALGO_QUOTE))
+        .as("families are separable, so the Kite-only migrating share can be summed")
+        .isEqualTo(1.0);
+    assertThat(restCalls(meters, KiteCallExecutor.Family.DUMP))
+        .as("an untouched family stays at zero")
+        .isEqualTo(0.0);
+  }
+
+  /**
+   * A call the limiter refuses never reaches Kite, so it must not be counted as broker volume — the
+   * counter sits INSIDE both decorators precisely so this case is excluded.
+   */
+  @Test
+  void restCallCounterExcludesCallsThatNeverReachTheNetwork() {
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    KiteCallExecutor exec =
+        meteredExecutor(
+            RateLimiterConfig.custom()
+                .limitForPeriod(1)
+                .limitRefreshPeriod(Duration.ofMinutes(30))
+                .timeoutDuration(Duration.ZERO)
+                .build(),
+            meters);
+
+    exec.execute(KiteCallExecutor.Family.HISTORICAL, () -> "burns the single permit");
+    assertThatThrownBy(
+            () -> exec.execute(KiteCallExecutor.Family.HISTORICAL, () -> "refused by the limiter"))
+        .isInstanceOf(ApiException.class);
+
+    assertThat(restCalls(meters, KiteCallExecutor.Family.HISTORICAL))
+        .as("only the attempt that actually reached the network counts")
+        .isEqualTo(1.0);
+  }
+
   @Test
   void fiftyRequestBurstNeverExceedsThreePerSecond() throws Exception {
     // the production kite-historical budget: 3 permits / 1 s, queue rather than reject

@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.upstox;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import in.arthayantra.marketdata.upstox.UpstoxRateLimiter.WindowStat;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -32,6 +33,12 @@ class UpstoxRateLimiterTest {
   private static UpstoxRateLimiter window(double reserveFraction, int max) {
     return new UpstoxRateLimiter(
         reserveFraction, () -> false, new String[] {"w"}, new long[] {3_600_000L}, new int[] {max});
+  }
+
+  /** A metered single window, market closed, nothing reserved for live. */
+  private static UpstoxRateLimiter metered(int max, long windowMs, SimpleMeterRegistry meters) {
+    return new UpstoxRateLimiter(
+        0.0, () -> false, new String[] {"w"}, new long[] {windowMs}, new int[] {max}, meters);
   }
 
   @Test
@@ -157,6 +164,88 @@ class UpstoxRateLimiterTest {
 
     parkedBatch.interrupt();
     parkedBatch.join(1_000);
+  }
+
+  @Test
+  void budgetTelemetryCountsLiveAndBatchCallsSeparately() {
+    // H26 step 1: the two priorities have different irreducibility (only the live half cannot be
+    // deferred), so a session total that cannot be split is not the number the owner needs.
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    UpstoxRateLimiter limiter = metered(10, 3_600_000L, meters);
+
+    assertThat(limiter.tryAcquire(50)).isTrue();
+    assertThat(limiter.tryAcquire(50)).isTrue();
+    assertThat(limiter.tryAcquire(50)).isTrue();
+    limiter.acquireForBatch();
+    limiter.acquireForBatch();
+
+    assertThat(meters.get("ay_upstox_calls_total").tag("path", "live").counter().count())
+        .isEqualTo(3.0);
+    assertThat(meters.get("ay_upstox_calls_total").tag("path", "batch").counter().count())
+        .isEqualTo(2.0);
+    assertThat(used(limiter, "w"))
+        .as("telemetry is observational: the budget still debits exactly as before")
+        .isEqualTo(5);
+  }
+
+  @Test
+  void budgetTelemetryCountsRefusedLiveAcquisitions() {
+    // The single most important series: a refused live slot is DIRECT evidence of exhaustion, and it
+    // is silent by construction today because tryAcquire fails soft and records nothing.
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    UpstoxRateLimiter limiter = metered(1, 3_600_000L, meters);
+
+    assertThat(limiter.tryAcquire(50)).isTrue(); // fills the only slot
+    assertThat(limiter.tryAcquire(50)).isFalse();
+    assertThat(limiter.tryAcquire(50)).isFalse();
+
+    assertThat(meters.get("ay_upstox_live_refused_total").counter().count()).isEqualTo(2.0);
+    assertThat(meters.get("ay_upstox_calls_total").tag("path", "live").counter().count())
+        .as("a refused acquisition is not a call")
+        .isEqualTo(1.0);
+  }
+
+  @Test
+  void peakUsedRetainsABurstTheSnapshotHasAlreadyLost() {
+    // The crux of H26 step 1. getUsageStats() is an instantaneous SNAPSHOT, so a burst that happens
+    // between two 15 s scrapes is invisible to it — which is exactly the question "did we ever come
+    // close to the cap" needs answered. Fill 4 of 10 slots, let the window drain, and the snapshot
+    // reads 0 while the high-water mark still reports the 4 that were actually reached.
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    UpstoxRateLimiter limiter = metered(10, 2_000L, meters);
+    for (int i = 0; i < 4; i++) {
+      assertThat(limiter.tryAcquire(50)).isTrue();
+    }
+    assertThat(used(limiter, "w")).isEqualTo(4);
+
+    Awaitility.await().atMost(Duration.ofSeconds(10)).until(() -> used(limiter, "w") == 0);
+
+    assertThat(meters.get("ay_upstox_rate_window_peak_used").tag("window", "w").gauge().value())
+        .as("the burst is gone from the snapshot; the high-water mark must still carry it")
+        .isEqualTo(4.0);
+    assertThat(meters.get("ay_upstox_rate_window_max").tag("window", "w").gauge().value())
+        .as("a peak is uninterpretable without its cap on the same scrape")
+        .isEqualTo(10.0);
+  }
+
+  @Test
+  void peakUsedKeepsTheMaximumNotTheLastOccupancy() {
+    // The property the sibling test above CANNOT observe: it only pins that the value survives a
+    // drain, and a last-value implementation survives a drain identically (the last record() IS the
+    // burst). Under last-value a 30m window that peaked at 1700 in-session and then took one quiet
+    // evening call would report 1/1800 — "vast headroom", the exact number H26 step 1 exists to
+    // produce, and an architecture would be committed to it.
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    UpstoxRateLimiter limiter = metered(10, 2_000L, meters);
+    for (int i = 0; i < 6; i++) {
+      assertThat(limiter.tryAcquire(50)).isTrue();
+    }
+    Awaitility.await().atMost(Duration.ofSeconds(10)).until(() -> used(limiter, "w") == 0);
+    assertThat(limiter.tryAcquire(50)).isTrue(); // one later call: occupancy is now 1
+
+    assertThat(meters.get("ay_upstox_rate_window_peak_used").tag("window", "w").gauge().value())
+        .as("a later quiet call must not lower the session high-water mark")
+        .isEqualTo(6.0);
   }
 
   @Test

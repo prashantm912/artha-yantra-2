@@ -15,12 +15,18 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
- * Audit-H6 / ledger §9-02 equality IT for the two BREADTH consumers that were never swept onto the
- * CA-adjusted plane: {@link EquityBreadthDailyRepository#compute} and {@link
- * EquityContextRepository#aboveMa}. Both used to read raw {@code nse_eod_bhavcopy} closes, so a
- * split or bonus ex-date inside the window collapsed the name against its unadjusted prior close
- * (counted a DECLINE) and dropped it below its own SMA for the next 50/200 sessions (counted out of
- * the above-MA numerator) — a data artifact, not market breadth.
+ * Audit-H6 / ledger §9-02 equality IT for every BREADTH/equity-context fold that was never swept
+ * onto the CA-adjusted plane: {@link EquityBreadthDailyRepository#compute} plus all six price folds
+ * in {@link EquityContextRepository} ({@code aboveMa}, {@code advanceDecline}, {@code advDecSeries},
+ * {@code sectorSessionChange}, {@code indexMemberChange}, {@code returnBases}). They all used to read
+ * raw {@code nse_eod_bhavcopy} closes, so a split or bonus ex-date inside the window collapsed the
+ * name against its unadjusted prior close (counted a DECLINE, and a ~-50% session move) and dropped
+ * it below its own SMA for the next 50/200 sessions — a data artifact, not market breadth.
+ *
+ * <p>They are tested in ONE file on ONE fixture because they must move together: {@code
+ * EquityDigestService} assembles them into adjacent fields of a single response record, so adjusting
+ * some and not others puts two price planes in one payload. A per-fold test file would let that
+ * inconsistency back in one fold at a time.
  *
  * <p>The fixture seeds ONE 2:1 split name whose RAW bhavcopy carries the cliff (pre-ex closes are 2x
  * the continuous level) plus its {@code eod_corporate_actions} ratio row, alongside a control name
@@ -183,5 +189,132 @@ class EquityBreadthCorporateActionAdjustmentIntegrationTest extends MarketDataIn
     assertThat(after.above50() - before.above50())
         .as("raw MA50 of the split name is 209.2 vs its 159 close; adjusted it is 134.5")
         .isEqualTo(2);
+  }
+
+  /**
+   * {@link EquityContextRepository#advanceDecline} on the ex-date. Adjusted, both names rose 139 ->
+   * 140, so advances gains TWO and declines gains none. Raw, the split name reads 140 against its
+   * unadjusted prior close of 278, so advances would gain ONE and declines one.
+   */
+  @Test
+  void advanceDeclineReadsTheExDateAsAnAdvance() {
+    LocalDate exDate = dateOf(EX_INDEX);
+    EquityContextRepository.AdCounts before = context.advanceDecline(exDate);
+
+    seed();
+
+    EquityContextRepository.AdCounts after = context.advanceDecline(exDate);
+    assertThat(after.total() - before.total()).isEqualTo(2);
+    assertThat(after.advances() - before.advances())
+        .as("both names advanced 139 -> 140 on the adjusted plane")
+        .isEqualTo(2);
+    assertThat(after.declines() - before.declines())
+        .as("the raw cliff (278 -> 140) must not be counted as a decline")
+        .isZero();
+  }
+
+  /**
+   * {@link EquityContextRepository#advDecSeries} — the breadth-thrust series. Same discriminator, on
+   * the ex-date entry of a 3-session window. The two NON-ex sessions in the same window are the
+   * control that legitimately stays green either way: away from an ex-date the adjustment factor is
+   * identical on both bars, so the ratio, and therefore the verdict, is unchanged.
+   */
+  @Test
+  void advDecSeriesReadsTheExDateSessionAsAnAdvance() {
+    LocalDate exDate = dateOf(EX_INDEX);
+    AdPair before = adOn(exDate, 3, exDate);
+    AdPair beforePrior = adOn(exDate, 3, dateOf(EX_INDEX - 1));
+
+    seed();
+
+    AdPair after = adOn(exDate, 3, exDate);
+    AdPair afterPrior = adOn(exDate, 3, dateOf(EX_INDEX - 1));
+    assertThat(after.adv() - before.adv())
+        .as("ex-date session: both names advance on the adjusted plane")
+        .isEqualTo(2);
+    assertThat(after.dec() - before.dec()).as("no decline from the raw cliff").isZero();
+    assertThat(afterPrior.adv() - beforePrior.adv())
+        .as("control: a NON-ex session is +2 advances on either plane")
+        .isEqualTo(2);
+    assertThat(afterPrior.dec() - beforePrior.dec()).isZero();
+  }
+
+  /**
+   * {@link EquityContextRepository#sectorSessionChange} — the sector-rotation per-symbol read. This
+   * one asserts VALUES rather than a delta, because the row is addressable by symbol: adjusted, the
+   * split name's prior close is 139.00; raw it is 278.00, i.e. a -49.6% session move the market never
+   * made. The control name is asserted at the same values to show the fixture is not simply
+   * rescaling everything.
+   */
+  @Test
+  void sectorSessionChangeReportsTheAdjustedPriorClose() {
+    seed();
+
+    List<EquityContextRepository.SessionChange> rows = context.sectorSessionChange(dateOf(EX_INDEX));
+    assertThat(changeFor(rows, SPLIT).close()).isEqualByComparingTo("140.0000");
+    assertThat(changeFor(rows, SPLIT).prevClose())
+        .as("raw would be 278.0000 — the unadjusted pre-split close")
+        .isEqualByComparingTo("139.0000");
+    assertThat(changeFor(rows, CTRL).close()).isEqualByComparingTo("140.0000");
+    assertThat(changeFor(rows, CTRL).prevClose())
+        .as("control: no corporate action, identical on either plane")
+        .isEqualByComparingTo("139.0000");
+  }
+
+  /**
+   * {@link EquityContextRepository#indexMemberChange} — same read with the index-member {@code IN}
+   * filter, which also pins the bind ORDER (the member binds sit inside the windowed CTE, between the
+   * two lookback dates and the emitted-session pin). A bind-order slip does not throw; it reads the
+   * wrong session, so the date assertion below is what catches it.
+   */
+  @Test
+  void indexMemberChangeReportsTheAdjustedPriorCloseAndBindsInOrder() {
+    seed();
+
+    List<EquityContextRepository.SessionChange> rows =
+        context.indexMemberChange(dateOf(EX_INDEX), List.of(SPLIT, CTRL));
+    assertThat(rows).hasSize(2);
+    assertThat(changeFor(rows, SPLIT).close())
+        .as("a bind-order slip would read some other session's close")
+        .isEqualByComparingTo("140.0000");
+    assertThat(changeFor(rows, SPLIT).prevClose())
+        .as("raw would be 278.0000")
+        .isEqualByComparingTo("139.0000");
+    assertThat(changeFor(rows, CTRL).prevClose()).isEqualByComparingTo("139.0000");
+  }
+
+  /**
+   * {@link EquityContextRepository#returnBases} — the multi-session return legs. Read at bar 43 with
+   * a 6-session base, the base row (rn 6) is bar 38, which is PRE-ex: adjusted 138.00, raw 276.00. A
+   * post-ex base would not discriminate at all, which is why the read date is offset from the ex-date
+   * rather than sitting on it.
+   */
+  @Test
+  void returnBasesReadsAPreExBaseOnTheAdjustedPlane() {
+    seed();
+
+    List<EquityContextRepository.ReturnBase> rows = context.returnBases(dateOf(EX_INDEX + 3), 6);
+    EquityContextRepository.ReturnBase split =
+        rows.stream().filter(r -> r.symbol().equals(SPLIT)).findFirst().orElseThrow();
+    assertThat(split.c0()).isEqualByComparingTo("143.0000");
+    assertThat(split.cPrior())
+        .as("raw would be 276.0000 — a fabricated -48% over six sessions")
+        .isEqualByComparingTo("138.0000");
+  }
+
+  /** One session's advance/decline pair, or zeros when that date is absent from the series. */
+  private record AdPair(int adv, int dec) {}
+
+  private AdPair adOn(LocalDate asOf, int sessions, LocalDate wanted) {
+    return context.advDecSeries(asOf, sessions).stream()
+        .filter(a -> a.tradeDate().equals(wanted))
+        .findFirst()
+        .map(a -> new AdPair(a.advances(), a.declines()))
+        .orElse(new AdPair(0, 0));
+  }
+
+  private static EquityContextRepository.SessionChange changeFor(
+      List<EquityContextRepository.SessionChange> rows, String symbol) {
+    return rows.stream().filter(r -> r.symbol().equals(symbol)).findFirst().orElseThrow();
   }
 }

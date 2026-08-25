@@ -36,7 +36,17 @@ import org.springframework.stereotype.Component;
  * UpstoxQuoteInstrumentKeys}), issues ONE batch {@code /v2/market-quote/quotes} call (no fan-out), and
  * maps each {@link UpstoxQuoteClient.Tick} back to the domain {@link Quote}. Keys with no Upstox
  * mapping are simply omitted from the batch, so the caller treats them as absent — matching the {@code
- * QuoteGateway} contract — and the Kite path remains the source for them.
+ * QuoteGateway} contract.
+ *
+ * <p>⚠️ <b>THERE IS NO KITE FALLBACK FOR THOSE OMITTED KEYS, and the sentence that used to stand
+ * here said the opposite.</b> The source flags select MUTUALLY-EXCLUSIVE beans: this class is
+ * {@code @ConditionalOnProperty(name = "artha.marketdata.source.quotes", havingValue = "upstox")}
+ * and the Kite {@link in.arthayantra.marketdata.kite.live.LiveQuoteGateway} bean is the SAME
+ * property with {@code havingValue = "kite", matchIfMissing = true}. So when this bean exists the
+ * Kite one does NOT, this class holds no Kite delegate, and an unmapped key is SILENTLY ABSENT
+ * rather than served by Kite. Kite is the bound DEFAULT, not a runtime fallback. The composite
+ * primary+fallback that would make the old sentence true is UNBUILT — ledger row H26.
+ * Audit EXT-04, corrected 2026-08-25.
  */
 @Component
 @Profile("live")

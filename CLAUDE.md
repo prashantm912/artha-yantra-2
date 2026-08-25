@@ -463,8 +463,12 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   MUTUALLY-EXCLUSIVE beans (`LiveKiteConfig:241`) — flipping the quote/ticker source to Upstox/OpenAlgo REMOVES
   the Kite bean entirely (`UpstoxQuoteGateway:75` drops unmapped keys with no Kite delegate), so a live miss
   does NOT fall through to Kite. Kite-as-fallback holds only while the source flag stays Kite (the current
-  default). ⚠️ **`application.yml:104` and `UpstoxQuoteGateway:39` BOTH claim "Kite stays the fallback for
-  unmapped keys" — that comment is FALSE; there is no delegate and unmapped keys are silently absent.**
+  default). ⚠️ **The two comments that used to claim "Kite stays the fallback for unmapped keys"
+  (`application.yml` `source.quotes`, `UpstoxQuoteGateway`'s javadoc) were FALSE and are now CORRECTED
+  in place — the beans are MUTUALLY EXCLUSIVE (`liveQuoteGateway` is `havingValue = "kite",
+  matchIfMissing = true`; `UpstoxQuoteGateway` is `havingValue = "upstox"`), so there is no delegate
+  and unmapped keys are SILENTLY ABSENT. The behaviour is unchanged; only the lie is gone. Do not
+  re-file this as an open comment defect.**
   Composite primary+fallback is unbuilt — but **W-U4 is NO LONGER declined: the owner reversed it
   2026-08-17 and asked for Upstox primary + Kite as a rate-limit fallback (ledger H26).** Building that
   composite is the item; the blocker is instrument identity, not candles. ⚠️ **H26's OUTAGE argument is

@@ -309,6 +309,53 @@ def test_take_eligible_generates_promote_and_advances_state():
     assert cand["state"] == "TAKE_ELIGIBLE"
 
 
+def _fenced_recon(gap_z=-6.0):
+    """A ledger-H9 cross-basis-fenced swing reconciliation, in the shape the computer persists."""
+    return {
+        "id": "recon-fenced",
+        "verdict": "INSUFFICIENT",
+        "gapZ": gap_z,
+        "gap": {
+            "mode": "swing",
+            "crossBasis": {
+                "fenced": True,
+                "reason": "cross-basis: live fills at the official NSE close (bhavcopy "
+                          "close_price), replay fills at the candle close",
+                "liveFillBasis": "official_nse_close",
+                "replayFillBasis": "candle_close",
+            },
+        },
+    }
+
+
+def test_a_cross_basis_fenced_recon_blocks_take_and_says_waiting_will_not_help():
+    # ⚠️ live_gap is REQUIRED for SIM_FIRST (swing) TAKE, so a fenced INSUFFICIENT BLOCKS promotion
+    # via the existing closed-fail-open. That is the conservative direction — nothing is promoted on
+    # evidence we KNOW to be incomparable — but it is only defensible if the operator is told which
+    # of the two INSUFFICIENTs they are looking at. "Below the evidence floor" invites them to wait
+    # for lived weeks; the fence never clears that way.
+    pending: list[str] = []
+    gate = proposals._live_gap_gate_from_recon(_fenced_recon(), pending)
+
+    assert gate["status"] == "SKIPPED"
+    assert len(pending) == 1
+    assert "FENCED" in pending[0] and "ledger H9" in pending[0]
+    assert "Waiting longer will NOT clear it" in pending[0]
+    assert "below the §7.2 evidence floor" not in pending[0]
+
+
+def test_an_ordinary_insufficient_keeps_the_evidence_floor_wording():
+    # The control: an unfenced INSUFFICIENT must NOT be relabelled as a fence, or the two operator
+    # states collapse back into one and the distinction above buys nothing.
+    pending: list[str] = []
+    recon = {"id": "r", "verdict": "INSUFFICIENT", "gapZ": None, "gap": {"mode": "swing"}}
+    gate = proposals._live_gap_gate_from_recon(recon, pending)
+
+    assert gate["status"] == "SKIPPED"
+    assert "below the §7.2 evidence floor" in pending[0]
+    assert "FENCED" not in pending[0]
+
+
 def test_take_eligible_blocked_by_unevaluated_live_gap():
     # audit PF-01 fail-CLOSED: F7 metrics all clear + capital present, but NO reconciliation → the
     # §7.2 live-gap gate is SKIPPED. A REQUIRED gate that could not run must not read as a pass, so

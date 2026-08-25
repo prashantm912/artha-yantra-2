@@ -51,8 +51,9 @@ public class EngineExitListener {
 
   /**
    * Settles every open position linked to the exited anchor with the engine's reason — at the event's
-   * explicit price when present (the Phase-9 swing batch's daily-bar close for non-ticking equities),
-   * else at the live LTP (the tick-engine default).
+   * explicit price when present (the swing batch's session settle price for non-ticking equities —
+   * the OFFICIAL NSE close since ledger H9, its daily-bar close only when the exchange published
+   * none), else at the live LTP (the tick-engine default).
    */
   @EventListener
   public void onSignalExited(SignalExited event) {

@@ -606,6 +606,20 @@ def _live_gap_gate_from_recon(
         return {"id": "live_gap", "status": "FAIL", "value": gap_z, "note": "§7.2 DIVERGENT"}
     if verdict in ("ALIGNED", "PENALIZED"):
         return {"id": "live_gap", "status": "PASS", "value": gap_z}
+    fence = scoring.cross_basis_fence(recon)
+    if fence is not None:
+        # live_gap is REQUIRED for SIM_FIRST (swing) TAKE, so this SKIPPED BLOCKS promotion -- the
+        # existing closed-fail-open. That is the conservative direction (nothing is promoted on
+        # evidence we know to be incomparable), but the operator must be told it is the FENCE
+        # blocking them and not a shortage of lived weeks, or they will wait for evidence that
+        # cannot arrive.
+        pending.append(
+            "reconciliation is FENCED to INSUFFICIENT (ledger H9) - "
+            f"{fence.get('reason')} - the live-gap gate is SKIPPED; REQUIRED for SIM_FIRST TAKE, "
+            "so this BLOCKS promotion. Waiting longer will NOT clear it: the fence lifts only when "
+            "live and replay agree on a fill basis"
+        )
+        return {"id": "live_gap", "status": "SKIPPED", "value": gap_z}
     pending.append(
         f"reconciliation verdict {verdict!r} is below the §7.2 evidence floor — the live-gap gate "
         "is SKIPPED; REQUIRED for SIM_FIRST TAKE, so INSUFFICIENT evidence BLOCKS (never a "

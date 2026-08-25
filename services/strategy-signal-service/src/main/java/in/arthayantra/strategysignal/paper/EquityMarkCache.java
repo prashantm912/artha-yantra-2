@@ -23,9 +23,14 @@ import org.springframework.stereotype.Component;
  * 2026-08-13, {@code HLEN ticks:last} = 307 and NOT ONE entry is an NSE cash-equity symbol, so
  * EVERY swing position (manas-arora + minervini, 18 open) marked at its own entry price and the
  * books' whole +₹27,213.97 of unrealized gain was invisible to book equity. The swing exit pass
- * already settles these same positions at the daily-bar close for precisely this reason
+ * already settles these same positions at an explicit session price for precisely this reason
  * ({@code SwingBatchEngine}: "the equities don't tick, so an LTP close would book breakeven"), so
  * the correct mark was already in hand once a day and simply never captured.
+ *
+ * <p>⚠️ Since ledger H9 that session price is the OFFICIAL NSE close (bhavcopy) when the exchange
+ * published one, and the daily-bar close only when it did not — {@code SwingBatchEngine} resolves it
+ * ONCE per symbol and hands the SAME number to the exit fill and to this cache, so book equity and
+ * realized P&amp;L can never disagree about one symbol on one night by the closing-auction delta.
  *
  * <p><b>Why not fetch one.</b> The three obvious sources — {@code MarketDataCandlesClient}, a
  * {@code marketdata.candles} read, a market-data quote endpoint — are all blocking HTTP, and

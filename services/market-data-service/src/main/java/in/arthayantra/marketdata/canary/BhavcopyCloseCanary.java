@@ -4,6 +4,7 @@ import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
 import in.arthayantra.marketdata.constituents.StaticIndexConstituents;
+import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import in.arthayantra.marketdata.kite.GapBackfiller;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import io.micrometer.core.instrument.Counter;
@@ -195,6 +196,7 @@ public class BhavcopyCloseCanary {
 
   private final JdbcTemplate jdbc;
   private final NtfyClient ntfy;
+  private final IngestRunLedger ledger;
   private final Clock clock;
   private final StaticIndexConstituents constituents;
   private final GapBackfiller backfiller;
@@ -273,6 +275,7 @@ public class BhavcopyCloseCanary {
   public BhavcopyCloseCanary(
       JdbcTemplate jdbc,
       NtfyClient ntfy,
+      IngestRunLedger ledger,
       Clock clock,
       StaticIndexConstituents constituents,
       GapBackfiller backfiller,
@@ -288,6 +291,7 @@ public class BhavcopyCloseCanary {
       @Value("${artha.bhavcopy-close.prefetch-cron:0 5 16 * * MON-FRI}") String prefetchCron) {
     this.jdbc = jdbc;
     this.ntfy = ntfy;
+    this.ledger = ledger;
     this.clock = clock;
     this.constituents = constituents;
     this.backfiller = backfiller;
@@ -550,8 +554,29 @@ public class BhavcopyCloseCanary {
     if (!live || !enabled) {
       return;
     }
-    LocalDate latest = latestTradeDate();
+    // ⚠️ The ledger row opens HERE, before any of the three exits below, because EveningChainCanary
+    // asks "will anything more run tonight" and every one of those exits answers "no" (review Major
+    // C, 2026-08-17). This is the last market-data job before the 19:00 shutdown and it wrote nothing
+    // at all, so the 18:59 check could not see it and announced "safe to shut down" over it. It is
+    // deliberately NOT inside the live/enabled gate: a canary switched off is not a leg that ran, and
+    // a row claiming otherwise would be the same lie in a different place — with the gate closed the
+    // source simply stays outstanding, which is what a disabled leg before shutdown honestly is.
+    Long runId = ledger.start(IngestRunLedger.SOURCE_BHAVCOPY_CLOSE);
+    // ⚠️ INSIDE the try, because this read sits AFTER the row is opened. It was outside, so a
+    // DataAccessException here left the row RUNNING forever and rethrew out of the @Scheduled
+    // sweep — a leg stuck PENDING at the 18:59 shutdown check with no owner, which is the exact
+    // never-resolving alert this class's javadoc warns about. IngestRunReaper would eventually
+    // close it at the next boot, but "eventually, on a restart" is not terminal tonight.
+    LocalDate latest;
+    try {
+      latest = latestTradeDate();
+    } catch (RuntimeException e) {
+      log.warn("bhavcopy-close canary could not read the latest trade date: {}", e.getMessage());
+      ledger.fail(runId, e.getMessage());
+      return;
+    }
     if (latest == null) {
+      ledger.skip(runId, "nse_eod_bhavcopy is empty — there is nothing to compare");
       return;
     }
     LocalDate today = LocalDate.now(clock.withZone(Ist.ZONE));
@@ -563,6 +588,9 @@ public class BhavcopyCloseCanary {
               + " bar for today (a late publish, or a non-trading weekday), and comparing an older"
               + " session would alert on the wrong day",
           latest, today);
+      // SKIPPED, never SUCCESS: this comparison is permanently missed for the session (see the
+      // javadoc above), so it is terminal — but nothing was compared and the row must not say it was.
+      ledger.skip(runId, "newest bhavcopy is " + latest + ", not today (" + today + ")");
       return;
     }
     BhavcopyCloseReport report;
@@ -570,9 +598,18 @@ public class BhavcopyCloseCanary {
       report = evaluate(latest);
     } catch (RuntimeException e) {
       log.warn("bhavcopy-close canary failed: {}", e.getMessage());
+      ledger.fail(runId, e.getMessage());
       return;
     }
     publish(report);
+    // ⚠️ `compared()` is a COMPARISON count, not rows stored — a third meaning for this column after
+    // #1452 established it counts rows SUBMITTED to an upsert rather than stored. Inert today:
+    // IngestRunLedger.succeededToday (the only reader that gates on rows_written > 0, added #1454)
+    // has exactly two call sites, both NseEodScheduler.retryIfFailed for the three NSE sources, and
+    // IngestHealthBoard pivots IngestCoverageCanary.EXPECTED, which excludes BHAVCOPY_CLOSE. Said
+    // out loud because a zero-comparison evening WOULD read as "never succeeded" the day anything
+    // starts gating on this source, and the next reader should not have to re-derive that.
+    ledger.succeed(runId, report.compared());
   }
 
   /** The newest EQ bhavcopy trade date, or {@code null} when the table is empty. */

@@ -136,6 +136,9 @@ public class ManasController {
       backtestService;
   private final ScreenerHistoryRepository history;
 
+  /** Ledger H13 — shared with {@code ManasScheduler}; this controller publishes the screen itself. */
+  private final ManasScreenLock screenLock;
+
   /** Wires the screener + screen/geometry repositories + the funnel + swing-backtest service. */
   public ManasController(
       ManasScreenService screener,
@@ -144,7 +147,8 @@ public class ManasController {
       ManasSetupsRepository setupsRepo,
       ManasFunnelService funnelService,
       ManasAroraBacktestService backtestService,
-      ScreenerHistoryRepository history) {
+      ScreenerHistoryRepository history,
+      ManasScreenLock screenLock) {
     this.screener = screener;
     this.repo = repo;
     this.geometryService = geometryService;
@@ -152,6 +156,7 @@ public class ManasController {
     this.funnelService = funnelService;
     this.backtestService = backtestService;
     this.history = history;
+    this.screenLock = screenLock;
   }
 
   /**
@@ -189,6 +194,22 @@ public class ManasController {
       @RequestParam(defaultValue = "true") boolean passesAllOnly,
       @RequestParam(defaultValue = "50") int limit) {
     int cappedLimit = Math.min(Math.max(1, limit), 500);
+    // ⚠️ Ledger H13, and this door is the reason the lock is a shared bean. Unlike the minervini
+    // controller — which delegates to MinerviniScheduler.runOnce and inherits its lock — this method
+    // publishes the screen ITSELF, so without this it can run concurrently with the 18:48 cron or
+    // the bhavcopy-complete event. BLOCKING, like every other HTTP door: waiting is acceptable on a
+    // request thread, and skipping would be wrong for a forced recompute (it would return a screen
+    // it did not compute). See ManasScreenLock for why a concurrent replaceAll MERGES two candidate
+    // sets rather than merely repeating work.
+    screenLock.lock();
+    try {
+      return runLocked(asOf, cappedLimit, passesAllOnly);
+    } finally {
+      screenLock.unlock();
+    }
+  }
+
+  private ScreenResponse runLocked(LocalDate asOf, int cappedLimit, boolean passesAllOnly) {
     ManasScreenService.ScreenResult res = screener.screen(asOf);
     if (res.screenDate() == null) {
       return new ScreenResponse(List.of(), null, 0, cappedLimit, 0);

@@ -105,4 +105,22 @@ class NtfyClientHeaderTest {
     assertThat(receivedTitle.get()).isNull();
     assertThat(meters.counter("ay_ntfy_send_failed_total").count()).isZero();
   }
+
+  /** trySend reports the delivery outcome instead of swallowing it — the EveningChainCanary case. */
+  @Test
+  void trySendReportsTrueOnSuccessAndFalseOnFailure() {
+    assertThat(client.trySend("ok", "default", "body")).isTrue();
+
+    server.stop(0);
+    assertThat(client.trySend("ok", "default", "body")).isFalse();
+  }
+
+  /** trySend on an unconfigured (blank-topic) client reports false — "not sent", not an exception. */
+  @Test
+  void trySendReportsFalseWhenNoTopicIsConfigured() {
+    NtfyClient unconfigured =
+        new NtfyClient(RestClient.builder(), meters, "http://127.0.0.1:1", "");
+
+    assertThat(unconfigured.trySend("title", "urgent", "detail")).isFalse();
+  }
 }

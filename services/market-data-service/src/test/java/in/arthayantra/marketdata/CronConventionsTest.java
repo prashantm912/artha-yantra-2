@@ -30,7 +30,8 @@ class CronConventionsTest {
           // PARSES its own cron (CronExpression.parse) to decide whether the boot catch-up fires, so
           // a malformed or zone-less expression silently disables the catch-up as well as drifting
           // the schedule.
-          in.arthayantra.marketdata.canary.IngestCoverageCanary.class);
+          in.arthayantra.marketdata.canary.IngestCoverageCanary.class,
+          in.arthayantra.marketdata.canary.EveningChainCanary.class);
 
   @Test
   void everyCronScheduleIsSixFieldWithIstZone() {

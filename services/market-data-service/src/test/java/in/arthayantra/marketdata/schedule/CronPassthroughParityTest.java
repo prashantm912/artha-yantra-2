@@ -51,8 +51,15 @@ class CronPassthroughParityTest {
    * ⚠️ RATCHET. Every assertion below iterates {@link #JOBS}, so emptying or trimming this list makes
    * the whole file execute zero assertions and pass — the guard-that-checks-nothing shape. Lowering
    * this number is a deliberate act that must be justified in the PR that does it.
+   *
+   * <p>⚠️ RAISED 12 -> 13 on 2026-08-25, and RE-DERIVED from the list rather than incremented: 13
+   * {@code new Job(} entries, 13 distinct property keys. Main added {@code artha.nse.fii-retry-cron}
+   * (#1454) while this branch was open. Both catalogues in this repo — this one and
+   * {@code OperatingWindowTest.JOBS} — moved on the same merge, and taking either side's number
+   * instead of counting leaves the size assertion GREEN while the other side's jobs silently drop
+   * out of the parity sweep.
    */
-  private static final int EXPECTED_JOB_COUNT = 12;
+  private static final int EXPECTED_JOB_COUNT = 13;
 
   private static final List<Job> JOBS =
       List.of(
@@ -100,7 +107,18 @@ class CronPassthroughParityTest {
           new Job(
               "artha.minervini.buyable-alerts.cron",
               "ARTHA_MINERVINI_BUYABLE_ALERTS_CRON",
-              SRC + "screener/minervini/MinerviniBuyableProducer.java"));
+              SRC + "screener/minervini/MinerviniBuyableProducer.java"),
+          // Added 2026-08-14 (review Major 6). Compose already carried this passthrough, which made
+          // it an UNPINNED third copy of the schedule — the exact #653 shape this file exists for.
+          // ⚠️ It is also why EveningChainCanary's @Scheduled keeps `cron` and `zone` on ONE source
+          // line: activeCronSites() below matches PER LINE, so a wrapped annotation reads to
+          // onePropertyOneActiveScheduledSite as a job with no zone at all. That per-line extraction
+          // was the stated blocker for adding this job; reformatting the annotation is the fix, and
+          // the comment lives in both files so neither side can be "corrected" back on its own.
+          new Job(
+              "artha.evening-chain.check-cron",
+              "ARTHA_EVENING_CHAIN_CHECK_CRON",
+              SRC + "canary/EveningChainCanary.java"));
 
   @Test
   @DisplayName("the catalogue still covers every job it claims to")

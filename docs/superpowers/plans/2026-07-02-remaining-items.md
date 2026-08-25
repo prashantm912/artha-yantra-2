@@ -21,15 +21,19 @@ is a commit I pushed that shipped its own fix REVERTED while every gate stayed g
 released the HOLD; a rationed Codex slot re-reviewed head `cf89a30a`, which nothing had reviewed —
 the last recorded verdict was REQUEST_CHANGES from 08-13 with two commits after it) ·
 [#1354](https://github.com/prashantm912/artha-yantra-2/pull/1354) `d09acb74` ·
-[#1456](https://github.com/prashantm912/artha-yantra-2/pull/1456) `86780a47` [[H13]].
+[#1456](https://github.com/prashantm912/artha-yantra-2/pull/1456) `86780a47` [[H13]] ·
+[#1459](https://github.com/prashantm912/artha-yantra-2/pull/1459) `5f8d88aa` (this ledger) ·
+[#1458](https://github.com/prashantm912/artha-yantra-2/pull/1458) `8791af9a` [[H19]].
 
-⚠️ **OPEN, and both are deliberate:** [#1457](https://github.com/prashantm912/artha-yantra-2/pull/1457)
+⚠️ **OPEN, and deliberately so:** [#1457](https://github.com/prashantm912/artha-yantra-2/pull/1457)
 [[H23]] is HOLD (a migration on the swing dead-man canary's table — owner decision), and
-[#1458](https://github.com/prashantm912/artha-yantra-2/pull/1458) [[H19]] is in review.
+[#1458](https://github.com/prashantm912/artha-yantra-2/pull/1458) [[H19]] merged as `8791af9a`
+after review found the regression test it added was **itself a dated bomb** — an unscoped residue
+count that would have false-red-ed on 2026-09-11/-12/-15/-16 naming rows the class never wrote. The
+H19 shape, reintroduced inside the fix for H19.
 
 ⚠️ **NOTHING IS DEPLOYED YET.** The deploy floor is 16:30 IST and the owner authorised clean-tier
-deploys autonomously after it. Pending: strategy-signal (#1368) and market-data (#1354, #1456,
-#1458), plus **ARMING TWO FLAGS the owner approved** — `ARTHA_SWING_BOOT_CATCHUP_ENABLED` (false
+deploys autonomously after it. Pending: strategy-signal (#1368) and market-data (#1354, #1456, #1458), plus **ARMING TWO FLAGS the owner approved** — `ARTHA_SWING_BOOT_CATCHUP_ENABLED` (false
 today, see [[H18]]) and `ARTHA_SIGNALS_SWING_COVERAGE_GATE_MODE` (`OBSERVE_ONLY` → `ARMED`, #1283).
 ⚠️ The coverage gate's own javadoc says arming should follow the observed refusal rate — **measure
 that rate and report it before flipping**, not after.

@@ -4,6 +4,7 @@ import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategysignal.signals.FlagSnapshotService;
 import in.arthayantra.strategysignal.signals.SwingBatchAlert;
 import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
+import in.arthayantra.strategysignal.signals.SwingBatchRunRepository.Pass;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -94,9 +95,16 @@ public class SwingBatchRecorder {
     this.clock = clock;
   }
 
-  /** Runs one daily batch for a family, records the marker, and pushes the summary. Propagates. */
+  /**
+   * Runs one daily batch for a family, records the marker, and pushes the summary. Propagates.
+   *
+   * <p>The manual {@code POST /api/v1/signals/&lt;batch&gt;-swing/run} path, and it DECLARES
+   * {@link Pass#ENTRIES} — see that constant for why a hand-run legitimately shares the
+   * catch-up's pass value rather than taking a fourth of its own. {@code sessionDate} is null,
+   * so {@link #runLocked} stamps the marker under TODAY, never a past session.
+   */
   public SwingBatchEngine.SwingRun runAndRecord(SwingDoctrine doctrine) {
-    return runAndRecord(doctrine, null, true, MarkerPolicy.ALWAYS).run();
+    return runAndRecord(doctrine, null, Pass.ENTRIES, MarkerPolicy.ALWAYS).run();
   }
 
   /**
@@ -118,13 +126,13 @@ public class SwingBatchRecorder {
    * </ol>
    */
   public RunOutcome runAndRecord(
-      SwingDoctrine doctrine, LocalDate sessionDate, boolean entriesEnabled, MarkerPolicy markerPolicy) {
+      SwingDoctrine doctrine, LocalDate sessionDate, Pass pass, MarkerPolicy markerPolicy) {
     ReentrantLock lock = mutex.lockFor(doctrine.batchName());
     lock.lock();
     try {
       if (!doctrine.enabled()) {
         return runLocked(
-            doctrine, sessionDate, entriesEnabled, markerPolicy, null, false, null);
+            doctrine, sessionDate, pass, markerPolicy, null, false, null);
       }
       // ⚠️ An EXITS-ONLY run must not read the entry funnel at all. Passing a snapshot makes
       // runLocked's `snapshotAvailable` gate depend on it, so a funnel failure would refuse the run
@@ -133,12 +141,12 @@ public class SwingBatchRecorder {
       // because the 16:00 settle is exits-only every single session, so that would not be an edge
       // case but the normal path. null means "no snapshot was consulted", which is the truth here.
       java.util.Optional<SwingDoctrine.CandidateSnapshot> snapshot = null;
-      if (entriesEnabled) {
+      if (pass.takesEntries()) {
         SwingDoctrine.CandidateSnapshotRead read = doctrine.candidateSnapshot();
         snapshot = read == null ? null : read.snapshot();
       }
       return runLocked(
-          doctrine, sessionDate, entriesEnabled, markerPolicy, snapshot, doctrine.enabled(), null);
+          doctrine, sessionDate, pass, markerPolicy, snapshot, doctrine.enabled(), null);
     } finally {
       lock.unlock();
     }
@@ -148,7 +156,7 @@ public class SwingBatchRecorder {
   public RunOutcome runAndRecord(
       SwingDoctrine doctrine,
       LocalDate sessionDate,
-      boolean entriesEnabled,
+      Pass pass,
       MarkerPolicy markerPolicy,
       Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot) {
     ReentrantLock lock = mutex.lockFor(doctrine.batchName());
@@ -156,7 +164,7 @@ public class SwingBatchRecorder {
     try {
       // This overload is used by catch-up after it has read the historical schedule intent. The
       // current doctrine flag may have changed since that session, so it is deliberately not the gate.
-      return runLocked(doctrine, sessionDate, entriesEnabled, markerPolicy, candidateSnapshot, true, null);
+      return runLocked(doctrine, sessionDate, pass, markerPolicy, candidateSnapshot, true, null);
     } finally {
       lock.unlock();
     }
@@ -166,7 +174,7 @@ public class SwingBatchRecorder {
   public RunOutcome runAndRecord(
       SwingDoctrine doctrine,
       LocalDate sessionDate,
-      boolean entriesEnabled,
+      Pass pass,
       MarkerPolicy markerPolicy,
       Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot,
       SwingBatchEngine.RunDeadline deadline) {
@@ -174,7 +182,7 @@ public class SwingBatchRecorder {
     lock.lock();
     try {
       return runLocked(
-          doctrine, sessionDate, entriesEnabled, markerPolicy, candidateSnapshot, true, deadline);
+          doctrine, sessionDate, pass, markerPolicy, candidateSnapshot, true, deadline);
     } finally {
       lock.unlock();
     }
@@ -241,11 +249,17 @@ public class SwingBatchRecorder {
   private RunOutcome runLocked(
       SwingDoctrine doctrine,
       LocalDate sessionDate,
-      boolean entriesEnabled,
+      Pass pass,
       MarkerPolicy markerPolicy,
       Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot,
       boolean executionArmed,
       SwingBatchEngine.RunDeadline deadline) {
+    // ⚠️ ONE operand for both halves. `pass` is what the CALLER declared this run to be; the
+    // engine's entry gate is DERIVED from it rather than travelling alongside as a second
+    // boolean, so the marker can never say ENTRIES about a run the engine executed exits-only —
+    // nor SETTLE about the catch-up's recovery pass, which is the failure V063's first cut
+    // shipped (cross-vendor review, 2026-08-25).
+    boolean entriesEnabled = pass.takesEntries();
     LocalDate runDate = sessionDate != null ? sessionDate : LocalDate.now(clock.withZone(IST));
     SwingBatchEngine.SwingRun result =
         candidateSnapshot == null
@@ -281,7 +295,7 @@ public class SwingBatchRecorder {
                 doctrine.batchName(), runDate, result.strategies(), result.candidates(),
                 result.entries(), result.exits(), result.exitSkipped(), probe.openAtStart(),
                 probe.wouldEnter(), probe.admitted(), probe.capExceedance(), probe.capBound(),
-                probe.droppedByCap(), entriesEnabled);
+                probe.droppedByCap(), pass);
       } catch (RuntimeException e) {
         log.warn("{} swing run-marker record failed: {}", doctrine.batchName(), e.getMessage());
       }
@@ -344,11 +358,12 @@ public class SwingBatchRecorder {
    * prices, corrupting the forward-paper evidence).
    */
   public SwingBatchEngine.SwingRun runScheduled(SwingDoctrine doctrine) {
-    return runScheduled(doctrine, true);
+    return runScheduled(doctrine, Pass.ENTRIES);
   }
 
   /**
-   * The scheduler path with an explicit entry arming — the evening settle passes {@code false}.
+   * The scheduler path with an explicitly DECLARED pass — the evening settle declares
+   * {@link Pass#SETTLE}, the catch-up's own recovery never comes through here.
    *
    * <p>Added rather than reusing one of the snapshot-carrying {@link #runAndRecord} overloads
    * because those hardcode {@code executionArmed = true} for the catch-up's benefit (a historical
@@ -358,7 +373,7 @@ public class SwingBatchRecorder {
    * the four-argument form, which gates on {@code doctrine.enabled()}, and keeps the FAILED-alert
    * envelope that a direct {@code runAndRecord} call would have silently dropped.
    */
-  public SwingBatchEngine.SwingRun runScheduled(SwingDoctrine doctrine, boolean entriesEnabled) {
+  public SwingBatchEngine.SwingRun runScheduled(SwingDoctrine doctrine, Pass pass) {
     try {
       SwingBatchEngine.SwingRun result =
           runAndRecord(
@@ -366,7 +381,7 @@ public class SwingBatchRecorder {
                   // A MANUAL run on a holiday pins TODAY rather than reaching back: the marker then
                   // lands on the day it ran, which is what keeps it from overwriting a real session.
                   scheduledSettleSession().orElseGet(() -> LocalDate.now(clock.withZone(IST))),
-                  entriesEnabled,
+                  pass,
                   MarkerPolicy.ALWAYS)
               .run();
       log.info(
@@ -382,7 +397,7 @@ public class SwingBatchRecorder {
       // instruction would enter off yesterday's screen. Exactly the behaviour the 16:00/08:35 split
       // exists to prevent. Cross-vendor review, 2026-08-10.
       String remediation =
-          entriesEnabled
+          pass.takesEntries()
               ? " Re-run via POST /api/v1/signals/" + doctrine.batchName() + "-swing/run."
               : " Do NOT POST /run to recover this — that endpoint takes ENTRIES too, and this"
                   + " session's screen has not landed yet, so it would enter off the previous"

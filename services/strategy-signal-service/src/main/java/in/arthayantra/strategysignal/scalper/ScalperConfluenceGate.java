@@ -10,6 +10,8 @@ import in.arthayantra.strategysignal.scalper.ConnectTheDotsScorer.Confluence;
 import in.arthayantra.strategysignal.scalper.MarketOiClient.ChainSnapshot;
 import in.arthayantra.strategysignal.scalper.ScalperConfig.StructuralStop;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Chart;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -18,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -50,13 +53,79 @@ public class ScalperConfluenceGate {
   // optional 60-minute bias confirmation (e.g. SUPERTREND@60m); absent ⇒ unknown ⇒ never blocks.
   static final String BIAS_60M = "bias60m";
 
+  /**
+   * H34 telemetry: every strike-pick attempt, tagged so the empty RATE is computable per option root.
+   * MEASUREMENT ONLY — it counts the attempt after the outcome is already decided.
+   *
+   * <p>Tags, and why each is load-bearing rather than decoration:
+   *
+   * <ul>
+   *   <li>{@code underlying} — the option-EXECUTION root ({@code NIFTY 50} / {@code SENSEX} / …), the
+   *       axis the whole question is asked on. Not the signal series: a scalper is instrument-decoupled
+   *       (ADR-0003), so the signal future is a NIFTY future on SENSEX-executing slugs too.
+   *   <li>{@code path} — which selector ran: {@code band} (the plain delta/premium conjunction),
+   *       {@code hero-zero} (the OI-ladder selector ran FIRST and the band picker was its fallback, so
+   *       an empty result means BOTH failed), {@code straddle} (a different picker entirely —
+   *       {@code StraddleLegPicker}, ATM pair, no delta/premium band). Conflating these into one number
+   *       would report a band failure that no band caused.
+   *   <li>{@code eval} — {@code entry} vs {@code oracle}. The E9 D4 confluence-flip EXIT oracle runs the
+   *       SAME evaluation for held positions and persists no rejection row, so an untagged counter could
+   *       never be reconciled against {@code strategy.signal_rejections} (entry-path only).
+   *       <p><b>DERIVED FROM {@code enforceOptionSide}, which is documented on {@link #evaluateInternal}
+   *       as the option-side PARITY GUARD, not as an entry marker.</b> It is a faithful proxy because the
+   *       three production callers are exhaustive and split exactly that way — {@code SignalEngine:2028}
+   *       and {@code :2206} reach {@code evaluateWithDiagnostic} (true ⇒ entry), {@code SignalEngine:3153}
+   *       reaches {@code evaluateOracle} (false ⇒ oracle). A FOURTH caller that wanted the non-enforcing
+   *       read for a non-oracle reason would silently land in the {@code oracle} series; re-check this
+   *       list before trusting the split if one appears.
+   *   <li>{@code result} — {@code picked} / {@code empty}, so the denominator is in the same metric and
+   *       a rate needs no second series.
+   * </ul>
+   *
+   * <p>Bounded by construction: a handful of option roots × 3 paths × 2 × 2. Deliberately NOT tagged by
+   * strike, tradingsymbol, slug or bar — that is where a per-bar metric becomes a cardinality incident.
+   */
+  static final String STRIKE_PICK_METRIC = "ay_scalper_strike_pick_total";
+
   private final MarketOiClient client;
   private final ScalperOiProps oiProps;
+  private final MeterRegistry meterRegistry;
 
   /** Wires the market-data OI/chain client + the Tier-1 OI-analytics thresholds. */
-  public ScalperConfluenceGate(MarketOiClient client, ScalperOiProps oiProps) {
+  @Autowired
+  public ScalperConfluenceGate(
+      MarketOiClient client, ScalperOiProps oiProps, MeterRegistry meterRegistry) {
     this.client = client;
     this.oiProps = oiProps;
+    this.meterRegistry = meterRegistry;
+  }
+
+  /**
+   * Pre-H34 signature: a private, unshared registry absorbs the strike-pick counter so every existing
+   * direct-construction call site keeps compiling byte-identical (the {@code MarketDataCandlesClient}
+   * convention).
+   */
+  public ScalperConfluenceGate(MarketOiClient client, ScalperOiProps oiProps) {
+    this(client, oiProps, new SimpleMeterRegistry());
+  }
+
+  /**
+   * Records one strike-pick attempt. Never decides anything — see {@link #STRIKE_PICK_METRIC}.
+   *
+   * <p>{@code entry} is passed {@code enforceOptionSide} by both call sites. That is a PROXY: the flag
+   * is declared as the option-side parity guard, and it separates entry from oracle only because the
+   * three production callers happen to split that way ({@code SignalEngine:2028}/{@code :2206} entry,
+   * {@code SignalEngine:3153} oracle). See the {@code eval} tag note on {@link #STRIKE_PICK_METRIC}.
+   */
+  private void countStrikePick(ScalperConfig cfg, String path, boolean entry, boolean picked) {
+    meterRegistry
+        .counter(
+            STRIKE_PICK_METRIC,
+            "underlying", cfg.underlying(),
+            "path", path,
+            "eval", entry ? "entry" : "oracle",
+            "result", picked ? "picked" : "empty")
+        .increment();
   }
 
   /** One tradeable option leg the seam picked (the V009 side-channel carrier, §3.11 two-leg). */
@@ -137,7 +206,35 @@ public class ScalperConfluenceGate {
       // G17/T14: the comparison direction of the BLOCKING rail, declared by the gate function that
       // compared it. The persist seam judges `margin` against this, so the self-contradiction check
       // is derived from the operator rather than a name table that drifts from the wiring.
-      RailMarginSign marginSign) {
+      RailMarginSign marginSign,
+      // H34, MEASUREMENT ONLY: WHY the delta/premium conjunction found nothing. The `strike-pick`
+      // RailCheck is a boolean verdict, so its operand/threshold/margin are structurally NULL and the
+      // durable record could not say which band failed, by how much, or what the nearest strike was.
+      // Non-null ONLY on the directional empty-pick path; nothing reads it on the live path.
+      StrikeNearMiss.NearMiss strikeNearMiss) {
+
+    /** Pre-H34 form: {@code strikeNearMiss} defaults to null (no near-miss recorded). */
+    public RejectionDiagnostic(
+        String blockingRail,
+        OptionType side,
+        BigDecimal operand,
+        BigDecimal threshold,
+        BigDecimal margin,
+        String reason,
+        BigDecimal compositeScore,
+        BigDecimal compositeThreshold,
+        List<RailCheck> checks,
+        Confluence confluence,
+        ScalperGateContext context,
+        String underlying,
+        LocalDate expiry,
+        StrikePicker.Pick pick,
+        BigDecimal structuralStop,
+        RailMarginSign marginSign) {
+      this(
+          blockingRail, side, operand, threshold, margin, reason, compositeScore, compositeThreshold,
+          checks, confluence, context, underlying, expiry, pick, structuralStop, marginSign, null);
+    }
 
     /** Pre-G17 form: {@code marginSign} defaults to UNSIGNED (asserts nothing). */
     public RejectionDiagnostic(
@@ -272,6 +369,9 @@ public class ScalperConfluenceGate {
     private LocalDate expiry;
     private StrikePicker.Pick pick;
     private BigDecimal structuralStop;
+    // H34 measurement-only: set on the directional empty-pick path only. Null everywhere else,
+    // including a successful pick — a near-miss on a bar that PICKED would be meaningless.
+    private StrikeNearMiss.NearMiss strikeNearMiss;
     // V056 measurement-only: set on the ORACLE path once every rail has been recorded. Null means
     // "no counterfactual" — no level operand, or the gate blocked before a confluence was scored.
     private SentimentCounterfactual counterfactual;
@@ -356,7 +456,7 @@ public class ScalperConfluenceGate {
               b.rail(), side, b.operand(), b.threshold(), b.margin(), b.reason(),
               confluence == null ? null : confluence.aggregate(), confluenceThreshold,
               List.copyOf(checks), confluence, context, underlying, expiry, pick, structuralStop,
-              firstFailureSign),
+              firstFailureSign, strikeNearMiss),
           null,
           counterfactual);
     }
@@ -640,6 +740,10 @@ public class ScalperConfluenceGate {
       if (pair.isEmpty()) {
         diag.failsBool("strike-pick", false, "no ATM straddle pair in band");
       }
+      // H34: counted so this path is SEPARABLE from the band conjunction it shares a rail name with.
+      // No near-miss here — StraddleLegPicker judges an ATM PAIR, not the delta/premium bands, so a
+      // "which band failed, by how much" answer would be about bands this path never consulted.
+      countStrikePick(cfg, "straddle", enforceOptionSide, pair.isPresent());
       if (diag.anyFailed()) {
         return diag.block();
       }
@@ -1210,7 +1314,18 @@ public class ScalperConfluenceGate {
     }
     if (pick.isEmpty()) {
       diag.failsBool("strike-pick", false, "no strike met the delta/premium band");
+      // H34 measurement-only, computed AFTER the block is already recorded so it cannot influence it:
+      // the closest-to-satisfiable strike, which band it failed and by how much. Reason string left
+      // byte-identical — the session-analysis queries key on it.
+      diag.strikeNearMiss =
+          StrikeNearMiss.of(
+              chain.candidates(), chain.spot(), chain.basis(), side, barInstant, chain.expiry(),
+              cfg.strikeParams());
     }
+    // H34: `hero-zero` marks the runs where HeroZeroStrikeSelector went first and the band picker was
+    // only its fallback — an empty result there means BOTH selectors failed, not just the bands.
+    countStrikePick(
+        cfg, cfg.requireHeroZero() ? "hero-zero" : "band", enforceOptionSide, pick.isPresent());
     // Shadow-book capture: the leg the pick resolved + the structural stop — recorded on the
     // diagnostic even when a rail blocks, so the shadow book can trade the vetoed entry virtually.
     diag.pick = pick.orElse(null);

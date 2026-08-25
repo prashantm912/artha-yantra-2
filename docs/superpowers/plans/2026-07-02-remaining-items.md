@@ -12,7 +12,107 @@ the two 2026-07-02 audits (both fix queues fully closed) and the open-PR/issue l
 
 ## 0. Work queue (consolidated 2026-07-10; 2-pass-audited same day)
 
-### 📍 CURRENT STATE — as of 2026-08-25 ~12:00 IST (update this block at every session close)
+### 📍 CURRENT STATE — as of 2026-08-25 ~17:05 IST (update this block at every session close)
+
+⚠️ **DAY SESSION 2026-08-25. Eight PRs merged, ONE deploy DONE AND PROBED, one HOLD PR open, and
+EIGHT claims of mine refuted by their recipients — one of which reached the owner.**
+
+✅ **DEPLOYED 16:45–17:01 IST, verified by PROBE not by exit code.** V063 applied and the object
+probed: PK is now `batch,run_date,pass`, flyway `063`, **68 rows preserved, 0 null `pass`**, matching
+the read-only dry run exactly. Running-container jar fingerprints: `CLOCK_SKEW_ALLOWANCE_SECONDS` 1,
+`masterMetadataMissing` 1, `RECOVERY_EXITS` 1. **The frontend probe flipped 0 → 1** for
+`market/health/evening-chain` — #1354's UI half had never been served, and every earlier deploy plan
+omitted the frontend entirely. Engine reload **278: installed=t, 38 loaded, 0 unresolved, 0
+load_errors**. 11/11 healthy, **0 ERROR lines** both services.
+
+✅ **`ARTHA_SWING_BOOT_CATCHUP_ENABLED` ARMED** and proven via `docker inspect`, not the YAML default.
+⚠️ **Its first exercise is the ideal shape — the path RAN and DECLINED, with a reason:** *"booted
+17:01:03 IST, at/after the 09:05 cutoff … today's missed '0 35 8 * * MON-FRI' fire is NOT replayed on
+boot (a session run that crosses 09:15 mid-entry-pass takes a PARTIAL entry set and skips the exit
+pass entirely)"*. Positive proof it is alive AND that the guard holds; silence would have proven
+neither.
+
+⚠️ **`ARTHA_SIGNALS_SWING_COVERAGE_GATE_MODE` DELIBERATELY LEFT `OBSERVE_ONLY`** despite the owner's
+approval. Measured: **1 session, 2 batch runs, 0 `EXIT_DEGRADED_COVERAGE` rows all-time.** The
+structural point outweighs the sample size — **this gate only fires when coverage IS degraded, so
+zero refusals on a normal session is the EXPECTED reading, not a reassuring one.** Three more
+ordinary sessions produce three more zeros and no information. **Arming evidence here is an EVENT to
+wait for, not a DURATION** (a stale-bar evening of the kind [[H27]] was opened on).
+
+⚠️ **OPEN, HOLD:** [#1468](https://github.com/prashantm912/artha-yantra-2/pull/1468) [[H9]] — swing
+exits fill at the official NSE close. Three Codex rounds, APPROVED. **Two consequences the owner
+ratified in advance:** the cross-basis fence BLOCKS swing PAPER→TAKE_ELIGIBLE promotion, and swing can
+no longer reach `DIVERGENT`, so the 2-consecutive-DIVERGENT autonomous rollback cannot fire for a
+swing champion. **What unparks both — re-basing the reconciliation replay onto the official close — is
+UNOWNED work.**
+
+## ⚠️ EIGHT REFUTED CLAIMS, AND THE ONE THAT REACHED THE OWNER
+
+Every one was mine, and every one was checkable with a single command:
+
+- **[[H22]]** — I told a builder to reuse `skipEntry`. It requires `decision='UNDECIDED'`; the lease is
+  `'REQUIRED'`. **Zero rows matched** — a green, shipped no-op.
+- **[[H23]]** — two wrong premises in one brief: the merge base, and an instruction to preserve a
+  monotone `OR` that had already been removed on that branch.
+- **[[H30]]** — `exchange_token` is not a component of the record I proposed keying a rule to.
+- **[[H34]]** — I misnumbered the builder's own open doubts, nearly recording the wrong one as closed.
+- **[[H9]]** — I asserted the Kite-sourced 1d rows were "the subscribed symbols, the book's holdings".
+  **202 of 223 are `BhavcopyCloseCanary`'s NIFTY 200 prefetch.** I also called the ingest-precedence fix
+  viable; it is not — the settle's own read re-fetches from Kite and overwrites it minutes later.
+- **⚠️ [[H5]] — THE ONE THAT REACHED THE OWNER.** I offered it as buildable work. It merged
+  **2026-08-03** (#1242) and had been recording for 22 days. **Cause: a `split('|')` parser returned a
+  MID-CELL FRAGMENT** — the row contains `|flow| < 0.5` in its prose, and literal pipes fragment a
+  markdown row. **My cruder `grep -c ✅` scan had it RIGHT and I overrode it with the refined parser.**
+- **The "sentiment shadow regression"** I reported as live — **not a defect.** 2026-08-25 is the NSE
+  monthly index expiry; `MarketOiClient.oi()` takes its S24 suppression branch and returns an inert
+  `Oi`. **My own MEMORY.md index already said "on a monthly index expiry every OI dot is inert BY
+  DESIGN."** My "contradiction" rested on misreading an argument position: `absent` is `inputMissing`,
+  and under `NullPolicy.LEGACY` it is `false` regardless of nullness.
+- **Three stale-number corrections, and TWO of the corrections were themselves wrong:** H36's
+  population 2 → 12 → **140**; the bhavcopy series count 13 → 15 → **18**. Both now dated in CLAUDE.md
+  with an instruction to re-derive rather than quote.
+
+**The generalisation: a refined tool that disagrees with a crude one is not automatically right.** A
+plausible answer from a subtly broken parser is worse than a blunt one, because it carries no signal
+that it failed.
+
+## ⚠️ H31 HAS REGRESSED — found only by CROSS-READING two routines
+
+`computed` 2026-08-25: `day-context` shows **25 `ResourceAccessException` at exactly the 2.004 s
+`ContextClient` bound, against 3 successes at 450 ms.** All 25 are the same 15-minute scheduled sweep
+(08:45, 09:00, 09:15 …). **100% failure on the scheduled path**, on a row marked **DONE 2026-08-21
+(#1437)** with the fix confirmed deployed. That is H31's original defect verbatim, now worse than the
+"more than half" that opened it.
+
+⚠️ **Unresolved confound: today is the monthly expiry**, and the 08-21 verification that recorded
+544–647 ms was a non-expiry day. Discriminator scheduled for **2026-08-26 10:15 IST**; chip
+`task_de01f6bb` carries the write-up.
+
+⚠️ **NEITHER ROUTINE COULD HAVE FOUND IT.** The H36 verifier called it *"INCONCLUSIVE"* on n=5; the
+live-data check listed it under a GREEN verdict as *"2 of 2 observed in-session attempts"*. Both were
+right and both were under-powered. **The aggregate was nobody's job** — that is the finding about the
+routines, not just about H31.
+
+## OTHER ROUTINE OUTPUT, 2026-08-25
+
+- **Post-market ([#1469](https://github.com/prashantm912/artha-yantra-2/pull/1469))** — zero-fire
+  session, S24 expiry suppression textbook-confirmed, and **the first fully-clean no-outage day after
+  SIX consecutive outage days**; 25/25 coverage buckets, 38/38 slugs.
+- **NSE retry — PASS**, and it found **three defective checks in its own task file**: bare-timestamp
+  bounds resolving to UTC and returning a false zero; a `grep " ERROR "` that can never match ECS JSON
+  logs; and a premise confusing "thread exists" with "job ran" (disproved with a sibling scheduler
+  holding a thread and zero completed tasks).
+- **[[H36]] works** — counter at 10, 16 matching log lines, 0 × `400 Bad Request`. **But the
+  documented population was understated ~11×.**
+- **[[H35]] confirmed** — two consecutive non-null `market_context_days` rows.
+- ⚠️ **`verify-blind-window-writer-alive` has NEVER run** (created 00:03 today, first fire 08-31), and
+  `strategy.blind_windows` is empty — which is exactly the state that check exists to disambiguate.
+
+⚠️ **The block below is KEPT, not replaced.** Each session close DEMOTES the previous one to an
+archive heading beneath it, so the newest state is the first thing a fresh session reads and nothing
+is destroyed to achieve it.
+
+#### 🗄️ PREVIOUS SESSION CLOSE — 2026-08-25 ~12:00 IST (archived 2026-08-25 ~17:05, verbatim)
 
 ⚠️ **DAY SESSION 2026-08-25, continuing the overnight run. FIVE PRs merged, NOTHING DEPLOYED (floor 16:30 IST). The day's most useful output is not the code — it is that FOUR separate briefs I wrote were refuted by the builders or reviewers they were given to, and each refutation was load-bearing.**
 

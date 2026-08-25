@@ -1,9 +1,12 @@
 package in.arthayantra.strategysignal.paper;
 
+import in.arthayantra.common.web.error.ApiException;
+import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SignalTaken;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRetry;
+import in.arthayantra.strategysignal.swing.SwingBatchRefusalRepository;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,25 +29,44 @@ public class PaperSignalListener {
 
   private static final Logger log = LoggerFactory.getLogger(PaperSignalListener.class);
 
+  /** {@code swing_batch_refusals.reason} prefix for a permanent risk-governor entry refusal (H22). */
+  private static final String GOVERNOR_REFUSAL_REASON = "RISK_ENTRY_BLOCKED:";
+
   private final PaperService paper;
   private final ScalperAccountModel scalperAccounts;
   private final SignalRepository signals;
   private final SwingPaperEffectRepository paperEffects;
   private final InstrumentMetaClient instruments;
+  private final SwingBatchRefusalRepository refusals;
 
-  /** Wires the ledger service, the 5-account sub-ledger, the signal store + the instrument master. */
+  /**
+   * Wires the ledger service, the 5-account sub-ledger, the signal store, the instrument master +
+   * the durable refusal sink a permanently-refused swing entry is resolved against (H22).
+   */
   @Autowired
   public PaperSignalListener(
       PaperService paper,
       ScalperAccountModel scalperAccounts,
       SignalRepository signals,
       SwingPaperEffectRepository paperEffects,
-      InstrumentMetaClient instruments) {
+      InstrumentMetaClient instruments,
+      SwingBatchRefusalRepository refusals) {
     this.paper = paper;
     this.scalperAccounts = scalperAccounts;
     this.signals = signals;
     this.paperEffects = paperEffects;
     this.instruments = instruments;
+    this.refusals = refusals;
+  }
+
+  /** Backwards-compatible constructor for focused paper-listener tests. */
+  public PaperSignalListener(
+      PaperService paper,
+      ScalperAccountModel scalperAccounts,
+      SignalRepository signals,
+      SwingPaperEffectRepository paperEffects,
+      InstrumentMetaClient instruments) {
+    this(paper, scalperAccounts, signals, paperEffects, instruments, null);
   }
 
   /** Backwards-compatible constructor for focused paper-listener tests. */
@@ -53,13 +75,13 @@ public class PaperSignalListener {
       ScalperAccountModel scalperAccounts,
       SignalRepository signals,
       SwingPaperEffectRepository paperEffects) {
-    this(paper, scalperAccounts, signals, paperEffects, null);
+    this(paper, scalperAccounts, signals, paperEffects, null, null);
   }
 
   /** Backwards-compatible constructor for focused paper-listener tests. */
   public PaperSignalListener(
       PaperService paper, ScalperAccountModel scalperAccounts, SignalRepository signals) {
-    this(paper, scalperAccounts, signals, null, null);
+    this(paper, scalperAccounts, signals, null, null, null);
   }
 
   /** Opens a position (or, for a straddle, both legs) from the signal when a qty was supplied. */
@@ -148,9 +170,94 @@ public class PaperSignalListener {
         paperEffects.confirm(lease.id());
       }
     } catch (Exception e) {
-      // Leave CLAIMED. The next catch-up repair can reclaim the stale lease after read-back.
-      log.warn("paper swing effect {} failed: {}", lease.id(), e.getMessage());
+      String rail = governorRail(e);
+      if (rail == null) {
+        // Leave CLAIMED. The next catch-up repair can reclaim the stale lease after read-back.
+        log.warn("paper swing effect {} failed: {}", lease.id(), e.getMessage());
+        return;
+      }
+      resolveGovernorRefusal(lease, rail, e);
     }
+  }
+
+  /**
+   * The governor rail behind a PERMANENT refusal, or {@code null} when the failure should keep the
+   * transient handling - the ONE place this listener decides "verdict" vs "fault". Keyed on
+   * {@link ErrorCodes#RISK_ENTRY_BLOCKED}, the marker EVERY governor throw site in
+   * {@link PaperService} carries, never on the message text.
+   *
+   * <p>⚠️ {@link RiskService#MANAS_RISK_UNCOMPUTABLE} is deliberately EXCLUDED, and it is the only
+   * {@code RISK_ENTRY_BLOCKED} rail that is. It does not mean "refused", it means "could not be
+   * calculated" - {@link PaperService}'s {@code uncomputableRiskRefusal} scopes it to an unsupported
+   * side, an undefined governing stop, or non-positive equity. H22's thesis is verdict-vs-fault, and
+   * an inability to DECIDE is a fault: the other four rails are policy readings of live book state
+   * that bind HARDER as the book fills, while an undefined governing stop is curable by a later
+   * replay once {@code ManasGoverningStopCache} warms.
+   *
+   * <p>The failure directions are asymmetric and this repo has already settled the same trade-off in
+   * the sibling case - wrongly terminal is a SILENT permanent forfeiture of a real entry; wrongly
+   * transient is a loud page about a book that genuinely needs attention. See
+   * {@code SwingBatchCatchUp:755-756}: "A loud unrecoverable beats a silent one."
+   *
+   * <p>⚠️ A RAIL-LESS refusal is transient for the SAME reason, one step removed. Every throw site
+   * today carries a {@code rail}, so this can only arrive from a FUTURE site added without the
+   * detail map - and at that moment nobody knows whether it is a policy verdict or an inability.
+   * Note the argument is NOT that closing it would be silent: it would write a real
+   * {@code swing_batch_refusals} row. It is that the row would be attributed to nothing
+   * reviewable, spending a live entry on that ignorance. Left transient it ends at the catch-up's
+   * ABANDONED page, which is exactly "a human should look at this" - and a human is what an
+   * UNCLASSIFIED refusal needs.
+   */
+  private static String governorRail(Exception e) {
+    if (!(e instanceof ApiException api) || !ErrorCodes.RISK_ENTRY_BLOCKED.equals(api.code())) {
+      return null;
+    }
+    // Covers every rail-less shape identically: the 3-arg ApiException ctor (details normalized to
+    // an empty map), a details map carrying other keys but no 'rail', and a mutable map holding a
+    // null value - Map.of rejects null values, so only the first two are reachable from PaperService.
+    Object rail = api.details().get("rail");
+    if (rail == null) {
+      return null;
+    }
+    String label = rail.toString();
+    return RiskService.MANAS_RISK_UNCOMPUTABLE.equals(label) ? null : label;
+  }
+
+  /**
+   * Resolves a permanently-refused swing entry TERMINALLY, with durable evidence first (H22).
+   *
+   * <p>Measured live 2026-08-17: a {@code pyramid_risk_cap} refusal - the F9 governor doing exactly
+   * its job - was handled as a transient fault, so the effect stayed CLAIMED, its session never
+   * reached DONE, every sweep re-alerted PAPER EFFECTS UNCONFIRMED, and the attempt budget marched
+   * toward an ABANDONED alert calling the session "UNRECOVERABLE". Replay cannot help: the rails
+   * read live book state and bind HARDER as the book fills.
+   *
+   * <p>The refusal row is written BEFORE the effect is closed. Without a durable sink there is
+   * nowhere for the reason to survive - {@code swing_batch_refusals} exists precisely so retries
+   * cannot erase it (V050) - so a missing or failing sink falls back to the transient handling and
+   * leaves the row visible rather than closing it blind.
+   */
+  private void resolveGovernorRefusal(
+      SwingPaperEffectRepository.Effect lease, String rail, Exception refusal) {
+    if (refusals == null) {
+      log.warn("paper swing effect {} failed: {}", lease.id(), refusal.getMessage());
+      return;
+    }
+    try {
+      refusals.record(
+          lease.batch(), lease.sessionDate(), lease.tradingsymbol(), GOVERNOR_REFUSAL_REASON + rail);
+    } catch (RuntimeException persistFailure) {
+      log.error(
+          "paper swing effect {} was refused by the risk governor ({}) but the refusal could not be"
+              + " persisted - leaving it CLAIMED rather than closing it without the reason",
+          lease.id(), rail, persistFailure);
+      return;
+    }
+    paperEffects.refuseEntry(lease.id());
+    log.info(
+        "paper swing effect {} ({}) refused by the risk governor ({}) - no money effect, resolved"
+            + " terminally so the session can complete: {}",
+        lease.id(), lease.tradingsymbol(), rail, refusal.getMessage());
   }
 
   private void openPaperPosition(SignalTaken event) {

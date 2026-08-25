@@ -11,10 +11,16 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import in.arthayantra.common.web.error.ApiException;
+import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SignalTaken;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
+import in.arthayantra.strategysignal.swing.SwingBatchRefusalRepository;
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -161,6 +167,230 @@ class PaperSignalListenerTest {
 
     verify(paper).openOrder(any());
     verify(effects).confirm(99L);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // H22: a PERMANENT risk-governor refusal is not a transient fault.
+  //
+  // Measured live 2026-08-17 (manas-arora / 2026-08-13): swing_paper_effects id=19
+  // (ENTRY:SALSTEEL, expected_qty=206, signal_id=193) sat CLAIMED with attempts=2 and no
+  // paper_positions row because the F9 pyramid_risk_cap rail refused the fill -- correctly. The
+  // catch treated it like a DB blip, so the session never reached DONE, every sweep re-alerted
+  // PAPER EFFECTS UNCONFIRMED, and the attempt budget marched toward an "UNRECOVERABLE" page.
+  // ---------------------------------------------------------------------------------------------
+
+  /** The live shape: a governor verdict closes the lease terminally AND leaves durable evidence. */
+  @Test
+  void aGovernorRefusalResolvesTheEffectTerminallyWithDurableEvidence() {
+    PaperService paper = mock(PaperService.class);
+    ScalperAccountModel accounts = mock(ScalperAccountModel.class);
+    SwingPaperEffectRepository effects = claimingRepository();
+    SwingBatchRefusalRepository refusals = mock(SwingBatchRefusalRepository.class);
+    when(paper.openQuantityForSignal(SALSTEEL_SIGNAL)).thenReturn(0L);
+    when(paper.openOrder(any())).thenThrow(governorRefusal("pyramid_risk_cap"));
+
+    new PaperSignalListener(paper, accounts, noStraddle(), effects, null, refusals)
+        .onSignalTaken(new SignalTaken(SALSTEEL_SIGNAL, 206, new BigDecimal("69.38"), false));
+
+    // The reason survives the retry loop that no longer runs: rail-qualified, so two different
+    // rails on the same symbol stay separable in swing_batch_refusals.
+    verify(refusals)
+        .record(
+            "manas-arora",
+            LocalDate.of(2026, 8, 13),
+            "SALSTEEL",
+            "RISK_ENTRY_BLOCKED:pyramid_risk_cap");
+    verify(effects).refuseEntry(SALSTEEL_EFFECT);
+    // no money effect happened, so it must NOT be confirmed as though the entry landed
+    verify(effects, never()).confirm(anyLong());
+  }
+
+  /** A transient fault keeps today's behaviour EXACTLY: still CLAIMED, still repairable. */
+  @Test
+  void aTransientFailureIsStillLeftClaimedForTheCatchUpToRepair() {
+    PaperService paper = mock(PaperService.class);
+    ScalperAccountModel accounts = mock(ScalperAccountModel.class);
+    SwingPaperEffectRepository effects = claimingRepository();
+    SwingBatchRefusalRepository refusals = mock(SwingBatchRefusalRepository.class);
+    when(paper.openQuantityForSignal(SALSTEEL_SIGNAL)).thenReturn(0L);
+    when(paper.openOrder(any())).thenThrow(new RuntimeException("connection reset"));
+
+    new PaperSignalListener(paper, accounts, noStraddle(), effects, null, refusals)
+        .onSignalTaken(new SignalTaken(SALSTEEL_SIGNAL, 206, new BigDecimal("69.38"), false));
+
+    verify(effects, never()).refuseEntry(anyLong());
+    verify(refusals, never()).record(anyString(), any(), anyString(), anyString());
+    verify(effects, never()).confirm(anyLong());
+  }
+
+  /**
+   * The narrow gate, and the reason this keys on the CODE rather than on {@code ApiException}:
+   * a stale-tick refusal is a data condition a later replay can genuinely clear, so it must stay
+   * repairable even though it arrives as the same exception type from the same call.
+   */
+  @Test
+  void aNonGovernorApiExceptionIsStillTreatedAsTransient() {
+    PaperService paper = mock(PaperService.class);
+    ScalperAccountModel accounts = mock(ScalperAccountModel.class);
+    SwingPaperEffectRepository effects = claimingRepository();
+    SwingBatchRefusalRepository refusals = mock(SwingBatchRefusalRepository.class);
+    when(paper.openQuantityForSignal(SALSTEEL_SIGNAL)).thenReturn(0L);
+    when(paper.openOrder(any()))
+        .thenThrow(new ApiException(422, ErrorCodes.DATA_STALE, "tick 41s old"));
+
+    new PaperSignalListener(paper, accounts, noStraddle(), effects, null, refusals)
+        .onSignalTaken(new SignalTaken(SALSTEEL_SIGNAL, 206, new BigDecimal("69.38"), false));
+
+    verify(effects, never()).refuseEntry(anyLong());
+    verify(refusals, never()).record(anyString(), any(), anyString(), anyString());
+  }
+
+  /**
+   * The ONE {@code RISK_ENTRY_BLOCKED} rail that stays TRANSIENT (Architect audit, 2026-08-25).
+   *
+   * <p>{@code manas_risk_uncomputable} does not mean "refused", it means "could not be calculated"
+   * — an unsupported side, an undefined governing stop, or non-positive equity. An inability to
+   * DECIDE is a fault, not a verdict, and an undefined governing stop is curable by a later replay
+   * once the governing-stop cache warms. Wrongly terminal here is a SILENT permanent forfeiture of a
+   * real entry; wrongly transient is a loud page — {@code SwingBatchCatchUp:755-756} settled the
+   * same trade-off with "A loud unrecoverable beats a silent one."
+   *
+   * <p>BOTH {@code never()}s are load-bearing: a half-applied change — refusal row written, lease
+   * left open — is the worst of both, durable evidence asserting a permanent verdict on a session
+   * that still never completes.
+   */
+  @Test
+  void anUncomputableRiskRailStaysTransientAndWritesNoRefusalRow() {
+    PaperService paper = mock(PaperService.class);
+    ScalperAccountModel accounts = mock(ScalperAccountModel.class);
+    SwingPaperEffectRepository effects = claimingRepository();
+    SwingBatchRefusalRepository refusals = mock(SwingBatchRefusalRepository.class);
+    when(paper.openQuantityForSignal(SALSTEEL_SIGNAL)).thenReturn(0L);
+    // The real constant, not a literal: a rename must break this test, not silently widen the set.
+    when(paper.openOrder(any()))
+        .thenThrow(governorRefusal(RiskService.MANAS_RISK_UNCOMPUTABLE));
+
+    new PaperSignalListener(paper, accounts, noStraddle(), effects, null, refusals)
+        .onSignalTaken(new SignalTaken(SALSTEEL_SIGNAL, 206, new BigDecimal("69.38"), false));
+
+    verify(refusals, never()).record(anyString(), any(), anyString(), anyString());
+    verify(effects, never()).refuseEntry(anyLong());
+    verify(effects, never()).confirm(anyLong());
+  }
+
+  /**
+   * A RAIL-LESS refusal stays TRANSIENT (Architect audit, 2026-08-25) - shape 1, a details map
+   * carrying other keys but no {@code rail}.
+   *
+   * <p>Every throw site today supplies a rail, so this can only arrive from a FUTURE site added
+   * without the detail map. The argument is NOT that closing it would be silent - it would write a
+   * real {@code swing_batch_refusals} row. It is that the row would be attributed to nothing
+   * reviewable, spending a live entry on the fact that nobody could tell whether this was a policy
+   * verdict or an inability. Transient ends at the catch-up's ABANDONED page, and a human is what
+   * an unclassified refusal needs.
+   */
+  @Test
+  void aRefusalWithNoRailKeyStaysTransientAndWritesNoRefusalRow() {
+    assertTransient(
+        new ApiException(
+            422,
+            ErrorCodes.RISK_ENTRY_BLOCKED,
+            "entry blocked by risk governor on book manas-arora",
+            Map.of("book", "manas-arora")));
+  }
+
+  /**
+   * Shape 2: the 3-arg {@link ApiException} constructor, which normalizes absent details to an
+   * EMPTY map. Both shapes are reachable; {@code Map.of("rail", null)} is not, because
+   * {@code Map.of} rejects null values outright - a mutable map holding a null would take the same
+   * branch anyway, since the gate reads {@code get("rail") == null}.
+   */
+  @Test
+  void aRefusalWithNoDetailsAtAllStaysTransientAndWritesNoRefusalRow() {
+    assertTransient(
+        new ApiException(422, ErrorCodes.RISK_ENTRY_BLOCKED, "entry blocked by risk governor"));
+  }
+
+  /**
+   * Runs one refusal through the live seam and asserts the TRANSIENT contract: no durable refusal
+   * row, no terminal resolve, no confirm. Deliberately asserts rather than arranges - it forces
+   * nothing, so a change that made the refusal terminal reddens here.
+   */
+  private static void assertTransient(ApiException refusal) {
+    PaperService paper = mock(PaperService.class);
+    ScalperAccountModel accounts = mock(ScalperAccountModel.class);
+    SwingPaperEffectRepository effects = claimingRepository();
+    SwingBatchRefusalRepository refusals = mock(SwingBatchRefusalRepository.class);
+    when(paper.openQuantityForSignal(SALSTEEL_SIGNAL)).thenReturn(0L);
+    when(paper.openOrder(any())).thenThrow(refusal);
+
+    new PaperSignalListener(paper, accounts, noStraddle(), effects, null, refusals)
+        .onSignalTaken(new SignalTaken(SALSTEEL_SIGNAL, 206, new BigDecimal("69.38"), false));
+
+    verify(refusals, never()).record(anyString(), any(), anyString(), anyString());
+    verify(effects, never()).refuseEntry(anyLong());
+    verify(effects, never()).confirm(anyLong());
+  }
+
+  /**
+   * Evidence FIRST. If the refusal cannot be persisted there is nowhere for the reason to live, so
+   * closing the row would erase it -- fall back to the transient handling instead.
+   */
+  @Test
+  void aRefusalThatCannotBePersistedLeavesTheEffectClaimed() {
+    PaperService paper = mock(PaperService.class);
+    ScalperAccountModel accounts = mock(ScalperAccountModel.class);
+    SwingPaperEffectRepository effects = claimingRepository();
+    SwingBatchRefusalRepository refusals = mock(SwingBatchRefusalRepository.class);
+    when(paper.openQuantityForSignal(SALSTEEL_SIGNAL)).thenReturn(0L);
+    when(paper.openOrder(any())).thenThrow(governorRefusal("pyramid_risk_cap"));
+    org.mockito.Mockito.doThrow(new RuntimeException("ledger write failed"))
+        .when(refusals)
+        .record(anyString(), any(), anyString(), anyString());
+
+    new PaperSignalListener(paper, accounts, noStraddle(), effects, null, refusals)
+        .onSignalTaken(new SignalTaken(SALSTEEL_SIGNAL, 206, new BigDecimal("69.38"), false));
+
+    verify(effects, never()).refuseEntry(anyLong());
+    verify(effects, never()).confirm(anyLong());
+  }
+
+  private static final long SALSTEEL_SIGNAL = 193L;
+  private static final long SALSTEEL_EFFECT = 19L;
+
+  /** The live incident's rail, with the details map every governor throw site in PaperService carries. */
+  private static ApiException governorRefusal(String rail) {
+    return new ApiException(
+        422,
+        ErrorCodes.RISK_ENTRY_BLOCKED,
+        "entry blocked by risk governor (" + rail + ") on book manas-arora",
+        Map.of("book", "manas-arora", "rail", rail));
+  }
+
+  /** An effect ledger that hands out the live incident's REQUIRED lease. */
+  private static SwingPaperEffectRepository claimingRepository() {
+    SwingPaperEffectRepository effects = mock(SwingPaperEffectRepository.class);
+    SwingPaperEffectRepository.Effect effect =
+        new SwingPaperEffectRepository.Effect(
+            SALSTEEL_EFFECT,
+            "manas-arora",
+            LocalDate.of(2026, 8, 13),
+            "ENTRY:SALSTEEL",
+            "ENTRY",
+            "SALSTEEL",
+            SALSTEEL_SIGNAL,
+            null,
+            null,
+            null,
+            null,
+            206L,
+            0L,
+            "CLAIMED",
+            "REQUIRED",
+            List.of());
+    when(effects.findOpenBySignal(SALSTEEL_SIGNAL)).thenReturn(Optional.of(effect));
+    when(effects.claimOpen(eq(SALSTEEL_EFFECT), anyLong(), anyInt())).thenReturn(Optional.of(effect));
+    return effects;
   }
 
   /** A directional scalper take opens the PICKED OPTION at its captured premium (audit P0-3). */

@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.context;
 
+import in.arthayantra.marketdata.equitydaily.AdjustedEquityDailySql;
 import in.arthayantra.marketdata.equitydaily.CashEquityUniverse;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -26,6 +27,56 @@ import org.springframework.stereotype.Repository;
  * H24 names at {@code EquityBreadthEodJob:82} + {@code DataQualityEodJob:103}. Splitting this file
  * across PRs would have created that defect for the duration.
  *
+ * <p>⚠️ <b>Every PRICE fold here reads the CORPORATE-ACTION-ADJUSTED plane</b>, through {@link
+ * AdjustedEquityDailySql#factorLateral} — the SINGLE definition of that rule (audit H6 / ledger
+ * §9-02), CALLED, never pasted — hand-rolling the cumulative-ratio product here is the drift this
+ * seam exists to prevent. On raw closes a split or bonus ex-date collapsed the name against its prior
+ * close, so the digest read the ex-date as a crash and the name stayed below its own MA for the next
+ * 20/50 sessions. The factor is 1 for every symbol with no action after the bar — almost the whole
+ * universe — so this is inert there.
+ *
+ * <p>They move TOGETHER for the same reason the H24 series sweep did: {@link EquityDigestService}
+ * assembles {@link #advanceDecline}, {@link #aboveMa}, {@link #advDecSeries}, {@link
+ * #sectorSessionChange}, {@link #indexMemberChange} and {@link #returnBases} into adjacent fields of
+ * ONE response record. Adjusting some and not others would put two price planes in one payload with
+ * nothing on the wire saying which is which — strictly worse for a reader than uniform-raw was.
+ * <b>Do not adjust or un-adjust one of them alone.</b>
+ *
+ * <p><b>Raw ON PURPOSE, not missed:</b> {@code deliv_per} ({@link #deliveryZ}) is a percentage, not a
+ * price. Volume and rupee turnover are read nowhere in this class, and where they ARE read they stay
+ * raw for the reason {@link AdjustedEquityDailySql}'s javadoc gives — a split multiplies the share
+ * count, so the tape is already on the post-split basis and adjusting it would double-count. The
+ * {@code max(trade_date)} pins ({@link #latestSession}, {@link #priorSession}) are dates, not prices.
+ *
+ * <p>⚠️ The exchange's {@code prev_close} COLUMN is NOT on the adjusted basis and is no longer read
+ * by any fold here — measured 2026-08-25 on the live DB, it equalled the prior session's RAW close on
+ * all 21 ex-dates in 2026-06-01..2026-08-25 that carry a bhavcopy row (e.g. CORDELIA 2026-08-25,
+ * ratio 0.10: {@code prev_close} 1043.60 against an ex-date close of 104.45). The prior close is a
+ * rank-2 / {@code lag()} row on the adjusted plane instead, so both operands share one basis. That
+ * swap is inert off the ex-date: {@code lag(close_price)} equalled {@code prev_close} on 103068 of
+ * 103068 EQ+BE rows over 2026-07-01..2026-08-24. Its one cost is that a symbol with NO prior bar in
+ * the window gets no advance/decline verdict — see {@link #PRIOR_BAR_LOOKBACK_DAYS}. Both figures are
+ * re-derivable from the live DB, not constants: {@code nse_eod_bhavcopy} is retro-mutable.
+ *
+ * <p>⚠️ {@link AdCounts}: {@code advances + declines + unchanged} is NOT an invariant equal to
+ * {@code total}. A symbol trading on the read date with NO prior bar in the lookback window counts
+ * into {@code total} but gets no verdict, so the sum can fall short. Measured 2026-08-25 for session
+ * 2026-08-24: 2 of 2872 EQ+BE symbols, both listings whose first-ever bar was that session. The
+ * digest's own {@code adRatio} divides advances by DECLINES and never by {@code total}, which is why
+ * this is safe — but do not write a new consumer that assumes the sum closes.
+ *
+ * <p>⚠️ <b>THE FOLDS NO LONGER AGREE ON WHICH SYMBOLS GET A VERDICT, and that is new.</b> Before the
+ * CA move every fold read the same {@code prev_close} column, so a symbol was eligible everywhere or
+ * nowhere. Each now carries its OWN prior-bar window: {@code advanceDecline} /
+ * {@code sectorSessionChange} / {@code indexMemberChange} use {@link #PRIOR_BAR_LOOKBACK_DAYS} (45
+ * calendar days), {@code advDecSeries} uses {@code sessions * 3 + 20} (50 at the default window), and
+ * {@code EquityBreadthDailyRepository.COMPUTE_SQL} warms up over 400. So a symbol whose prior bar is
+ * 46–400 days back can get a verdict from one fold and not another — and {@code EquityDigestService}
+ * puts two of them in ONE payload while the breadth page renders the digest A/D above the
+ * {@code equity_breadth_daily} chart. This is a SECOND axis of the same "two planes in one payload"
+ * problem the CA move exists to remove; it is display-only and measured small (2 of 2872 on
+ * 2026-08-24), which is why it is recorded rather than fixed here. Review finding, 2026-08-25.
+ *
  * <p>Idioms match {@code nse.analytics}: plain {@link JdbcTemplate}, positional {@code ?} params,
  * {@code CashEquityUniverse.SERIES_PREDICATE}, {@code java.sql.Date.valueOf} binds, IST-safe {@code (col AT TIME ZONE
  * 'Asia/Kolkata')::date} casts (never a bare {@code ::date}). Every windowed fold carries a lower
@@ -33,6 +84,55 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class EquityContextRepository {
+
+  /**
+   * Calendar days scanned back from the read date so every symbol trading on that date also has its
+   * PRIOR bar in the window. The prior close is now a rank-2 row on the CA-adjusted plane, not the
+   * exchange's {@code prev_close} column, so it has to be scanned for rather than read off the row.
+   *
+   * <p>45 matches the bound {@link #deliveryZ} and {@link #returnBases} already used, and comfortably
+   * covers one session's gap. A symbol suspended LONGER than this loses its prior bar and therefore
+   * its verdict — measured 2026-08-25 on the live DB for session 2026-08-24: 2 of 2872 EQ+BE symbols
+   * had no prior bar in 45 days, and BOTH ({@code HORIZONIND}, {@code LALITHAA}) were listings whose
+   * first-ever bar was that session. Re-derivable, not a constant.
+   */
+  private static final String PRIOR_BAR_LOOKBACK_DAYS = "45";
+
+  /** Calendar-day budget per requested session in {@link #seriesLookbackDays}. */
+  private static final int SERIES_LOOKBACK_MULTIPLIER = 3;
+
+  /** Flat calendar-day pad in {@link #seriesLookbackDays}, absorbing a holiday cluster. */
+  private static final int SERIES_LOOKBACK_PAD = 20;
+
+  /**
+   * The largest {@code sessions} {@link #advDecSeries} accepts. Above this it would return a SHORTER
+   * series than asked for without failing — the reassuring direction, and the exact shape this repo
+   * keeps getting burned by — so it throws instead.
+   *
+   * <p><b>This bound is a MEASUREMENT, not an estimate.</b> Computed 2026-08-25 against the live
+   * {@code nse_eod_bhavcopy} EQ+BE session list: for every {@code n} from 1 to 60, the worst-case
+   * calendar span of {@code n+1} consecutive sessions anywhere in the history was compared to the
+   * {@code n * 3 + 20} budget. 60 of 60 were sufficient; the tightest margin was 19 days (at
+   * {@code n = 1}, budget 23 vs a worst observed span of 4), and margins widen with {@code n}
+   * (at {@code n = 60}, budget 200 vs 95). The bound is set at the edge of what was measured, not at
+   * the edge of what the arithmetic would allow.
+   *
+   * <p>⚠️ The measurement's POPULATION is 292 sessions over 2025-06-20..2026-08-25 — about 14 months.
+   * That covers ordinary weekend and festival clusters; it does NOT contain a rare multi-week
+   * exchange closure, so it bounds the common case rather than proving the worst one. It is also
+   * re-derivable rather than constant: {@code nse_eod_bhavcopy} is retro-mutable, and a MISSING
+   * ingest date inflates an apparent gap — which biases this test toward reporting INsufficiency,
+   * the safe direction. The residual risk the guard cannot close is a future holiday cluster
+   * exceeding the budget at some {@code n} within the bound; that would still truncate silently. An
+   * exact session-count lower bound (a {@code DISTINCT trade_date ... LIMIT sessions + 1} subquery)
+   * would remove the estimate entirely and is the fix if that ever matters.
+   *
+   * <p>Only the UPPER side is guarded. {@code sessions <= 0} does not truncate — it returns exactly
+   * what was asked for (nothing, or a loud {@code LIMIT must not be negative} from Postgres) — and
+   * the caller's window comes from configuration ({@code artha.context.equity.thrust-window}), so
+   * throwing on 0 would turn a harmless misconfiguration into a dead digest.
+   */
+  public static final int MAX_SERIES_SESSIONS = 60;
 
   private final JdbcTemplate jdbc;
 
@@ -65,33 +165,91 @@ public class EquityContextRepository {
 
   public AdCounts advanceDecline(LocalDate date) {
     return jdbc.queryForObject(
-        "SELECT count(*) FILTER (WHERE close_price > prev_close) AS adv,"
-            + " count(*) FILTER (WHERE close_price < prev_close) AS dec,"
-            + " count(*) FILTER (WHERE close_price = prev_close) AS unch,"
-            + " count(*) AS total"
-            + " FROM nse_eod_bhavcopy WHERE trade_date = ? AND "
-            + CashEquityUniverse.SERIES_PREDICATE
-            + " AND prev_close IS NOT NULL",
+        "WITH windowed AS ("
+            + "  SELECT b.symbol, b.trade_date,"
+            + "         round(b.close_price * caf.factor, 4) AS close_adj,"
+            + "         ROW_NUMBER() OVER (PARTITION BY b.symbol ORDER BY b.trade_date DESC) AS rn"
+            + "  FROM nse_eod_bhavcopy b "
+            + AdjustedEquityDailySql.factorLateral("b", "trade_date")
+            + "  WHERE " + CashEquityUniverse.qualified("b")
+            + "    AND b.trade_date <= ? AND b.trade_date > (?::date - INTERVAL '"
+            + PRIOR_BAR_LOOKBACK_DAYS
+            + " days')),"
+            + " per_symbol AS ("
+            + "  SELECT symbol,"
+            + "         max(trade_date) FILTER (WHERE rn = 1) AS last_date,"
+            + "         max(close_adj) FILTER (WHERE rn = 1) AS c0,"
+            + "         max(close_adj) FILTER (WHERE rn = 2) AS c1"
+            + "  FROM windowed GROUP BY symbol)"
+            + " SELECT count(*) FILTER (WHERE c0 > c1) AS adv,"
+            + "        count(*) FILTER (WHERE c0 < c1) AS dec,"
+            + "        count(*) FILTER (WHERE c0 = c1) AS unch,"
+            + "        count(*) AS total"
+            + " FROM per_symbol WHERE last_date = ?::date",
         (rs, n) -> new AdCounts(rs.getInt("adv"), rs.getInt("dec"), rs.getInt("unch"), rs.getInt("total")),
+        java.sql.Date.valueOf(date),
+        java.sql.Date.valueOf(date),
         java.sql.Date.valueOf(date));
   }
 
   /** One session's advance/decline counts (for the breadth-thrust moving average). */
   public record AdSession(LocalDate tradeDate, int advances, int declines) {}
 
-  /** The last {@code sessions} cash-equity sessions on/before {@code date}, newest first. */
+  /**
+   * The last {@code sessions} cash-equity sessions on/before {@code date}, newest first.
+   *
+   * @throws IllegalArgumentException if {@code sessions} exceeds {@link #MAX_SERIES_SESSIONS}, rather
+   *     than silently returning a shorter series than requested
+   */
   public List<AdSession> advDecSeries(LocalDate date, int sessions) {
+    if (sessions > MAX_SERIES_SESSIONS) {
+      throw new IllegalArgumentException(
+          "advDecSeries sessions must be <= "
+              + MAX_SERIES_SESSIONS
+              + " (the largest value the "
+              + SERIES_LOOKBACK_MULTIPLIER
+              + "x+"
+              + SERIES_LOOKBACK_PAD
+              + "-calendar-day lookback is MEASURED to cover); got "
+              + sessions);
+    }
     return jdbc.query(
-        "SELECT trade_date,"
-            + " count(*) FILTER (WHERE close_price > prev_close) AS adv,"
-            + " count(*) FILTER (WHERE close_price < prev_close) AS dec"
-            + " FROM nse_eod_bhavcopy"
-            + " WHERE " + CashEquityUniverse.SERIES_PREDICATE
-            + " AND prev_close IS NOT NULL AND trade_date <= ?"
+        "WITH adj AS ("
+            + "  SELECT b.symbol, b.trade_date,"
+            + "         round(b.close_price * caf.factor, 4) AS close_adj"
+            + "  FROM nse_eod_bhavcopy b "
+            + AdjustedEquityDailySql.factorLateral("b", "trade_date")
+            + "  WHERE " + CashEquityUniverse.qualified("b")
+            + "    AND b.trade_date <= ?"
+            + "    AND b.trade_date > (?::date - INTERVAL '1 day' * ?)),"
+            + " lagged AS ("
+            + "  SELECT trade_date, close_adj,"
+            + "         lag(close_adj) OVER (PARTITION BY symbol ORDER BY trade_date) AS prev_adj"
+            + "  FROM adj)"
+            + " SELECT trade_date,"
+            + "        count(*) FILTER (WHERE close_adj > prev_adj) AS adv,"
+            + "        count(*) FILTER (WHERE close_adj < prev_adj) AS dec"
+            + " FROM lagged"
             + " GROUP BY trade_date ORDER BY trade_date DESC LIMIT ?",
         (rs, n) -> new AdSession(rs.getObject("trade_date", LocalDate.class), rs.getInt("adv"), rs.getInt("dec")),
         java.sql.Date.valueOf(date),
+        java.sql.Date.valueOf(date),
+        seriesLookbackDays(sessions),
         sessions);
+  }
+
+  /**
+   * Calendar days to scan so a {@code sessions}-long series has a prior bar for EVERY emitted date,
+   * including the oldest one — the {@code lag()} of the oldest emitted session comes from a bar
+   * OUTSIDE the emitted range, so the scan must be strictly wider than the output. This also
+   * replaces an UNBOUNDED scan: the previous form carried no lower {@code trade_date} bound at all,
+   * against this class's own stated idiom.
+   *
+   * <p>The multiplier and pad are named constants rather than literals so this arithmetic, {@link
+   * #MAX_SERIES_SESSIONS} and the guard in {@link #advDecSeries} cannot drift apart.
+   */
+  private static int seriesLookbackDays(int sessions) {
+    return sessions * SERIES_LOOKBACK_MULTIPLIER + SERIES_LOOKBACK_PAD;
   }
 
   /**
@@ -99,17 +257,28 @@ public class EquityContextRepository {
    * above their 20- and 50-session simple moving average. Only symbols with a full window count into
    * the respective universe (n20 &ge; 20 / n50 &ge; 50). The 110-calendar-day lower bound comfortably
    * covers 50 trading sessions and chunk-prunes the scan.
+   *
+   * <p>⚠️ Closes are CORPORATE-ACTION-ADJUSTED via {@link AdjustedEquityDailySql#factorLateral} — the
+   * SINGLE definition of that rule (ledger §9-02), CALLED rather than pasted. On raw bhavcopy closes a
+   * split or bonus inside the window collapses the post-ex bars against the pre-ex ones, so the name
+   * reads below its own MA for the next 20/50 sessions and is counted out of {@code above20}/{@code
+   * above50} — a data artifact, not breadth. Same defect class as audit H6 / §9-02. The factor is 1 for
+   * every symbol with no action after the bar, i.e. almost the whole universe, so this is inert there.
+   *
+   * <p>Every other price fold in this class reads the same adjusted plane — see the class javadoc for
+   * why they move together and for what stays raw on purpose.
    */
   public record AboveMaCounts(int universe20, int above20, int universe50, int above50) {}
 
   public AboveMaCounts aboveMa(LocalDate date) {
     return jdbc.queryForObject(
         "WITH windowed AS ("
-            + "  SELECT symbol, close_price,"
-            + "         ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn"
-            + "  FROM nse_eod_bhavcopy"
-            + "  WHERE " + CashEquityUniverse.SERIES_PREDICATE
-            + "    AND trade_date <= ? AND trade_date > (?::date - INTERVAL '110 days')),"
+            + "  SELECT b.symbol, round(b.close_price * caf.factor, 4) AS close_price,"
+            + "         ROW_NUMBER() OVER (PARTITION BY b.symbol ORDER BY b.trade_date DESC) AS rn"
+            + "  FROM nse_eod_bhavcopy b "
+            + AdjustedEquityDailySql.factorLateral("b", "trade_date")
+            + "  WHERE " + CashEquityUniverse.qualified("b")
+            + "    AND b.trade_date <= ? AND b.trade_date > (?::date - INTERVAL '110 days')),"
             + " per_symbol AS ("
             + "  SELECT symbol,"
             + "         max(close_price) FILTER (WHERE rn = 1) AS last_close,"
@@ -183,13 +352,51 @@ public class EquityContextRepository {
 
   public List<SessionChange> sectorSessionChange(LocalDate date) {
     return jdbc.query(
-        "SELECT symbol, close_price, prev_close FROM nse_eod_bhavcopy"
-            + " WHERE trade_date = ? AND " + CashEquityUniverse.SERIES_PREDICATE
-            + " AND prev_close > 0",
+        sessionChangeSql(""),
         (rs, n) ->
             new SessionChange(
                 rs.getString("symbol"), rs.getBigDecimal("close_price"), rs.getBigDecimal("prev_close")),
+        java.sql.Date.valueOf(date),
+        java.sql.Date.valueOf(date),
         java.sql.Date.valueOf(date));
+  }
+
+  /**
+   * The shared per-symbol close/prior-close read for ONE session on the CA-adjusted plane, used by
+   * BOTH {@link #sectorSessionChange} and {@link #indexMemberChange} so the two cannot drift apart.
+   * {@code memberFilter} is an optional extra predicate inside the windowed CTE (the index-member
+   * {@code IN} list); empty for the sector read.
+   *
+   * <p>Binds, in order: {@code date} (upper bound), {@code date} (lookback base), any binds inside
+   * {@code memberFilter}, then {@code date} again (the emitted-session pin). A caller that gets that
+   * order wrong does not fail loudly — it reads the wrong session — so both callers bind against
+   * this one comment.
+   *
+   * <p>{@code c1 > 0} preserves the old {@code prev_close > 0} guard: a symbol with no prior bar in
+   * the window has a NULL prior close, fails the predicate and is dropped, exactly as a NULL or zero
+   * {@code prev_close} was dropped before.
+   */
+  private static String sessionChangeSql(String memberFilter) {
+    return "WITH windowed AS ("
+        + "  SELECT b.symbol, b.trade_date,"
+        + "         round(b.close_price * caf.factor, 4) AS close_adj,"
+        + "         ROW_NUMBER() OVER (PARTITION BY b.symbol ORDER BY b.trade_date DESC) AS rn"
+        + "  FROM nse_eod_bhavcopy b "
+        + AdjustedEquityDailySql.factorLateral("b", "trade_date")
+        + "  WHERE " + CashEquityUniverse.qualified("b")
+        + "    AND b.trade_date <= ? AND b.trade_date > (?::date - INTERVAL '"
+        + PRIOR_BAR_LOOKBACK_DAYS
+        + " days')"
+        + memberFilter
+        + "),"
+        + " per_symbol AS ("
+        + "  SELECT symbol,"
+        + "         max(trade_date) FILTER (WHERE rn = 1) AS last_date,"
+        + "         max(close_adj) FILTER (WHERE rn = 1) AS c0,"
+        + "         max(close_adj) FILTER (WHERE rn = 2) AS c1"
+        + "  FROM windowed GROUP BY symbol)"
+        + " SELECT symbol, c0 AS close_price, c1 AS prev_close"
+        + " FROM per_symbol WHERE last_date = ?::date AND c1 > 0";
   }
 
   /** One symbol's close now (rn 1) and one prior window (rn k) for a return calculation. */
@@ -202,11 +409,12 @@ public class EquityContextRepository {
   public List<ReturnBase> returnBases(LocalDate date, int windowRn) {
     return jdbc.query(
         "WITH ranked AS ("
-            + "  SELECT symbol, close_price,"
-            + "         ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn"
-            + "  FROM nse_eod_bhavcopy"
-            + "  WHERE " + CashEquityUniverse.SERIES_PREDICATE
-            + "    AND trade_date <= ? AND trade_date > (?::date - INTERVAL '45 days'))"
+            + "  SELECT b.symbol, round(b.close_price * caf.factor, 4) AS close_price,"
+            + "         ROW_NUMBER() OVER (PARTITION BY b.symbol ORDER BY b.trade_date DESC) AS rn"
+            + "  FROM nse_eod_bhavcopy b "
+            + AdjustedEquityDailySql.factorLateral("b", "trade_date")
+            + "  WHERE " + CashEquityUniverse.qualified("b")
+            + "    AND b.trade_date <= ? AND b.trade_date > (?::date - INTERVAL '45 days'))"
             + " SELECT symbol,"
             + "        max(close_price) FILTER (WHERE rn = 1) AS c0,"
             + "        max(close_price) FILTER (WHERE rn = ?) AS c_prior"
@@ -228,14 +436,12 @@ public class EquityContextRepository {
     }
     String placeholders = String.join(",", java.util.Collections.nCopies(members.size(), "?"));
     List<Object> args = new java.util.ArrayList<>();
-    args.add(java.sql.Date.valueOf(date));
-    args.addAll(members);
+    args.add(java.sql.Date.valueOf(date)); // upper bound
+    args.add(java.sql.Date.valueOf(date)); // lookback base
+    args.addAll(members); // the memberFilter binds sit INSIDE the windowed CTE
+    args.add(java.sql.Date.valueOf(date)); // emitted-session pin
     return jdbc.query(
-        "SELECT symbol, close_price, prev_close FROM nse_eod_bhavcopy"
-            + " WHERE trade_date = ? AND " + CashEquityUniverse.SERIES_PREDICATE
-            + " AND prev_close > 0 AND symbol IN ("
-            + placeholders
-            + ")",
+        sessionChangeSql("    AND b.symbol IN (" + placeholders + ")"),
         (rs, n) ->
             new SessionChange(
                 rs.getString("symbol"), rs.getBigDecimal("close_price"), rs.getBigDecimal("prev_close")),

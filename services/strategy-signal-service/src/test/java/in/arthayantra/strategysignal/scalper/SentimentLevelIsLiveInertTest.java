@@ -134,5 +134,58 @@ class SentimentLevelIsLiveInertTest {
     assertThat(thirteen.sentimentLevelPct()).isNull();
     assertThat(fourteen).isEqualTo(bar(null));
     assertThat(thirteen.oiDivergencePct()).isNull();
+    // The reason-code PR adds a 16th component. Same contract: every pre-existing literal keeps its
+    // meaning, and none of them may claim the monthly-expiry suppression by default.
+    assertThat(fourteen.monthlyExpirySuppressed()).isFalse();
+    assertThat(thirteen.monthlyExpirySuppressed()).isFalse();
+    assertThat(bar(null).monthlyExpirySuppressed()).isFalse();
+  }
+
+  /**
+   * The same inertness claim for the reason-code PR's own field. {@code monthlyExpirySuppressed} is
+   * PROVENANCE — it must reach the diagnostic and reach nothing else. Paired exactly as above, on
+   * the pair that MATTERS: two level-less bars differing only in the flag, i.e. the by-design
+   * monthly-expiry snapshot against the ordinary missing-level one. Every live output is asserted
+   * equal across the pair; the shadow's reason is asserted DIFFERENT. Either half alone is passable
+   * by a no-op — equality alone passes on a field nothing plumbed, difference alone passes on a
+   * field a gate also reads.
+   */
+  @Test
+  void theSuppressionFlagIsLiveInertButReachesTheShadowReason() {
+    Oi ordinary = bar(null);
+    Oi suppressed =
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("0.00"), bd("5"), bd("12"),
+            bd("-60000"), bd("70000"), bd("80"), true, false, bd("5"), bd("60"), bd("60"), bd("25"),
+            null, true);
+
+    for (OptionType side : new OptionType[] {CE, PE}) {
+      ScalperGateContext ordinaryCtx =
+          new ScalperGateContext(
+              "NIFTY 50", "NIFTY 50", LocalTime.of(10, 30), BULL_CHART, ordinary, MACRO);
+      ScalperGateContext suppressedCtx =
+          new ScalperGateContext(
+              "NIFTY 50", "NIFTY 50", LocalTime.of(10, 30), BULL_CHART, suppressed, MACRO);
+
+      assertThat(ConnectTheDotsScorer.score(suppressedCtx, side, 1, T, P, true))
+          .as("%s: the suppression flag must not reach the composite", side)
+          .isEqualTo(ConnectTheDotsScorer.score(ordinaryCtx, side, 1, T, P, true));
+      assertThat(ScalperGates.oiSlopeAgree(suppressed, side))
+          .as("%s: the suppression flag must not reach the oi-slope-agree rail", side)
+          .isEqualTo(ScalperGates.oiSlopeAgree(ordinary, side));
+    }
+
+    // The discriminating half: same four nulls on both, different reason. This is precisely the
+    // pair that was indistinguishable on 2026-08-25.
+    SentimentLevelShadow ordinaryShadow = SentimentLevelShadow.of(ordinary, CE);
+    SentimentLevelShadow suppressedShadow = SentimentLevelShadow.of(suppressed, CE);
+    assertThat(suppressedShadow.levelPct()).isNull();
+    assertThat(ordinaryShadow.levelPct()).isNull();
+    assertThat(suppressedShadow.sentimentDotWouldSupport())
+        .isEqualTo(ordinaryShadow.sentimentDotWouldSupport())
+        .isNull();
+    assertThat(ordinaryShadow.reason()).isEqualTo(SentimentLevelShadow.Reason.LEVEL_UNAVAILABLE);
+    assertThat(suppressedShadow.reason())
+        .isEqualTo(SentimentLevelShadow.Reason.MONTHLY_EXPIRY_SUPPRESSED);
   }
 }

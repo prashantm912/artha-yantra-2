@@ -65,6 +65,10 @@ public class MarketOiClient {
   private final java.util.concurrent.atomic.AtomicBoolean chainPublishesExchange =
       new java.util.concurrent.atomic.AtomicBoolean(true);
 
+  /** {@code <tradeDate>|<underlying>} keys already announced by {@link #logSuppressionOnce}. */
+  private final java.util.Set<String> suppressionLogged =
+      java.util.concurrent.ConcurrentHashMap.newKeySet();
+
   /**
    * Short-TTL response memo (audit P1-12): every scalper passing the chart gate on the SAME bar
    * re-ran the full ~15-call OI/macro fan-out sequentially on the single eval thread — 12 CE
@@ -343,15 +347,19 @@ public class MarketOiClient {
    * futures-quadrant / active-strikes / trending) are SKIPPED and degrade to their inert defaults
    * (NEUTRAL quadrants, null soft-numerics, false flags) — exactly as if the OI endpoints were
    * unavailable, so every OI dot/gate is non-confirming. The price-derived futures basis is kept.
+   *
+   * <p>"Exactly as if the endpoints were unavailable" is the problem as well as the design: the
+   * returned snapshot is byte-identical to a four-failed-reads one, so a reader of the persisted
+   * diagnostic cannot tell a BY-DESIGN suppression from a genuine outage. Two readers built a live
+   * regression theory out of that on 2026-08-25. The snapshot therefore carries {@link
+   * Oi#monthlyExpirySuppressed()} as PROVENANCE — still read by no gate and no dot — and {@link
+   * SentimentLevelShadow} turns it into a reason code on the row.
    */
   public Oi oi(String underlying, LocalDate expiry, LocalDate tradeDate) {
     // Per-root expiry model (P1-9): SENSEX suppression keys on the BSE Thursday monthly, not NSE's.
     if (ScalperCalendars.forUnderlying(underlying).isMonthlyIndexExpiryDay(tradeDate)) {
-      log.debug("scalper OI suppressed for monthly-expiry day {} ({}) - chain-OI is corrupted (S24)", tradeDate, underlying);
-      BigDecimal futuresBasis = futuresBasis(underlying);
-      return new Oi(
-          OiQuadrant.NEUTRAL, OiQuadrant.NEUTRAL, null, null, futuresBasis, null, null, null,
-          false, false, null, null, null);
+      logSuppressionOnce(underlying, tradeDate);
+      return Oi.monthlyExpirySuppressed(futuresBasis(underlying));
     }
     // /options/spurt: one read → the underlying quadrant PLUS the spurt OI/price magnitudes (§A6).
     Spurt spurt =
@@ -421,6 +429,31 @@ public class MarketOiClient {
         trending.divergencePct(),
         // Measurement-only carrier — no gate or dot reads it (see SentimentLevelShadow).
         sentiment.levelBased());
+  }
+
+  /**
+   * The S24 suppression, said out loud ONCE per (trade date, underlying) at INFO.
+   *
+   * <p>It used to be {@code log.debug}, and nothing configures this service above the Spring default
+   * of INFO, so {@code docker logs | grep monthly-expiry} returned 0 on the very day two people were
+   * hunting for exactly this — the branch fired ~1,100 times and left no trace. INFO makes the day's
+   * single most consequential data fact greppable.
+   *
+   * <p>Once per key, not per call: {@code oi()} runs per strategy per bar, so an unguarded line would
+   * emit four figures of identical text on a monthly expiry and bury everything else at INFO. The key
+   * set is bounded by (underlyings × monthly expiries seen since boot) — a handful per month.
+   */
+  private void logSuppressionOnce(String underlying, LocalDate tradeDate) {
+    if (suppressionLogged.add(tradeDate + "|" + underlying)) {
+      // The enum NAME is interpolated, never spelled out: an operator greps this line and then
+      // greps `diagnostic->'sentimentLevelShadow'->>'reason'` for the same token, so a rename of the
+      // constant must move BOTH or the line becomes a quiet lie. Review finding, 2026-08-25.
+      log.info(
+          "scalper OI suppressed for monthly-expiry day {} ({}) — chain-OI is corrupted (S24); every"
+              + " OI dot/gate reads non-confirming today and sentimentLevelShadow.reason is {}."
+              + " This is BY DESIGN, not an outage.",
+          tradeDate, underlying, SentimentLevelShadow.Reason.MONTHLY_EXPIRY_SUPPRESSED.name());
+    }
   }
 
   /**

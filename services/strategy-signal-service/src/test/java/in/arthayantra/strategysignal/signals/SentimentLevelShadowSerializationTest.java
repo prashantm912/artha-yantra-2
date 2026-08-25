@@ -128,11 +128,12 @@ class SentimentLevelShadowSerializationTest {
     JsonNode shadow = fired(bd("30"), context(bd("30"))).get("sentimentLevelShadow");
 
     assertThat(keys(shadow))
-        .isEqualTo(Set.of("flowPct", "levelPct", "dotWouldSupport", "slopeGateWouldPass"));
+        .isEqualTo(Set.of("flowPct", "levelPct", "dotWouldSupport", "slopeGateWouldPass", "reason"));
     assertThat(shadow.get("flowPct").decimalValue()).isEqualByComparingTo("0.00");
     assertThat(shadow.get("levelPct").decimalValue()).isEqualByComparingTo("30");
     assertThat(shadow.get("dotWouldSupport").asBoolean()).isTrue();
     assertThat(shadow.get("slopeGateWouldPass").asBoolean()).isTrue();
+    assertThat(shadow.path("reason").asText()).isEqualTo("COMPUTED");
   }
 
   /**
@@ -162,7 +163,43 @@ class SentimentLevelShadowSerializationTest {
       assertThat(shadow.get("levelPct").isNull()).isTrue();
       assertThat(shadow.get("dotWouldSupport").isNull()).isTrue();
       assertThat(shadow.get("slopeGateWouldPass").isNull()).isTrue();
+      // …and it says WHY: this fixture is an ordinary bar whose level operand is simply absent, so
+      // the row must NOT claim the monthly-expiry suppression that produces identical nulls.
+      assertThat(shadow.path("reason").asText()).isEqualTo("LEVEL_UNAVAILABLE");
     }
+  }
+
+  /**
+   * The discriminator is REAL on the wire, not merely on the record: the two rows whose confusion
+   * prompted this change — a suppressed monthly expiry and a plain missing level — are identical in
+   * all four operand/verdict fields and differ ONLY in {@code reason}. An implementation that always
+   * emitted the same code would serialize two indistinguishable blocks and fail the last assertion.
+   */
+  @Test
+  void twoRowsWithIdenticalNullsAreToldApartByTheReasonAlone() {
+    ScalperGateContext suppressed =
+        new ScalperGateContext(
+            "NIFTY 50", "NIFTY 50", LocalTime.of(10, 30), BULL_CHART,
+            Oi.monthlyExpirySuppressed(bd("12")), MACRO);
+    // Same shape, NOT suppressed: quadrants NEUTRAL and every OI soft-numeric null — what four
+    // failed reads produce. Byte-identical to the above everywhere except the provenance flag.
+    ScalperGateContext unavailable =
+        new ScalperGateContext(
+            "NIFTY 50", "NIFTY 50", LocalTime.of(10, 30), BULL_CHART,
+            new Oi(
+                OiQuadrant.NEUTRAL, OiQuadrant.NEUTRAL, null, null, bd("12"), null, null, null,
+                false, false, null, null, null, null, null),
+            MACRO);
+
+    JsonNode a = fired(null, suppressed).get("sentimentLevelShadow");
+    JsonNode b = fired(null, unavailable).get("sentimentLevelShadow");
+
+    for (String operand : List.of("flowPct", "levelPct", "dotWouldSupport", "slopeGateWouldPass")) {
+      assertThat(a.get(operand)).as("%s must be null on BOTH rows", operand).isEqualTo(b.get(operand));
+      assertThat(a.get(operand).isNull()).isTrue();
+    }
+    assertThat(a.path("reason").asText()).isEqualTo("MONTHLY_EXPIRY_SUPPRESSED");
+    assertThat(b.path("reason").asText()).isEqualTo("LEVEL_UNAVAILABLE");
   }
 
   /**
@@ -175,9 +212,11 @@ class SentimentLevelShadowSerializationTest {
     JsonNode shadow = fired(bd("30"), null).get("sentimentLevelShadow");
 
     assertThat(keys(shadow))
-        .isEqualTo(Set.of("flowPct", "levelPct", "dotWouldSupport", "slopeGateWouldPass"));
+        .isEqualTo(Set.of("flowPct", "levelPct", "dotWouldSupport", "slopeGateWouldPass", "reason"));
     assertThat(shadow.get("flowPct").isNull()).isTrue();
     assertThat(shadow.get("dotWouldSupport").isNull()).isTrue();
+    // The four nulls stay four nulls; only the reason distinguishes this row from a suppressed one.
+    assertThat(shadow.path("reason").asText()).isEqualTo("NO_OI_CONTEXT");
   }
 
   /**

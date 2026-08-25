@@ -3,10 +3,13 @@ package in.arthayantra.strategysignal.scalper;
 import static in.arthayantra.black76.Black76.OptionType.CE;
 import static in.arthayantra.black76.Black76.OptionType.PE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 
 import in.arthayantra.black76.Black76.OptionType;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext.Oi;
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -121,6 +124,77 @@ class SentimentLevelShadowTest {
 
     assertThat(shadow.sentimentDotWouldSupport()).isTrue();
     assertThat(shadow.oiSlopeAgreeWouldPass()).isFalse();
+  }
+
+  /**
+   * ⚠️ THE WEAKENING PROOF for the reason code. A reason field that always reported the same value
+   * would satisfy "a reason code exists" and every single-case assertion elsewhere in this file, yet
+   * carry exactly as much information as the four nulls it replaced — i.e. none. This asserts the
+   * property that a constant CANNOT have: the five distinguishable states map to five DISTINCT
+   * codes. It fails on any collapse, whether to one constant or to a merge of two causes.
+   */
+  @Test
+  void everyDistinguishableCauseGetsItsOwnReasonCode() {
+    Oi suppressed = Oi.monthlyExpirySuppressed(bd("12"));
+    // The historical ambiguity, reproduced: identical in every operand the shadow reads, differing
+    // ONLY in the provenance flag. Before the reason code these two rows were indistinguishable.
+    Oi unavailable = oi(null, null, null);
+    assertThat(suppressed.sentimentPct()).isEqualTo(unavailable.sentimentPct());
+    assertThat(suppressed.sentimentLevelPct()).isEqualTo(unavailable.sentimentLevelPct());
+
+    Map<String, SentimentLevelShadow.Reason> byCause = new LinkedHashMap<>();
+    byCause.put("no OI context", SentimentLevelShadow.of(null, CE).reason());
+    byCause.put("monthly-expiry suppression", SentimentLevelShadow.of(suppressed, CE).reason());
+    byCause.put("level unavailable", SentimentLevelShadow.of(unavailable, CE).reason());
+    byCause.put("no side resolved", SentimentLevelShadow.of(oi(bd("12"), bd("5"), bd("30")), null).reason());
+    byCause.put("computed", SentimentLevelShadow.of(oi(bd("12"), bd("5"), bd("30")), CE).reason());
+
+    // The property a constant fails: five causes, five codes, no two alike.
+    assertThat(byCause.values()).doesNotHaveDuplicates().hasSize(5);
+    // …and each is the RIGHT one, so a permutation is caught too.
+    assertThat(byCause)
+        .containsExactly(
+            entry("no OI context", SentimentLevelShadow.Reason.NO_OI_CONTEXT),
+            entry("monthly-expiry suppression", SentimentLevelShadow.Reason.MONTHLY_EXPIRY_SUPPRESSED),
+            entry("level unavailable", SentimentLevelShadow.Reason.LEVEL_UNAVAILABLE),
+            entry("no side resolved", SentimentLevelShadow.Reason.SIDE_UNRESOLVED),
+            entry("computed", SentimentLevelShadow.Reason.COMPUTED));
+    // Every constant the enum declares is reachable — a code nothing can produce is a lie in a
+    // dashboard legend, and a code produced by two causes is the ambiguity all over again.
+    assertThat(byCause.values())
+        .containsExactlyInAnyOrder(SentimentLevelShadow.Reason.values());
+  }
+
+  /**
+   * The reason NEVER substitutes for a verdict. On the suppressed bar the four operand/verdict
+   * fields stay null — the point of the S24 branch is that the chain OI is corrupt, so any number
+   * derived from it would be measurement garbage. A "fix" that filled them in would pass a naive
+   * reason-code test and fail this one.
+   */
+  @Test
+  void theSuppressedReasonDoesNotConjureAVerdict() {
+    SentimentLevelShadow shadow = SentimentLevelShadow.of(Oi.monthlyExpirySuppressed(bd("12")), CE);
+
+    assertThat(shadow.reason()).isEqualTo(SentimentLevelShadow.Reason.MONTHLY_EXPIRY_SUPPRESSED);
+    assertThat(shadow.flowPct()).isNull();
+    assertThat(shadow.levelPct()).isNull();
+    assertThat(shadow.sentimentDotWouldSupport()).isNull();
+    assertThat(shadow.oiSlopeAgreeWouldPass()).isNull();
+  }
+
+  /**
+   * Root cause beats proximate cause. A suppressed snapshot ALSO has a null level, so an
+   * implementation that tested {@code level == null} before the provenance flag would report
+   * LEVEL_UNAVAILABLE and restore the very ambiguity this field removes — a failure mode invisible
+   * to any test that only ever checks one snapshot at a time.
+   */
+  @Test
+  void suppressionOutranksTheMissingLevelItCauses() {
+    assertThat(Oi.monthlyExpirySuppressed(bd("12")).sentimentLevelPct()).isNull();
+
+    assertThat(SentimentLevelShadow.of(Oi.monthlyExpirySuppressed(bd("12")), CE).reason())
+        .isNotEqualTo(SentimentLevelShadow.Reason.LEVEL_UNAVAILABLE)
+        .isEqualTo(SentimentLevelShadow.Reason.MONTHLY_EXPIRY_SUPPRESSED);
   }
 
   /**

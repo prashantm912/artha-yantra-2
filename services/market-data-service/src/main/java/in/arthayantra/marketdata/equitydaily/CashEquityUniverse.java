@@ -3,8 +3,9 @@ package in.arthayantra.marketdata.equitydaily;
 /**
  * The ONE definition of the cash-equity series predicate: {@code series IN ('EQ','BE')}.
  *
- * <p>{@code marketdata.nse_eod_bhavcopy} is MULTI-SERIES (13 series exist: EQ, BE, BZ, E1, GB, GS,
- * IV, MF, N1, RR, SM, ST, SZ), but the house cash-equity universe — the population the swing
+ * <p>{@code marketdata.nse_eod_bhavcopy} is MULTI-SERIES (⚠️ <b>18</b> series exist as of
+ * 2026-08-25 — EQ, BE, BZ, E1, GB, GS, IV, MF, N1, N3, P1, RR, SF, SM, ST, SZ, T0, X1; this doc said
+ * 13 until then, and the set GROWS, so re-derive it rather than quoting this list), but the house cash-equity universe — the population the swing
  * screeners rank and the paper books actually trade — is {@code EQ} plus {@code BE}. That is the
  * standard already encoded at {@code BhavcopyBackfillService:123}
  * ({@code artha.nse.bhavcopy.candle-series:EQ,BE}), {@code AdjustedEquityDailySql:76,207,259},

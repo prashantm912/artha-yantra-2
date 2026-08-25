@@ -61,6 +61,34 @@ _DIVERGENT_MAX = -1.5    # gapZ ≤ −1.5 (AND evidence floor) → DIVERGENT; b
 _FLOOR_PAIRED_TRADES = 20
 _FLOOR_WINDOW_DAYS = 28
 
+# --- ledger H9 cross-basis fence ---------------------------------------------------------------
+# Since H9 the LIVE swing exit FILL is the official NSE close (marketdata.nse_eod_bhavcopy
+# .close_price, which includes the 15:15-15:30 closing auction); the backtest replay still exits at
+# the `candles`@1d close, which does not. Kite's daily bar covers the continuous session only, so
+# the two are systematically different numbers -- measured 2026-08-13, 0 of 22 KITE 1d bars over the
+# swing book matched the bhavcopy close.
+#
+# `realizedPnl` on the live side therefore sits on a different fill basis from the re-sim, and
+# returnGap = live_return - sim_return acquires a one-directional wedge that is PURE PROVENANCE. The
+# §7.2 thresholds carry no price-basis tolerance, so without this fence a strategy could be pushed
+# ALIGNED -> PENALIZED -> DIVERGENT, blocking promotion or generating rollback evidence, purely
+# because we corrected the pricing. A graduation verdict moving because a defect was FIXED is a
+# worse outcome than the defect.
+#
+# The fence is deliberately the conservative option: report the EXISTING "INSUFFICIENT" literal
+# rather than reprice the replay (which reopens the same question inside the sim) or invent a new
+# verdict string (which would need a Flyway migration against the V012 CHECK constraint, break the
+# frontend's ReconVerdict union, and land in two defensive fall-throughs). It is SWING-ONLY: scalper
+# reconciliation is unaffected by H9 and is left byte-identical.
+_CROSS_BASIS_REASON = (
+    "cross-basis: live fills at the official NSE close (bhavcopy close_price, includes the "
+    "15:15-15:30 closing auction), replay fills at the candle close (continuous session only) - "
+    "the two sides are not on the same fill basis, so the return gap is a PROVENANCE artifact and "
+    "not a strategy signal; verdict fenced to INSUFFICIENT (ledger H9)"
+)
+_CROSS_BASIS_LIVE_FILL = "official_nse_close"
+_CROSS_BASIS_REPLAY_FILL = "candle_close"
+
 # Re-sim drain bounds (mirror the cost-stress drain, #729): a single full-window re-run polled to a
 # terminal state; a slow/dead run degrades to INSUFFICIENT, never a spinning daemon.
 _POLL_INTERVAL_SECONDS = 3.0
@@ -177,14 +205,28 @@ def _evidence_floor_met(paired_trades: int, window_days: float) -> bool:
     return paired_trades >= _FLOOR_PAIRED_TRADES or window_days >= _FLOOR_WINDOW_DAYS
 
 
-def _verdict(gap_z: float | None, evidence_floor_met: bool, has_live_evidence: bool) -> str:
+def _verdict(
+    gap_z: float | None,
+    evidence_floor_met: bool,
+    has_live_evidence: bool,
+    *,
+    cross_basis: bool = False,
+) -> str:
     """The §7.2 divergence verdict:
+      * the two sides are on different FILL BASES (``cross_basis``)  → INSUFFICIENT (ledger H9);
       * no live evidence at all, or gap_z is None (no fold-return σ) → INSUFFICIENT;
       * gap_z ≥ −0.5                                                 → ALIGNED;
       * −1.5 < gap_z < −0.5                                          → PENALIZED;
       * gap_z ≤ −1.5 AND evidence floor met                         → DIVERGENT;
       * gap_z ≤ −1.5 but floor unmet                                → INSUFFICIENT.
+
+    ``cross_basis`` is checked FIRST and on purpose: it says the INPUTS are incomparable, which is
+    upstream of every threshold below. Ordering it after the gapZ ladder would let a cross-basis
+    return gap be classified before anyone asked whether the two returns describe the same world.
+    Keyword-only with a default so the threshold ladder keeps reading as three arguments.
     """
+    if cross_basis:
+        return "INSUFFICIENT"
     if not has_live_evidence or gap_z is None:
         return "INSUFFICIENT"
     if gap_z >= _ALIGNED_MIN:
@@ -802,7 +844,12 @@ class ReconciliationService:
 
         paired_trades = inputs.paired_count
         evidence_floor_met = _evidence_floor_met(paired_trades, window_days)
-        verdict = _verdict(gap_z, evidence_floor_met, has_live and not sim_failed)
+        # Ledger H9: swing live fills at the official NSE close, the replay at the candle close.
+        # SWING-ONLY -- scalper reconciliation is untouched by H9 and keeps its exact prior verdict.
+        cross_basis = context.mode == "swing"
+        verdict = _verdict(
+            gap_z, evidence_floor_met, has_live and not sim_failed, cross_basis=cross_basis
+        )
 
         # gap vector (§7.1.3): returnGap is annualized (the §10 presentation value); returnGapRaw is
         # the gapZ numerator before √t rescaling (gapZTimeScale records the durations + factor).
@@ -826,6 +873,16 @@ class ReconciliationService:
             },
             "caveats": caveats,
         }
+        # Machine-readable twin of the caveat text, so scoring/proposals can tell a FENCED
+        # INSUFFICIENT apart from a genuinely-thin-evidence one without string-matching a caveat.
+        # Added ONLY when fenced, so a scalper row's persisted shape is byte-identical to before.
+        if cross_basis:
+            gap["crossBasis"] = {
+                "fenced": True,
+                "reason": _CROSS_BASIS_REASON,
+                "liveFillBasis": _CROSS_BASIS_LIVE_FILL,
+                "replayFillBasis": _CROSS_BASIS_REPLAY_FILL,
+            }
         diagnosis = (
             _diagnosis(overlap, slippage_realized=None, single_pick=context.single_pick)
             if verdict == "DIVERGENT"
@@ -902,6 +959,7 @@ def _dispatch_caveats(mode: str) -> list[str]:
     verdict."""
     if mode == "swing":
         return [
+            _CROSS_BASIS_REASON,
             "residual exit-TRIGGER axis: the sim honors exit_intrabar (default true on a 1d "
             "primary) and may exit at the first intraday 1m close through a stop, while live "
             "SwingBatchEngine evaluates exits only at the daily close — moot on daily-only "

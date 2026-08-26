@@ -58,8 +58,15 @@ class CronPassthroughParityTest {
    * {@code OperatingWindowTest.JOBS} — moved on the same merge, and taking either side's number
    * instead of counting leaves the size assertion GREEN while the other side's jobs silently drop
    * out of the parity sweep.
+   *
+   * <p>⚠️ RAISED 13 -> 14 on 2026-08-26 for {@code artha.context.day-context-refresh-cron} (H31),
+   * and again RE-DERIVED by COUNTING rather than incrementing: the constructor call sites in
+   * {@link #JOBS} number <b>14</b> (source lines 66–128; a fifteenth {@code new Job(} occurrence in
+   * this file is the {@code @code} reference in the paragraph above, which is why a naive grep
+   * over the whole file says 15), and the distinct {@code ARTHA_*} names in that literal also
+   * number <b>14</b>.
    */
-  private static final int EXPECTED_JOB_COUNT = 13;
+  private static final int EXPECTED_JOB_COUNT = 14;
 
   private static final List<Job> JOBS =
       List.of(
@@ -118,7 +125,17 @@ class CronPassthroughParityTest {
           new Job(
               "artha.evening-chain.check-cron",
               "ARTHA_EVENING_CHAIN_CHECK_CRON",
-              SRC + "canary/EveningChainCanary.java"));
+              SRC + "canary/EveningChainCanary.java"),
+          // Added 2026-08-26 (H31 review Major 1). Same shape as the EveningChainCanary entry above
+          // and found the same way: the compose passthrough shipped as an UNPINNED third copy, and
+          // composeMirrorsTheCodeDefaultExactly passed WITHOUT checking it — because this catalogue
+          // is hand-written, a job that is missing from it is invisible to every assertion here.
+          // ⚠️ Its @Scheduled keeps `cron` and `zone` on ONE source line for the activeCronSites
+          // per-line reason documented above; that reformatting was required to add this entry.
+          new Job(
+              "artha.context.day-context-refresh-cron",
+              "ARTHA_CONTEXT_DAY_CONTEXT_REFRESH_CRON",
+              SRC + "context/DayContextService.java"));
 
   @Test
   @DisplayName("the catalogue still covers every job it claims to")

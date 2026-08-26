@@ -16,6 +16,7 @@ import in.arthayantra.marketdata.instruments.UnderlyingRef;
 import in.arthayantra.marketdata.kite.VixQuoteCache;
 import in.arthayantra.marketdata.options.OptionsDigestService;
 import in.arthayantra.marketdata.upstox.UpstoxGlobalInstrumentsClient;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -219,6 +220,7 @@ class DayContextUnderlyingNameTest {
         // 11:30 IST Thursday — inside the bundled 2024-2026 calendar and not a holiday, so this is
         // deterministic and carries no coupling to the calendar horizon canary.
         Clock.fixed(Instant.parse("2026-08-20T06:00:00Z"), ZoneOffset.UTC),
+        new SimpleMeterRegistry(),
         configuredName,
         "NSE",
         "NIFTY 50",
@@ -227,7 +229,8 @@ class DayContextUnderlyingNameTest {
         5,
         new BigDecimal("13"),
         new BigDecimal("17"),
-        new BigDecimal("22"));
+        new BigDecimal("22"),
+        300L);
   }
 
   /** First value between {@code prefix} and the next {@code suffix}; fails loudly if absent. */

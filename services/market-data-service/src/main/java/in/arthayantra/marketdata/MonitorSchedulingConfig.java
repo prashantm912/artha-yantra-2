@@ -219,4 +219,42 @@ public class MonitorSchedulingConfig {
     scheduler.setDaemon(true);
     return scheduler;
   }
+
+  /**
+   * A single daemon thread owned solely by {@code DayContextService.refreshSnapshot} — the H31
+   * intraday precompute that fires at :13/:28/:43/:58, 08–15 IST, i.e. INSIDE market hours.
+   *
+   * <p><b>Why it cannot sit on the default pool — it would defeat the fix it is part of.</b> That
+   * pool is ONE thread ({@link #taskScheduler} is {@code builder.build()}, pool size 1) shared by
+   * <b>29 scheduled methods on the shared default pool (of 38 {@code @Scheduled} annotations in
+   * this service's main sources; 9 name a scheduler)</b>, and one of them is
+   * {@code OptionsSnapshotService.scheduledSnapshot}:
+   * every 2 minutes, and its own javadoc sizes a pass at "~70 batched calls ≈ 70 s at the 1/s
+   * limit". The entire safety margin of the H31 design is the 2 minutes between the :13 refresh and
+   * the :15 sweep. A refresh submitted at :13:00 that queues behind an in-flight options pass can
+   * land AFTER :15; the sweep then reads a snapshot older than
+   * {@code artha.context.day-context-snapshot-max-age-seconds}, falls back to an inline compute, and
+   * <b>H31 reproduces exactly — with every unit test still green</b>, because nothing in a unit test
+   * can observe scheduler queueing.
+   *
+   * <p>The traffic runs the other way too. {@code DayContextService.overnightCues} is an UNCACHED
+   * Upstox call whose 429 ladder backs off 1→16 s (longer on a {@code Retry-After}), so on the
+   * default pool a throttled refresh would block in-session OI capture — work that used to run on a
+   * Tomcat request thread and never touched a scheduler at all. Its own thread means an overrun can
+   * only ever starve itself.
+   *
+   * <p><b>Why not {@link #monitorTaskScheduler()}.</b> Same fence as {@link #barFlushTaskScheduler},
+   * {@link #oiCaptureTaskScheduler}, {@link #nseRetryTaskScheduler} and {@link
+   * #closeCanaryTaskScheduler}: that pool is reserved for pure liveness DETECTORS. This is a
+   * multi-upstream fetch path (Kite quote + Upstox world indices + a JDBC candle read + the ingest
+   * board), which is exactly what must not sit next to {@code FeedWatchdog.check}.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler dayContextTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("day-context-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
 }

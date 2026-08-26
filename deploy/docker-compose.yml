@@ -497,6 +497,19 @@ services:
       # about live behaviour, it only makes the knob reachable from .env (#653).
       ARTHA_VIX_QUOTE_CACHE_TTL_SECONDS: ${ARTHA_VIX_QUOTE_CACHE_TTL_SECONDS:-30}
       ARTHA_CONTEXT_OPTIONS_NAME: ${ARTHA_CONTEXT_OPTIONS_NAME:-NIFTY 50}
+      # H31 day-context intraday snapshot: the expensive half (options digest + VIX + world
+      # indices + daily candles + ingest board) is precomputed 2 minutes before each 15-minute
+      # insight sweep, so the sweep never pays the ~1.9 s assembly against its 2000 ms read
+      # budget. Cost is +4 upstream passes a session: 4/hr over hours 8-15 = 32, against the 28
+      # the sweep alone used to cost (4/hr over hours 9-15). An earlier cut of this comment said
+      # "the SAME number of calls" -- that was wrong arithmetic; the extra four are the pre-open
+      # warm-up that stops the 09:00 sweep computing inline. A weekday NSE holiday costs 0 (the
+      # refresher checks the calendar). A snapshot older than the max age is recomputed inline;
+      # the 18:49 EOD job does not depend on that -- it calls the uncached entry point outright.
+      # BOTH VALUES ARE THE CODE DEFAULTS, BYTE FOR BYTE -- these lines change nothing about
+      # live behaviour, they only make the knobs reachable from .env (#653).
+      ARTHA_CONTEXT_DAY_CONTEXT_REFRESH_CRON: "${ARTHA_CONTEXT_DAY_CONTEXT_REFRESH_CRON:-0 13,28,43,58 8-15 * * MON-FRI}"
+      ARTHA_CONTEXT_DAY_CONTEXT_SNAPSHOT_MAX_AGE_SECONDS: ${ARTHA_CONTEXT_DAY_CONTEXT_SNAPSHOT_MAX_AGE_SECONDS:-300}
       # Live option-premium 1m capture: nearest-expiry ATM +/- width, both CE and PE.
       ARTHA_OPTIONS_ATM_PINNER_UNDERLYINGS: ${ARTHA_OPTIONS_ATM_PINNER_UNDERLYINGS:-NIFTY 50,SENSEX}
       ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH: ${ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH:-5}

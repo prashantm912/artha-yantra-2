@@ -12,10 +12,13 @@ import in.arthayantra.marketdata.kite.VixQuoteCache;
 import in.arthayantra.marketdata.options.OptionsDigestService;
 import in.arthayantra.marketdata.upstox.UpstoxGlobalInstrumentsClient;
 import in.arthayantra.marketdata.upstox.WorldIndex;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
@@ -27,6 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /**
@@ -93,6 +97,23 @@ public class DayContextService {
   /** The ingest-trust summary: worst-of overall + per-source cells (OK / DEGRADED / BLOCKED). */
   public record IngestTrust(String overall, List<SourceTrust> sources) {}
 
+  /**
+   * The EXPENSIVE half of a day context — everything that reaches an upstream (options digest, VIX
+   * quote, Upstox world indices, the daily-candle read, the ingest-health board) plus the {@code
+   * notes} those reads produced, stamped with the instant it was assembled.
+   *
+   * <p>⚠️ Deliberately holds NOTHING now-dependent. {@code tradeDate}, {@code sessionPhase},
+   * {@code holiday} and {@code asOf} are recomputed on EVERY request — see {@link #dayContext()}.
+   */
+  private record Heavy(
+      OptionsDigestService.OptionsDigest options,
+      Vix vix,
+      List<GlobalCue> cues,
+      IndexPriceAction indexPriceAction,
+      IngestTrust ingestTrust,
+      List<String> notes,
+      Instant computedAt) {}
+
   /** The bundled day context. */
   public record DayContext(
       LocalDate tradeDate,
@@ -111,6 +132,13 @@ public class DayContextService {
   // Coarse INDIA-VIX regime bands (heuristic defaults, config-overridable). Labels only — never a gate.
   private static final BigDecimal RANGE_WIDE = BigDecimal.valueOf(1.2);
   private static final BigDecimal RANGE_NARROW = BigDecimal.valueOf(0.8);
+  // H31 snapshot meters. SECONDARY to the INFO lines: a flat hit counter cannot tell "served
+  // from cache" apart from "nobody called", the ambiguity that let H31 pass a live-verify once.
+  private static final String HIT_TOTAL = "ay_day_context_snapshot_hit_total";
+  private static final String INLINE_TOTAL = "ay_day_context_snapshot_inline_total";
+  private static final String UNCACHED_TOTAL = "ay_day_context_uncached_total";
+  private static final String REFRESH_TOTAL = "ay_day_context_snapshot_refresh_total";
+  private static final String REFRESH_FAILED_TOTAL = "ay_day_context_snapshot_refresh_failed_total";
 
   private final OptionsDigestService optionsDigest;
   private final VixQuoteCache vixQuotes;
@@ -119,6 +147,7 @@ public class DayContextService {
   private final IngestHealthBoard healthBoard;
   private final MarketCalendar calendar;
   private final Clock clock;
+  private final MeterRegistry meterRegistry;
   private final InstrumentKey vixKey;
   private final String optionsName;
   private final String indexExchange;
@@ -128,6 +157,14 @@ public class DayContextService {
   private final BigDecimal vixNormal;
   private final BigDecimal vixElevated;
   private final BigDecimal vixHigh;
+  private final Duration snapshotMaxAge;
+
+  /**
+   * The latest intraday snapshot of the expensive half, or null before the first refresh. Written
+   * only by the scheduled refresher, read by every request — {@code volatile} is sufficient because
+   * {@link Heavy} is immutable and publication is a single reference store.
+   */
+  private volatile Heavy snapshot;
 
   /** Wires the reused digest + the market-data-native context ports and the display/config knobs. */
   public DayContextService(
@@ -138,6 +175,7 @@ public class DayContextService {
       IngestHealthBoard healthBoard,
       MarketCalendar calendar,
       Clock clock,
+      MeterRegistry meterRegistry,
       @Value("${artha.context.options-name:NIFTY 50}") String optionsName,
       @Value("${artha.context.index-exchange:NSE}") String indexExchange,
       @Value("${artha.context.index-symbol:NIFTY 50}") String indexSymbol,
@@ -146,7 +184,8 @@ public class DayContextService {
       @Value("${artha.context.trust-lookback-days:5}") int trustLookback,
       @Value("${artha.context.vix-normal:13}") BigDecimal vixNormal,
       @Value("${artha.context.vix-elevated:17}") BigDecimal vixElevated,
-      @Value("${artha.context.vix-high:22}") BigDecimal vixHigh) {
+      @Value("${artha.context.vix-high:22}") BigDecimal vixHigh,
+      @Value("${artha.context.day-context-snapshot-max-age-seconds:300}") long snapshotMaxAgeSeconds) {
     this.optionsDigest = optionsDigest;
     this.vixQuotes = vixQuotes;
     this.worldIndices = worldIndices;
@@ -154,6 +193,7 @@ public class DayContextService {
     this.healthBoard = healthBoard;
     this.calendar = calendar;
     this.clock = clock;
+    this.meterRegistry = meterRegistry;
     this.vixKey = new InstrumentKey("NSE", vixSymbol);
     // ⚠️ NORMALISED, not trusted. The default was a bare `NIFTY` for the whole life of this
     // feature, which is not a canonical instrument key: OptionsDigestService answered "no option
@@ -174,10 +214,51 @@ public class DayContextService {
     this.vixNormal = vixNormal;
     this.vixElevated = vixElevated;
     this.vixHigh = vixHigh;
+    this.snapshotMaxAge = Duration.ofSeconds(snapshotMaxAgeSeconds);
   }
 
-  /** Assemble the day-context one-call for the configured primary index. */
+  /**
+   * Assemble the day-context one-call for the configured primary index: FRESH now-dependent values
+   * composed with the (possibly cached) expensive half. This is the CONTROLLER's entry point.
+   *
+   * <p><b>H31.</b> The whole assembly cost ~1.9 s server-side against {@code ContextClient}'s 2000 ms
+   * read budget, so {@code InsightSweeper}'s 15-minute sweep intermittently timed out and DISCARDED
+   * work the server had already finished (measured 2026-08-26: 09:00 and 09:15 succeeded, 09:30
+   * refreshed 0, 09:45:02 logged "Read timed out"). The expensive half is now precomputed by
+   * {@link #refreshSnapshot()} on its own schedule so no caller pays the queued read inline.
+   *
+   * <p>⚠️ <b>{@code phase}, {@code nowIst}, {@code tradeDate} and {@code holiday} are NEVER served
+   * from the snapshot.</b> The sweep fires at exactly 09:15:01; a cached phase would report a stale
+   * {@code PRE_OPEN} across the opening bell — a wrong regime label handed to every downstream
+   * insight. Only the upstream-backed values are cached.
+   *
+   * <p>A caller that must NOT see a cached upstream read calls {@link #freshDayContext()} instead.
+   */
   public DayContext dayContext() {
+    return compose(false);
+  }
+
+  /**
+   * The day context with the expensive half ALWAYS computed inline — never served from the snapshot.
+   *
+   * <p><b>Why this exists rather than relying on the max age.</b> {@link MarketContextEodJob} writes
+   * ONE {@code market_context_days} row per session and it must hold the day's CLOSING context. The
+   * arithmetic happens to work today — the refresher's window ends at 15:58, the job runs at 18:49,
+   * so the snapshot is ~171 minutes old and blows past any sane max age — but that is a coincidence
+   * of two INDEPENDENTLY CONFIGURABLE crons plus a third knob. Widening
+   * {@code artha.context.day-context-refresh-cron} past 18:xx, or raising
+   * {@code artha.context.day-context-snapshot-max-age-seconds}, would silently start persisting a
+   * mid-afternoon context as the day's close — with no commit to the job, no deploy of it, and no
+   * review of it. That is the behaviour-that-arms-itself shape: a config-gated rule that changes
+   * what gets written on a date nobody chose. Making the EOD path structurally uncached removes the
+   * dependency instead of documenting it.
+   */
+  public DayContext freshDayContext() {
+    return compose(true);
+  }
+
+  /** Compose fresh now-dependent values with either a cache-eligible or a forced-fresh heavy half. */
+  private DayContext compose(boolean forceFresh) {
     OffsetDateTime nowIst = OffsetDateTime.now(clock).withOffsetSameInstant(Ist.OFFSET);
     LocalDate today = nowIst.toLocalDate();
     List<String> notes = new ArrayList<>();
@@ -195,6 +276,87 @@ public class DayContextService {
     String phase = sessionPhase(tradingDay, nowIst.toLocalTime());
     HolidayProximity holiday = holidayProximity(today);
 
+    Heavy heavy =
+        forceFresh
+            ? inlineHeavy(nowIst, "caller requires an uncached read", UNCACHED_TOTAL)
+            : heavy(nowIst, notes);
+    notes.addAll(heavy.notes());
+
+    return new DayContext(
+        tradeDate,
+        phase,
+        holiday,
+        heavy.options(),
+        heavy.vix(),
+        heavy.cues(),
+        heavy.indexPriceAction(),
+        heavy.ingestTrust(),
+        nowIst,
+        List.copyOf(notes));
+  }
+
+  /**
+   * The held snapshot when it is younger than {@code artha.context.day-context-snapshot-max-age-
+   * seconds}, else a fresh inline compute — byte-for-byte what {@code dayContext()} did before H31.
+   *
+   * <p>Every inline fallback is logged at INFO with its REASON. That is deliberate and it is the
+   * primary live-verify signal for this change: the inline path is the BAD case, so the gate fires
+   * on an EVENT rather than on elapsed time. H31 was once marked DONE on a measurement taken in the
+   * one regime where the defect could not occur; "did the 09:15 sweep read a snapshot or compute
+   * inline?" must be answerable from the log, not inferred from the sweep having succeeded.
+   *
+   * <p>⚠️ <b>A cache hit adds a {@code notes} entry carrying the age, and that is not decoration.</b>
+   * {@code compose()} stamps {@code asOf = nowIst}, so on the cached path {@code asOf} describes the
+   * REQUEST, not the VIX band or the index range beside it — and those are exactly what
+   * {@code MarketStructureGenerator:57,64} cites as {@code s.asOf()} on the evidence line of a
+   * PERSISTED insight. Without the note, an insight would claim second-fresh evidence for a reading
+   * up to {@code max-age} old. {@code notes} is the established provenance channel here (the
+   * fail-soft blocks already use it), and the EOD row goes through {@code forceFresh}, so nothing
+   * downstream shifts.
+   */
+  private Heavy heavy(OffsetDateTime nowIst, List<String> notes) {
+    Heavy held = this.snapshot;
+    if (held == null) {
+      return inlineHeavy(nowIst, "no snapshot has been refreshed yet", INLINE_TOTAL);
+    }
+    if (snapshotMaxAge.isZero() || snapshotMaxAge.isNegative()) {
+      return inlineHeavy(
+          nowIst,
+          "snapshot caching disabled (max-age " + snapshotMaxAge.toSeconds() + "s)",
+          INLINE_TOTAL);
+    }
+    Duration age = Duration.between(held.computedAt(), clock.instant());
+    if (age.isNegative()) {
+      return inlineHeavy(
+          nowIst, "snapshot computedAt is in the future (clock moved back)", INLINE_TOTAL);
+    }
+    if (age.compareTo(snapshotMaxAge) > 0) {
+      return inlineHeavy(
+          nowIst,
+          "snapshot age " + age.toSeconds() + "s exceeds max-age " + snapshotMaxAge.toSeconds() + "s",
+          INLINE_TOTAL);
+    }
+    meterRegistry.counter(HIT_TOTAL).increment();
+    notes.add("heavy half computed " + age.toSeconds() + "s ago");
+    return held;
+  }
+
+  /** Compute the heavy half inline, timing it and saying WHY the snapshot was not used. */
+  private Heavy inlineHeavy(OffsetDateTime nowIst, String reason, String counter) {
+    long startedAt = System.nanoTime();
+    Heavy fresh = computeHeavy(nowIst);
+    meterRegistry.counter(counter).increment();
+    log.info(
+        "day-context INLINE compute ({}) — this caller paid the upstream reads, took {} ms",
+        reason,
+        (System.nanoTime() - startedAt) / 1_000_000L);
+    return fresh;
+  }
+
+  /** Every upstream-backed block of a day context, exactly as {@code dayContext()} computed them. */
+  private Heavy computeHeavy(OffsetDateTime nowIst) {
+    List<String> notes = new ArrayList<>();
+
     OptionsDigestService.OptionsDigest options = null;
     try {
       options = optionsDigest.digest(optionsName, null, null);
@@ -207,8 +369,81 @@ public class DayContextService {
     IndexPriceAction ipa = indexPriceAction(nowIst, notes);
     IngestTrust trust = ingestTrust();
 
-    return new DayContext(
-        tradeDate, phase, holiday, options, vix, cues, ipa, trust, nowIst, List.copyOf(notes));
+    return new Heavy(options, vix, cues, ipa, trust, List.copyOf(notes), clock.instant());
+  }
+
+  /**
+   * Precompute the expensive half so the 15-minute insight sweep never pays it inline (H31).
+   *
+   * <p><b>Why :13,:28,:43,:58 and not "every N minutes".</b> The consumer sweeps at :00/:15/:30/:45,
+   * so refreshing two minutes ahead of each puts a &le;2-minute-old snapshot in front of every sweep
+   * for <b>four extra upstream passes a session</b>: this cron runs 4/hr over hours 8–15 = <b>32</b>,
+   * against the <b>28</b> the sweep alone used to cost (4/hr over hours 9–15), before any inline
+   * fallback. ⚠️ An earlier cut of this javadoc — and of the compose comment beside the env var —
+   * claimed the SAME number of calls. That was simply wrong arithmetic, not a design change; the
+   * extra four buy the pre-open warm-up that stops the 09:00 sweep computing inline. A faster
+   * refresh would TRIPLE Upstox load — and {@link #overnightCues} is an UNCACHED Upstox call with 429
+   * backoff up to 16 s, i.e. the leading suspect for the residual latency. Refreshing harder would
+   * worsen the cause while treating the symptom.
+   *
+   * <p>Fail-soft on purpose: a failed refresh leaves the PREVIOUS snapshot in place and never
+   * propagates, so one bad upstream minute degrades freshness rather than the endpoint.
+   *
+   * <p>⚠️ <b>The success line here is what proves the refresher RAN</b>, independently of whether
+   * anything read the result. {@code ay_day_context_snapshot_hit_total} alone CANNOT distinguish
+   * "the sweep was served from cache" from "the sweep never ran" — both leave it flat, and that
+   * exact ambiguity is why H31's first live-verify gate passed on a defect that was still live. The
+   * two INFO lines (this one and the inline-fallback one) are the primary signal; the counters are
+   * secondary, for trend only.
+   *
+   * <p>⚠️ <b>Bound to {@code dayContextTaskScheduler}, and that binding is load-bearing.</b> The
+   * default pool is a SINGLE thread shared with {@code OptionsSnapshotService.scheduledSnapshot}
+   * (every 2 min, ~70 s per pass), so a refresh queued behind one could land after the :15 sweep and
+   * reproduce H31 with every test still green. See that bean's javadoc.
+   */
+  @Scheduled(
+      // ⚠️ `cron` and `zone` must stay on ONE line: CronPassthroughParityTest matches the
+      // @Scheduled site PER LINE (activeCronSites) and asserts the zone on that same slice, so
+      // wrapping zone onto the next line reads to it as an unzoned job. Same rule, same reason, as
+      // EveningChainCanary — the comment lives in both files so neither can be "tidied" back alone.
+      cron = "${artha.context.day-context-refresh-cron:0 13,28,43,58 8-15 * * MON-FRI}", zone = "Asia/Kolkata",
+      scheduler = "dayContextTaskScheduler")
+  public void refreshSnapshot() {
+    long startedAt = System.nanoTime();
+    try {
+      OffsetDateTime nowIst = OffsetDateTime.now(clock).withOffsetSameInstant(Ist.OFFSET);
+      // MON-FRI still fires on a weekday NSE holiday; without this the day costs 32 pointless
+      // upstream passes. Fail-soft on an uncovered calendar year: refresh rather than skip, since
+      // skipping would silently disable the whole precompute past the bundled horizon.
+      if (!tradingDaySafe(nowIst.toLocalDate())) {
+        // Logged, not silent: without this line "skipped, holiday" and "never fired at all" are
+        // indistinguishable in the log — the same read-the-absence ambiguity this class's own
+        // javadoc criticises the hit counter for.
+        log.info(
+            "day-context snapshot refresh skipped — {} is not a trading day", nowIst.toLocalDate());
+        return;
+      }
+      this.snapshot = computeHeavy(nowIst);
+      meterRegistry.counter(REFRESH_TOTAL).increment();
+      log.info(
+          "day-context snapshot refreshed in {} ms (max-age {}s)",
+          (System.nanoTime() - startedAt) / 1_000_000L,
+          snapshotMaxAge.toSeconds());
+    } catch (RuntimeException failed) {
+      meterRegistry.counter(REFRESH_FAILED_TOTAL).increment();
+      log.warn(
+          "day-context snapshot refresh failed (keeping the previous snapshot): {}",
+          failed.getMessage());
+    }
+  }
+
+  /** Trading-day check that degrades to TRUE past the bundled calendar horizon (never skips). */
+  private boolean tradingDaySafe(LocalDate day) {
+    try {
+      return calendar.isTradingDay(day);
+    } catch (IllegalArgumentException uncoveredYear) {
+      return true;
+    }
   }
 
   private static String sessionPhase(boolean tradingDay, LocalTime now) {

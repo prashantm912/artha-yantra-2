@@ -29,6 +29,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  *
  * <p>S1 (2026-07-25) adds the same guarantee for the 1 s bar-close sweep on its own
  * {@code barFlushTaskScheduler}, for a different reason — see that test's javadoc.
+ *
+ * <p>H31 (2026-08-26) adds it for {@code DayContextService.refreshSnapshot} on
+ * {@code dayContextTaskScheduler} — see {@link #dayContextRefreshFiresWhileTheDefaultPoolIsBlocked}.
  */
 class MonitorSchedulingConfigTest {
 
@@ -208,6 +211,63 @@ class MonitorSchedulingConfigTest {
         });
   }
 
+  /**
+   * H31: the day-context snapshot refresher must fire while the default pool is wedged.
+   *
+   * <p><b>This is the whole point of the fix, not a nicety.</b> The refresher precomputes the
+   * expensive half of {@code GET /context/day-context} at :13/:28/:43/:58 so the insight sweep at
+   * :15/:30/:45 reads a warm snapshot instead of paying a ~1.9 s assembly against a 2000 ms client
+   * budget. Its entire safety margin is those 2 minutes. On the shared default pool a refresh can
+   * queue behind {@code OptionsSnapshotService.scheduledSnapshot} — every 2 minutes, "~70 batched
+   * calls ≈ 70 s at the 1/s limit" — land after :15, and the sweep then falls back to an inline
+   * compute: <b>H31 reproduces with every unit test in the context package still green</b>, because
+   * none of them can observe scheduler queueing. This one can.
+   */
+  @Test
+  void dayContextRefreshFiresWhileTheDefaultPoolIsBlocked() {
+    runner.run(
+        context -> {
+          BlockingDefaultJob blocker = context.getBean(BlockingDefaultJob.class);
+          DayContextProbeJob probe = context.getBean(DayContextProbeJob.class);
+          try {
+            assertThat(blocker.entered.await(3, TimeUnit.SECONDS))
+                .as("default-pool job started and is holding its only thread")
+                .isTrue();
+            assertThat(probe.fired.await(3, TimeUnit.SECONDS))
+                .as("the day-context refresh fired while the default pool was blocked")
+                .isTrue();
+            assertThat(probe.threadName)
+                .as("the refresh ran on the dedicated day-context pool")
+                .startsWith("day-context-sched-");
+            assertThat(blocker.threadName)
+                .as("the blocked job ran on the default (Boot) pool, not the day-context pool")
+                .startsWith("scheduling-");
+          } finally {
+            blocker.release.countDown();
+          }
+        });
+  }
+
+  /** The bean it names must exist, on its own single daemon thread, distinct from every sibling. */
+  @Test
+  void theDayContextSchedulerBeanExistsAndIsIsolated() {
+    runner.run(
+        context -> {
+          ThreadPoolTaskScheduler scheduler =
+              context.getBean("dayContextTaskScheduler", ThreadPoolTaskScheduler.class);
+          assertThat(scheduler).isNotNull();
+          assertThat(scheduler)
+              .as("a distinct pool from the monitor detectors")
+              .isNotSameAs(context.getBean("monitorTaskScheduler"));
+          assertThat(scheduler)
+              .as("a distinct pool from the default scheduling pool")
+              .isNotSameAs(context.getBean("taskScheduler"));
+          assertThat(scheduler)
+              .as("and from the NSE retry pool")
+              .isNotSameAs(context.getBean("nseRetryTaskScheduler"));
+        });
+  }
+
   private static void assertBoundToMonitorScheduler(Class<?> type, String method)
       throws NoSuchMethodException {
     Scheduled scheduled = type.getDeclaredMethod(method).getAnnotation(Scheduled.class);
@@ -244,6 +304,23 @@ class MonitorSchedulingConfigTest {
     @Bean
     DefaultPoolProbeJob defaultPoolProbeJob() {
       return new DefaultPoolProbeJob();
+    }
+
+    @Bean
+    DayContextProbeJob dayContextProbeJob() {
+      return new DayContextProbeJob();
+    }
+  }
+
+  /** Stands in for DayContextService.refreshSnapshot; records that it fired and on which thread. */
+  static class DayContextProbeJob {
+    final CountDownLatch fired = new CountDownLatch(1);
+    volatile String threadName;
+
+    @Scheduled(fixedDelay = 60_000, initialDelay = 0, scheduler = "dayContextTaskScheduler")
+    public void run() {
+      threadName = Thread.currentThread().getName();
+      fired.countDown();
     }
   }
 

@@ -74,7 +74,13 @@ public class MarketContextEodJob {
 
   /** Compute the day context and upsert its row; returns the rows written for the ledger. */
   private long persist() {
-    DayContext dc = dayContext.dayContext();
+    // ⚠️ freshDayContext(), NEVER dayContext(). This row is the day's CLOSING context and there is
+    // exactly one of it per session, so it must never be assembled from the H31 intraday snapshot.
+    // The 08-15 refresh window and the 300 s max age make that impossible TODAY by arithmetic — but
+    // both are independently configurable, and widening either would silently start persisting a
+    // mid-afternoon context as the close, with no change to this file and nothing to review. The
+    // uncached entry point removes the dependency rather than documenting it.
+    DayContext dc = dayContext.freshDayContext();
     // The MON-FRI cron also fires on weekday NSE holidays; on a non-trading day dc.tradeDate() is the
     // PRIOR session, so persisting would overwrite that day's real row with holiday-flavored context.
     // Skip cleanly (a SUCCESS/0 ledger row = "ran, nothing to persist"), mirroring an empty EOD pull.

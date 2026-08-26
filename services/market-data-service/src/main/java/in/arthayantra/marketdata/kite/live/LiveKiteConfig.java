@@ -22,7 +22,10 @@ import org.springframework.core.env.Environment;
  */
 @Configuration
 @Profile("live")
-@org.springframework.boot.context.properties.EnableConfigurationProperties(KiteHttpProperties.class)
+@org.springframework.boot.context.properties.EnableConfigurationProperties({
+  KiteHttpProperties.class,
+  in.arthayantra.marketdata.kite.session.autologin.KiteAutoLoginProperties.class
+})
 public class LiveKiteConfig {
 
   /**
@@ -55,6 +58,38 @@ public class LiveKiteConfig {
                 + ", "
                 + masterKeyFile
                 + ") — see deploy/secrets/README.md (D13); mock mode needs none");
+      }
+      // ⚠️ The three auto-login secrets are required ONLY when the feature is armed. The live
+      // stack must still boot without them while the flag is off (which is the default), or
+      // shipping this feature would break every existing live start — so this check is INSIDE
+      // the flag, deliberately, rather than joined onto the unconditional set above.
+      if (!Boolean.TRUE.equals(
+          environment.getProperty("artha.kite.auto-login.enabled", Boolean.class, Boolean.FALSE))) {
+        return;
+      }
+      Path userIdFile =
+          Path.of(
+              environment.getProperty(
+                  "artha.kite.auto-login.user-id-file", "/run/secrets/kite_user_id"));
+      Path passwordFile =
+          Path.of(
+              environment.getProperty(
+                  "artha.kite.auto-login.password-file", "/run/secrets/kite_password"));
+      Path totpSeedFile =
+          Path.of(
+              environment.getProperty(
+                  "artha.kite.auto-login.totp-seed-file", "/run/secrets/kite_totp_seed"));
+      if (!isNonBlankFile(userIdFile)
+          || !isNonBlankFile(passwordFile)
+          || !isNonBlankFile(totpSeedFile)) {
+        throw new IllegalStateException(
+            "artha.kite.auto-login.enabled=true requires the auto-login secret files ("
+                + userIdFile
+                + ", "
+                + passwordFile
+                + ", "
+                + totpSeedFile
+                + ") — see deploy/secrets/README.md; disable the flag to boot without them");
       }
     };
   }
@@ -159,6 +194,81 @@ public class LiveKiteConfig {
             wireClient, store, statusPublisher, meterRegistry);
     probe.setOnLiveHook(canary::maybeRunDaily);
     return probe;
+  }
+
+  /**
+   * The undocumented browser leg of the daily login — bound ONLY when the feature is armed.
+   *
+   * <p>Default OFF: with {@code artha.kite.auto-login.enabled} unset, neither this bean nor
+   * {@link #kiteAutoLoginService} exists, so no {@code @Scheduled} is registered and no credential
+   * file is ever opened. Bean absence is the arming gate, which is a stronger off than an internal
+   * boolean — there is nothing to accidentally invoke.
+   */
+  @Bean
+  @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+      name = "artha.kite.auto-login.enabled",
+      havingValue = "true")
+  public in.arthayantra.marketdata.kite.session.autologin.LoginWireClient loginWireClient(
+      in.arthayantra.marketdata.kite.session.autologin.KiteAutoLoginProperties autoLogin,
+      KiteHttpProperties properties,
+      com.fasterxml.jackson.databind.ObjectMapper objectMapper,
+      java.time.Clock clock,
+      @org.springframework.beans.factory.annotation.Value(
+              "${artha.kite.auto-login.connect-timeout:5s}")
+          java.time.Duration connectTimeout,
+      @org.springframework.beans.factory.annotation.Value("${artha.kite.auto-login.read-timeout:20s}")
+          java.time.Duration readTimeout) {
+    // ⚠️ Resolved and ORIGIN-PINNED here, at bean creation, so a hostile or fat-fingered
+    // override fails the CONTEXT at boot rather than posting credentials somewhere unintended at
+    // 08:05 (cross-vendor review Critical 1). LoginEndpoints.pinned is the only production entry.
+    return new in.arthayantra.marketdata.kite.session.autologin.LiveLoginWireClient(
+        autoLogin,
+        in.arthayantra.marketdata.kite.session.autologin.LoginEndpoints.pinned(autoLogin),
+        objectMapper,
+        clock,
+        properties.resolveApiKey(),
+        connectTimeout,
+        readTimeout);
+  }
+
+  /**
+   * The morning login orchestrator + its silence watchdog — bound ONLY when the feature is armed.
+   *
+   * <p>Takes {@code monitorTaskScheduler} by name for the delayed transport-only re-attempt, the
+   * same pool its two {@code @Scheduled} methods name, so a re-attempt cannot be queued behind a
+   * hung batch job on the shared default pool.
+   */
+  @Bean
+  @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+      name = "artha.kite.auto-login.enabled",
+      havingValue = "true")
+  public in.arthayantra.marketdata.kite.session.autologin.KiteAutoLoginService kiteAutoLoginService(
+      in.arthayantra.marketdata.kite.session.autologin.LoginWireClient loginWireClient,
+      org.springframework.jdbc.core.JdbcTemplate jdbcTemplate,
+      in.arthayantra.marketdata.kite.session.KiteSessionService sessionService,
+      in.arthayantra.marketdata.kite.session.KiteSessionStore store,
+      in.arthayantra.marketdata.alerts.NtfyClient ntfy,
+      in.arthayantra.marketcalendar.MarketCalendar calendar,
+      java.time.Clock clock,
+      @org.springframework.beans.factory.annotation.Qualifier("monitorTaskScheduler")
+          org.springframework.scheduling.TaskScheduler taskScheduler,
+      io.micrometer.core.instrument.MeterRegistry meterRegistry,
+      @org.springframework.beans.factory.annotation.Value("${artha.kite.auto-login.retry-delay:2m}")
+          java.time.Duration retryDelay) {
+    return new in.arthayantra.marketdata.kite.session.autologin.KiteAutoLoginService(
+        loginWireClient,
+        // Durable per-IST-day terminal marker over the existing canary_runs claim idiom — no
+        // migration, no schema change (review round 3).
+        in.arthayantra.marketdata.kite.session.autologin.AutoLoginTerminalLedger.forService(
+            jdbcTemplate, clock),
+        sessionService,
+        store,
+        ntfy,
+        calendar,
+        clock,
+        taskScheduler,
+        meterRegistry,
+        retryDelay);
   }
 
   /** The daily contract canary (B-9) — lives HERE, never backtest-service. */

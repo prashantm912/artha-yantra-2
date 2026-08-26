@@ -64,17 +64,28 @@ class ScheduledPoolCensusTest {
    * ⚠️ Computed 2026-08-26 by this test's own scan of the merged tree, not carried over from the
    * comment it replaces — that comment said <b>55</b>, and 55 was a grep artifact.
    *
+   * <p>⚠️ RAISED 38 -> 40 and 9 -> 11 later on 2026-08-26 by the Kite TOTP auto-login, which adds
+   * {@code KiteAutoLoginService.scheduledLogin} and {@code .watchdog}, BOTH naming {@code
+   * monitorTaskScheduler}. The default-pool figure is therefore UNCHANGED at 29, and that is the
+   * point of asserting the three separately: a total-only check would have read this as "two more
+   * jobs queue behind the ~70 s options pass", which is exactly what did not happen.
+   *
+   * <p>⚠️ The two new sites exist in the SOURCE unconditionally but their bean is
+   * {@code @ConditionalOnProperty(artha.kite.auto-login.enabled)}, default false — so today they
+   * are counted here and registered nowhere. This test counts source text and says so; do not read
+   * the census as a statement about what is scheduled on the live stack.
+   *
    * <p>Raising or lowering any of these three is a deliberate act. They are asserted separately on
    * purpose: the total alone cannot tell "a job was added to the shared pool" from "a job moved off
    * it onto a dedicated bean", and those two have opposite meanings for the single-thread argument
    * in {@code MonitorSchedulingConfig}.
    */
-  private static final int EXPECTED_SCHEDULED_ANNOTATIONS = 38;
+  private static final int EXPECTED_SCHEDULED_ANNOTATIONS = 40;
 
   /**
    * How many of those name a {@code scheduler} bean, i.e. sit on a dedicated single-thread pool.
    */
-  private static final int EXPECTED_NAMING_A_SCHEDULER = 9;
+  private static final int EXPECTED_NAMING_A_SCHEDULER = 11;
 
   /**
    * How many share the ONE-thread default pool — the figure the dedicated beans argue from.

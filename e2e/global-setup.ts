@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -149,28 +149,32 @@ function runningProfile(): string {
 /**
  * The compose stack mounts deploy/secrets/* as Docker secrets; `ay up` seeds them, but the E2E
  * boots compose directly, so CI (and a fresh local clone) has no secrets dir and the bind mount
- * fails before anything starts. Seed the same files `ay` does — idempotent, mock-safe values: a
- * fixed Postgres password (single source of truth for the DB and the services), a valid 32-byte
- * AES-256 master key, empty Kite placeholders, an empty OpenAlgo API key, and an empty Upstox
- * analytics token (all mock-unread — the OpenAlgo key and Upstox token mount into market-data-service
- * unconditionally, but are read only when a source.* / analytics capability routes through them,
- * which the mock stack never does).
+ * fails before anything starts.
+ *
+ * ⚠️ The list is READ OUT OF THE COMPOSE FILE, not hardcoded. It used to be a fixed map, and
+ * adding a compose secret without adding it here failed the whole `e2e` job with
+ * `bind source path does not exist` — a stack that never boots, ~4 minutes in, naming a file
+ * rather than the drift (measured on the kite auto-login secrets, 2026-08-26). Every declared
+ * secret is seeded EMPTY; only the two that need real content carry a value.
  */
 function ensureSecrets(): void {
   const dir = join(REPO, 'deploy', 'secrets');
   mkdirSync(dir, { recursive: true });
-  const files: Record<string, string> = {
+  // The two the mock stack actually reads; everything else compose declares is mounted but
+  // unread in mock mode, so an empty placeholder is enough to satisfy the bind mount.
+  const valued: Record<string, string> = {
     postgres_password: 'e2e-postgres-pw',
     artha_master_key: Buffer.alloc(32).toString('base64'),
-    kite_api_key: '',
-    kite_api_secret: '',
-    openalgo_api_key: '',
-    upstox_analytics_token: '',
   };
-  for (const [name, value] of Object.entries(files)) {
+  const compose = readFileSync(join(REPO, 'deploy', 'docker-compose.yml'), 'utf8');
+  const declared = [...compose.matchAll(/^\s*file:\s*\.\/secrets\/(\S+)\s*$/gm)].map((m) => m[1]!);
+  if (declared.length === 0) {
+    throw new Error('no `file: ./secrets/<name>` entries found in deploy/docker-compose.yml');
+  }
+  for (const name of new Set(declared)) {
     const file = join(dir, name);
     if (!existsSync(file)) {
-      writeFileSync(file, value);
+      writeFileSync(file, valued[name] ?? '');
     }
   }
 }

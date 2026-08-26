@@ -236,7 +236,12 @@ function Initialize-LocalConfig {
     # empty placeholders so compose can mount them; mock mode never reads them,
     # live mode fails fast until the owner fills in real Kite credentials. openalgo_api_key is
     # mounted into market-data-service but read only when capture routes through OpenAlgo (§3/§4).
-    foreach ($name in 'kite_api_key', 'kite_api_secret', 'openalgo_api_key', 'upstox_analytics_token') {
+    # kite_user_id / kite_password / kite_totp_seed back the default-OFF TOTP auto-login. They are
+    # created BLANK like every other placeholder and are never filled by this script: the owner
+    # places the values. Compose mounts them unconditionally (a `secrets:` entry needs the file to
+    # exist), and market-data-service fails fast at startup only if the flag is ON and one is blank.
+    foreach ($name in 'kite_api_key', 'kite_api_secret', 'openalgo_api_key', 'upstox_analytics_token',
+                      'kite_user_id', 'kite_password', 'kite_totp_seed') {
         $f = Join-Path $RepoRoot "deploy\secrets\$name"
         if (-not (Test-Path $f)) {
             New-Item -ItemType File -Path $f | Out-Null

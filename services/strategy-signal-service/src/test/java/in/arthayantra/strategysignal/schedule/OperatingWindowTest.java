@@ -96,6 +96,16 @@ class OperatingWindowTest {
     // minute before the machine goes off), so it is also the one with the least margin for a drift
     // out of it — a cron edit that pushed it to 19:00 would silently never fire.
     JOBS.put("artha.evening-chain.check-cron", MD + "canary/EveningChainCanary.java");
+    // The Kite TOTP auto-login and its silence watchdog (2026-08-26). ⚠️ THIS TEST IS WHY THEY ARE
+    // 08:05/08:15 and not the 07:30 the scoping doc proposed: the machine is off until 08:00, so a
+    // 07:30 login would never run at all — silently, every day, and the symptom would be a dead
+    // feed at 09:15 rather than anything naming the login. Both must stay ahead of the 08:30
+    // InstrumentSyncScheduler, which is the first job that needs a live token, and the watchdog
+    // must follow the login it is watching (asserted below).
+    JOBS.put("artha.kite.auto-login.cron", MD + "kite/session/autologin/KiteAutoLoginService.java");
+    JOBS.put(
+        "artha.kite.auto-login.watchdog-cron",
+        MD + "kite/session/autologin/KiteAutoLoginService.java");
   }
 
   // ⚠️ MERGE, and the number moved a SECOND time (2026-08-25). Re-derived from the JOBS map
@@ -105,7 +115,10 @@ class OperatingWindowTest {
   // merge already hit at 6 -> 9 and then at 17/18 -> 19. The branch contributes
   // artha.evening-chain.check-cron; main contributed the H27 swing-settle moves and, on
   // 2026-08-24, artha.nse.fii-retry-cron (#1454). Recount here on EVERY merge; do not add.
-  private static final int EXPECTED_JOB_COUNT = 20;
+  // ⚠️ RAISED 20 -> 22 on 2026-08-26 for the two Kite auto-login crons, and RE-DERIVED by counting
+  // the put() calls above (22 calls, 22 distinct keys) rather than by adding two — the same rule
+  // every earlier revision of this constant states, for the same reason.
+  private static final int EXPECTED_JOB_COUNT = 22;
 
   /**
    * The minutes on which two jobs are allowed to share a trigger, each with its pair spelled out.
@@ -327,6 +340,30 @@ class OperatingWindowTest {
     assertThat(heartbeat)
         .as("the heartbeat reports whether the settles ran, so it cannot be triggered before them")
         .isGreaterThan(manasSettle);
+  }
+
+  @Test
+  @DisplayName("the Kite auto-login runs after boot, before its watchdog, and before the 08:30 sync")
+  void theAutoLoginIsTriggeredEarlyEnoughToStillBeRescuedByHand() throws IOException {
+    // ⚠️ The ORDER here is the whole failure design, not a preference. The login must land while
+    // there is still a human-usable gap before InstrumentSyncScheduler (08:30, cron hardcoded in
+    // that class, so it cannot be read through this property-keyed map — the same limitation this
+    // file already documents for the fii-retry entry) and the 09:15 open. The watchdog must follow
+    // the login, or it reports "not connected" about an attempt that has not happened yet — a
+    // guaranteed false alarm every single morning, which is how an alert stops being read.
+    String autoLogin = MD + "kite/session/autologin/KiteAutoLoginService.java";
+    int login = onlyFiring("artha.kite.auto-login.cron", autoLogin);
+    int watchdog = onlyFiring("artha.kite.auto-login.watchdog-cron", autoLogin);
+
+    assertThat(login)
+        .as("the machine starts after 08:00, so a login triggered before it never runs at all")
+        .isGreaterThanOrEqualTo(WINDOW_START_HOUR * 60);
+    assertThat(watchdog)
+        .as("the watchdog must observe the login, not precede it")
+        .isGreaterThan(login);
+    assertThat(watchdog)
+        .as("...and must still leave room for the manual fallback before the 08:30 instrument sync")
+        .isLessThan(8 * 60 + 30);
   }
 
   /** Minutes-since-midnight of a job's single firing; fails if it has more than one. */

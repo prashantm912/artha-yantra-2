@@ -53,10 +53,12 @@ public class KiteSessionStore implements AccessTokenProvider {
                 encryptedAt = row.encryptedAt();
                 lastValidatedAt = row.lastValidatedAt();
                 state = State.CONNECTED; // tentative until the next health probe
-                log.info(
-                    "kite session restored from store (encrypted_at={}, user={})",
-                    row.encryptedAt(),
-                    row.kiteUserId());
+                // ⚠️ The Kite user id is DELIBERATELY not logged (cross-vendor review,
+                // Critical 3, 2026-08-26). It is half of the interactive broker-account credential,
+                // and the TOTP auto-login path now exercises this restore on every morning boot --
+                // so a line that was low-traffic became routine. encrypted_at alone answers the
+                // only operational question this log is for ("which token came back").
+                log.info("kite session restored from store (encrypted_at={})", row.encryptedAt());
               } catch (IllegalStateException wrongKey) {
                 log.warn(
                     "stored kite token cannot be decrypted (rotated ARTHA_MASTER_KEY?) — "

@@ -65,8 +65,15 @@ class CronPassthroughParityTest {
    * this file is the {@code @code} reference in the paragraph above, which is why a naive grep
    * over the whole file says 15), and the distinct {@code ARTHA_*} names in that literal also
    * number <b>14</b>.
+   *
+   * <p>⚠️ RAISED 14 -> 16 on 2026-08-26 for the two Kite TOTP auto-login crons
+   * ({@code artha.kite.auto-login.cron}, {@code artha.kite.auto-login.watchdog-cron}), and RE-DERIVED
+   * by COUNTING as every previous revision of this constant insists: the constructor call sites in
+   * {@link #JOBS} now number <b>16</b>, and the distinct {@code ARTHA_*} names in that literal also
+   * number <b>16</b>. Both crons come in on the SAME PR as their compose passthroughs, which is the
+   * only way this catalogue does not immediately go stale again.
    */
-  private static final int EXPECTED_JOB_COUNT = 14;
+  private static final int EXPECTED_JOB_COUNT = 16;
 
   private static final List<Job> JOBS =
       List.of(
@@ -135,7 +142,17 @@ class CronPassthroughParityTest {
           new Job(
               "artha.context.day-context-refresh-cron",
               "ARTHA_CONTEXT_DAY_CONTEXT_REFRESH_CRON",
-              SRC + "context/DayContextService.java"));
+              SRC + "context/DayContextService.java"),
+          // Added 2026-08-26 with the Kite TOTP auto-login. Both @Scheduled sites keep `cron` and
+          // `zone` on ONE source line for the activeCronSites per-line reason documented above.
+          new Job(
+              "artha.kite.auto-login.cron",
+              "ARTHA_KITE_AUTO_LOGIN_CRON",
+              SRC + "kite/session/autologin/KiteAutoLoginService.java"),
+          new Job(
+              "artha.kite.auto-login.watchdog-cron",
+              "ARTHA_KITE_AUTO_LOGIN_WATCHDOG_CRON",
+              SRC + "kite/session/autologin/KiteAutoLoginService.java"));
 
   @Test
   @DisplayName("the catalogue still covers every job it claims to")

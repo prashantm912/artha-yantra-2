@@ -26,6 +26,17 @@ secrets:
     file: ./secrets/kite_api_secret
   artha_master_key:
     file: ./secrets/artha_master_key
+  # Kite AUTO-LOGIN material (default-OFF feature: artha.kite.auto-login.enabled). `ay up` creates
+  # empty placeholders exactly as it does for the kite_api_* pair; the live stack boots fine with
+  # them blank while the flag is off, and fails fast at startup if the flag is ON and any is blank.
+  # ⚠️ Storing the TOTP seed beside the password is the security trade this feature makes on
+  # purpose — see docs/superpowers/plans/2026-08-26-kite-totp-login-scoping.md §3/§2a.
+  kite_user_id:
+    file: ./secrets/kite_user_id
+  kite_password:
+    file: ./secrets/kite_password
+  kite_totp_seed:
+    file: ./secrets/kite_totp_seed
   # OpenAlgo's OWN generated API key (NOT the fronted broker's secret) — plan §2/§3.
   # market-data-service reads it only when a source.* capability is routed to openalgo.
   openalgo_api_key:
@@ -510,6 +521,17 @@ services:
       # live behaviour, they only make the knobs reachable from .env (#653).
       ARTHA_CONTEXT_DAY_CONTEXT_REFRESH_CRON: "${ARTHA_CONTEXT_DAY_CONTEXT_REFRESH_CRON:-0 13,28,43,58 8-15 * * MON-FRI}"
       ARTHA_CONTEXT_DAY_CONTEXT_SNAPSHOT_MAX_AGE_SECONDS: ${ARTHA_CONTEXT_DAY_CONTEXT_SNAPSHOT_MAX_AGE_SECONDS:-300}
+      # Kite TOTP auto-login (default OFF). When false the beans do not exist at all, so no
+      # @Scheduled is registered and no credential file is ever opened. Arming it is an OWNER
+      # decision: it stores the TOTP seed beside the password on this box, so host compromise
+      # becomes full interactive broker-account access (scoping doc §3 / §2a).
+      ARTHA_KITE_AUTO_LOGIN_ENABLED: ${ARTHA_KITE_AUTO_LOGIN_ENABLED:-false}
+      # ⚠️ 08:05/08:15, NOT the 07:30 the scoping doc suggested. The machine is off 19:00-08:00 IST,
+      # so a 07:30 job would not run late — it would never run, silently, every day
+      # (OperatingWindowTest refuses it). Both stay ahead of the 08:30 instrument sync, which is
+      # the first thing that needs a live token. VALUES ARE THE CODE DEFAULTS, BYTE FOR BYTE (#653).
+      ARTHA_KITE_AUTO_LOGIN_CRON: "${ARTHA_KITE_AUTO_LOGIN_CRON:-0 5 8 * * MON-FRI}"
+      ARTHA_KITE_AUTO_LOGIN_WATCHDOG_CRON: "${ARTHA_KITE_AUTO_LOGIN_WATCHDOG_CRON:-0 15 8 * * MON-FRI}"
       # Live option-premium 1m capture: nearest-expiry ATM +/- width, both CE and PE.
       ARTHA_OPTIONS_ATM_PINNER_UNDERLYINGS: ${ARTHA_OPTIONS_ATM_PINNER_UNDERLYINGS:-NIFTY 50,SENSEX}
       ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH: ${ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH:-5}
@@ -517,7 +539,7 @@ services:
     # kite_* + master key + the OpenAlgo API key mount into THIS service only (B-2: the token
     # and the credentials never reach any other container). The openalgo key is read only when
     # capture routes through OpenAlgo (Phase 1); an empty placeholder is harmless otherwise.
-    secrets: [postgres_password, kite_api_key, kite_api_secret, artha_master_key, openalgo_api_key, upstox_analytics_token]
+    secrets: [postgres_password, kite_api_key, kite_api_secret, artha_master_key, openalgo_api_key, upstox_analytics_token, kite_user_id, kite_password, kite_totp_seed]
     depends_on:
       flyway-init:
         condition: service_completed_successfully

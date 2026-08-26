@@ -12,6 +12,18 @@ them at `/run/secrets/` per service.
 | `artha_master_key` | 256-bit base64 AES-GCM key (Stage B token store) | market-data-service |
 | `openalgo_api_key` | OpenAlgo's OWN generated API key (from its UI; NOT a broker secret) | market-data-service (only when `artha.marketdata.source.*=openalgo`, plan §3/§4) |
 | `upstox_analytics_token` | dedicated long-lived Upstox **analytics** access token (Developer Apps; SEPARATE from any live broker session) | market-data-service (only when `artha.upstox.analytics.enabled=true`, ADR-0002) |
+| `kite_user_id` | the Zerodha login user id | market-data-service (only when `artha.kite.auto-login.enabled=true`) |
+| `kite_password` | the Zerodha account password | market-data-service (only when `artha.kite.auto-login.enabled=true`) |
+| `kite_totp_seed` | the base32 TOTP seed shown at 2FA enrolment | market-data-service (only when `artha.kite.auto-login.enabled=true`) |
+
+⚠️ **The last three are the TOTP auto-login trio and they are a different KIND of secret from
+everything above them.** `kite_api_key`/`kite_api_secret` cannot log into the broker account; these
+three can, interactively. Storing the seed beside the password collapses two-factor authentication
+into one factor **on this box**, so anyone who can read this directory holds full account access.
+The feature ships DEFAULT OFF (`artha.kite.auto-login.enabled=false`) and the stack boots normally
+with all three blank — arming it is an owner decision, weighed in
+`docs/superpowers/plans/2026-08-26-kite-totp-login-scoping.md` §2a/§3. Rotating the seed means
+disabling and re-enrolling 2FA on the account.
 
 Mock mode (`SPRING_PROFILES_ACTIVE=mock`) needs **only `postgres_password`**
 (the database always requires one); no Kite material is ever present.

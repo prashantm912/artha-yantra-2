@@ -16,7 +16,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  * <p>⚠️ <b>Why this is a Major and not a tidiness point.</b> Boot's default {@code @Scheduled} pool
  * is ONE thread — {@code MonitorSchedulingConfig.taskScheduler} is {@code builder.build()} and its
  * own javadoc says "byte-for-byte the default (pool size 1)" — shared by <b>29</b> scheduled
- * methods in this service (38 {@code @Scheduled} annotations in main; 9 name a scheduler).
+ * methods in this service (40 {@code @Scheduled} annotations in main; 11 name a scheduler).
  * Those three figures are not a hand count: {@code ScheduledPoolCensusTest} re-derives them from
  * the main sources and fails with a per-class, per-pool breakdown when any of them moves.
  * One of the 29 is {@code OptionsSnapshotService.scheduledSnapshot}, cron

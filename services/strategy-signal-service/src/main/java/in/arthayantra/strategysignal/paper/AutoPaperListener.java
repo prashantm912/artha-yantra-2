@@ -5,6 +5,7 @@ import in.arthayantra.strategysignal.signals.SignalEmitted;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SignalTaken;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
+import in.arthayantra.strategysignal.signals.TakeAdmission;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,26 +31,33 @@ public class AutoPaperListener {
   private final BookResolver books;
   private final ApplicationEventPublisher events;
   private final SwingPaperEffectRepository paperEffects;
+  private final TakeAdmission admission;
 
-  /** Wires the risk toggle, signal store, book resolver, event bus, and durable swing effect ledger. */
+  /** Wires the risk toggle, signal store, book resolver, event bus, swing effect ledger + take gate. */
   @Autowired
   public AutoPaperListener(
       RiskService risk,
       SignalRepository signals,
       BookResolver books,
       ApplicationEventPublisher events,
-      SwingPaperEffectRepository paperEffects) {
+      SwingPaperEffectRepository paperEffects,
+      TakeAdmission admission) {
     this.risk = risk;
     this.signals = signals;
     this.books = books;
     this.events = events;
     this.paperEffects = paperEffects;
+    this.admission = admission;
   }
 
   /** Backwards-compatible constructor for non-ledger listener tests. */
   public AutoPaperListener(
-      RiskService risk, SignalRepository signals, BookResolver books, ApplicationEventPublisher events) {
-    this(risk, signals, books, events, null);
+      RiskService risk,
+      SignalRepository signals,
+      BookResolver books,
+      ApplicationEventPublisher events,
+      TakeAdmission admission) {
+    this(risk, signals, books, events, null, admission);
   }
 
   /** Auto-take an emitted entry at its suggested qty when the signal's BOOK has the toggle ON. */
@@ -68,6 +76,21 @@ public class AutoPaperListener {
       }
       int qty = row.suggestedQty().intValue();
       if (qty <= 0) {
+        skipSwingEffect(book, event.signalId());
+        return;
+      }
+      // The order intent is ADMITTED before the CAS, for the same reason the effect below is made
+      // durable before it: after the transition nothing downstream can veto it. PaperSignalListener
+      // catches its own DATA_GAP/VALIDATION_FAILED refusal and logs it, so an inadmissible auto-take
+      // used to leave a permanently stranded TAKEN anchor with no position — and this is the path
+      // the measured stranded anchors came through. Refusing here leaves the signal ACTIVE, so a
+      // later emission (or a manual take) can still enter once the master data is right.
+      TakeAdmission.Verdict verdict = admission.admit(event.signalId(), qty);
+      if (!verdict.admitted()) {
+        log.error(
+            "auto-take REFUSED for signal {} [{}]: {} — leaving it ACTIVE rather than committing a"
+                + " TAKEN anchor no writer can fill",
+            event.signalId(), verdict.code(), verdict.reason());
         skipSwingEffect(book, event.signalId());
         return;
       }

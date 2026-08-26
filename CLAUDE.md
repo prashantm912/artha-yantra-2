@@ -489,9 +489,16 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   (`ay_instrument_be_suffix_inactive_fallback_total`) so the two halves stay separable. `sourced`:
   `TokenResolverAdapter.resolve` gates on `direct.isPresent() && directRow.get().active()`. `computed`
   2026-08-25 from the live DB: `DIACABS` and `MENONBE` are exactly this shape — bare row inactive WITH a
-  token, active `-BE` twin carrying a different one. ⚠️ **The population is **140** symbols, not twelve and not the two
-  this bullet used to name** (measured 2026-08-21, and recorded in `TokenResolverAdapter`'s own javadoc):
-  every one is `is_active = false` with a token. The two named above are examples, not the set. ⚠️ Still **strictly additive by design**: an inactive
+  token, active `-BE` twin carrying a different one. ⚠️ **THIS POPULATION MOVES — RE-DERIVE IT, NEVER QUOTE IT.** `computed` live 2026-08-26:
+  **145** inactive-with-token rows have an ACTIVE `-BE` twin (the H36 shape), **25** tokenless rows have a
+  tokened twin (the H29 shape), and **583** NSE rows are inactive-with-token overall. Each is one query;
+  run it rather than trusting this line. ⚠️ **The earlier text here said "140 symbols … recorded in
+  `TokenResolverAdapter`'s own javadoc" and THE CITATION WAS FALSE** — `140` appears **zero** times in that
+  file, whose javadoc says **27** (`:52-53`), **twelve** (`:71`) and **160 of ~549** (`:77-78`), three
+  DIFFERENT predicates. 140 was probably a correct live measurement on 2026-08-21 that drifted to 145 by
+  08-26 and was then mis-attributed to the javadoc. **Both failures are the same one: a moving number
+  written down as a fixed fact, with a source that was never checked.**
+  Every row in the H36 set is `is_active = false` with a token. The two named above are examples, not the set. ⚠️ Still **strictly additive by design**: an inactive
   bare row with NO twin returns its own (rejected) token rather than a 404, so ~389 such NSE rows are
   deliberately untouched. Drift caught by 3 contract canaries (Kite/Upstox/OpenAlgo,
   CONSUMED-field sentinels). Full map: `docs/symbol-normalization.md`.

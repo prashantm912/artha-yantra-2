@@ -29,11 +29,14 @@ public class SignalsController {
 
   private final SignalRepository repository;
   private final ApplicationEventPublisher events;
+  private final TakeAdmission admission;
 
-  /** Wires the repository + the domain-event publisher (paper listens for TAKEN). */
-  public SignalsController(SignalRepository repository, ApplicationEventPublisher events) {
+  /** Wires the repository, the domain-event publisher (paper listens for TAKEN) + the take gate. */
+  public SignalsController(
+      SignalRepository repository, ApplicationEventPublisher events, TakeAdmission admission) {
     this.repository = repository;
     this.events = events;
+    this.admission = admission;
   }
 
   /** Paged/filtered history. */
@@ -131,6 +134,39 @@ public class SignalsController {
     // A signal carries a scalper_detail side-channel iff a scalper strategy emitted it (E10) — the
     // flag rides the event so the paper listener charges the open to a 5-account sub-ledger.
     boolean scalper = signal.scalperDetail() != null;
+    // The order intent is admitted BEFORE the CAS. Both writers refuse an unknown or misaligned lot,
+    // and both are reached through a synchronous @EventListener — i.e. one statement too late to
+    // veto the transition they were already told about. Committing first and discovering the refusal
+    // after leaves a TAKEN anchor with no order, no position and no rejection row, which is
+    // PERMANENT (TakenSignalResolver fires only on PaperPositionClosed) and which activeEntry then
+    // reads as an open entry, suppressing re-entry on that instrument for that version forever.
+    // Gated on ACTIVE so the idempotent double-take below stays a 200: re-taking an already-TAKEN
+    // signal must not start 422-ing because its instrument master has since gone quiet.
+    //
+    // ⚠️ That status is the INITIAL read, and a refusal must be re-checked against a SECOND one —
+    // cross-vendor review round 1, Major. The interleaving is real, not theoretical: A reads ACTIVE,
+    // B (a concurrent manual take or the auto-paper listener) wins ACTIVE→TAKEN, then A's admission
+    // refuses on the master data B already got past. Refusing there would answer 422 for a signal
+    // that IS now TAKEN — the caller's intended end state, reached by someone else — breaking the
+    // very idempotency contract the ACTIVE gate exists to preserve. The round-1 argument that "a row
+    // that has since moved off ACTIVE loses the CAS anyway" covered only the admitted path; a
+    // refusal RETURNS BEFORE the CAS is ever attempted, so it needed its own re-read.
+    // A refusal that survives the re-read falls through to the CAS, which no-ops on the TAKEN row
+    // and answers 200; an exception returns the same 200 rather than a 500 for the same reason.
+    if ("ACTIVE".equals(signal.status())) {
+      TakeAdmission.Verdict verdict;
+      try {
+        verdict = admission.admit(id, qty);
+      } catch (RuntimeException e) {
+        if (takenConcurrently(id)) {
+          return detail(id);
+        }
+        throw e;
+      }
+      if (!verdict.admitted() && !takenConcurrently(id)) {
+        throw new ApiException(422, verdict.code(), verdict.reason(), verdict.details());
+      }
+    }
     // Guarded CAS ACTIVE→TAKEN: publish (and thus open a paper position) only if THIS call won the
     // transition — an already-TAKEN signal (auto-paper or a double-submit) is an idempotent no-op.
     if (repository.transitionIf(id, "ACTIVE", "TAKEN")) {
@@ -171,6 +207,26 @@ public class SignalsController {
           Map.of("signalId", id, "signalStatus", String.valueOf(status)));
     }
     return detail(id);
+  }
+
+  /**
+   * Whether a concurrent take won {@code ACTIVE→TAKEN} while this call was admitting — the second
+   * read the refusal path needs so a lost race answers 200, not 422/500.
+   *
+   * <p>A failure of the re-read itself returns {@code false}: it cannot CONFIRM the caller's intent
+   * was reached, so the original outcome stands rather than being converted to a success on a read
+   * we could not trust. That also keeps the original exception the one that propagates.
+   */
+  private boolean takenConcurrently(long id) {
+    try {
+      return repository
+          .find(id)
+          .map(SignalRepository.SignalRow::status)
+          .filter("TAKEN"::equals)
+          .isPresent();
+    } catch (RuntimeException reReadFailed) {
+      return false;
+    }
   }
 
   private SignalRepository.SignalRow requireExists(long id) {

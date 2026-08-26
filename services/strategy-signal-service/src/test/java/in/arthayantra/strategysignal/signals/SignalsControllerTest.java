@@ -25,6 +25,9 @@ class SignalsControllerTest {
   /** Modules registered so the wire-shape assertions can serialize the {@code OffsetDateTime}s. */
   private static final ObjectMapper OM = new ObjectMapper().findAndRegisterModules();
 
+  /** These cases are about the read surface — the take gate is exercised in its own suite. */
+  private static final TakeAdmission ADMIT_ALL = (id, qty) -> TakeAdmission.Verdict.ADMITTED;
+
   private static SignalRow row(String tradeableExch, String tradeableSym, JsonNode scalperDetail) {
     return new SignalRow(
         1L, UUID.randomUUID(), "NSE", "NIFTY24JUNFUT", "3m", "ENTRY", "BUY",
@@ -40,7 +43,7 @@ class SignalsControllerTest {
         OM.readTree("{\"side\":\"CE\",\"manual_checks\":[{\"key\":\"news_clear\"}]}");
     when(repo.find(1L)).thenReturn(Optional.of(row("NFO", "NIFTY24JUN24000CE", detail)));
     SignalsController controller =
-        new SignalsController(repo, mock(ApplicationEventPublisher.class));
+        new SignalsController(repo, mock(ApplicationEventPublisher.class), ADMIT_ALL);
 
     SignalViews.SignalDto dto = controller.detail(1L);
 
@@ -70,7 +73,7 @@ class SignalsControllerTest {
     SignalRepository repo = mock(SignalRepository.class);
     when(repo.find(1L)).thenReturn(Optional.of(row("NFO", "NIFTY24JUN24000CE", OM.nullNode())));
     SignalsController controller =
-        new SignalsController(repo, mock(ApplicationEventPublisher.class));
+        new SignalsController(repo, mock(ApplicationEventPublisher.class), ADMIT_ALL);
 
     List<String> keys = new ArrayList<>();
     OM.valueToTree(controller.detail(1L)).fieldNames().forEachRemaining(keys::add);
@@ -88,7 +91,7 @@ class SignalsControllerTest {
     SignalRepository repo = mock(SignalRepository.class);
     when(repo.find(1L)).thenReturn(Optional.of(row(null, null, null)));
     SignalsController controller =
-        new SignalsController(repo, mock(ApplicationEventPublisher.class));
+        new SignalsController(repo, mock(ApplicationEventPublisher.class), ADMIT_ALL);
 
     SignalViews.SignalDto dto = controller.detail(1L);
 
@@ -121,7 +124,7 @@ class SignalsControllerTest {
     when(repo.list(any(), any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
         .thenReturn(List.of(exitRow("CONFLUENCE_FLIP")));
     SignalsController controller =
-        new SignalsController(repo, mock(ApplicationEventPublisher.class));
+        new SignalsController(repo, mock(ApplicationEventPublisher.class), ADMIT_ALL);
 
     assertThat(controller.detail(2L).exitReason()).isEqualTo("CONFLUENCE_FLIP");
 
@@ -141,7 +144,7 @@ class SignalsControllerTest {
     when(repo.list(any(), any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
         .thenReturn(List.of(row(null, null, null)));
     SignalsController controller =
-        new SignalsController(repo, mock(ApplicationEventPublisher.class));
+        new SignalsController(repo, mock(ApplicationEventPublisher.class), ADMIT_ALL);
 
     String csv =
         new String(

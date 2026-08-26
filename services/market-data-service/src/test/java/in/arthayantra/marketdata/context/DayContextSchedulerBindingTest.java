@@ -17,7 +17,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  * is ONE thread — {@code MonitorSchedulingConfig.taskScheduler} is {@code builder.build()} and its
  * own javadoc says "byte-for-byte the default (pool size 1)" — shared by <b>29</b> scheduled
  * methods in this service (38 {@code @Scheduled} annotations in main; 9 name a scheduler).
- * One of them is {@code OptionsSnapshotService.scheduledSnapshot}, cron
+ * Those three figures are not a hand count: {@code ScheduledPoolCensusTest} re-derives them from
+ * the main sources and fails with a per-class, per-pool breakdown when any of them moves.
+ * One of the 29 is {@code OptionsSnapshotService.scheduledSnapshot}, cron
  * {@code 0 *&#47;2 * * * *}, whose javadoc sizes a full pass at "~70 batched calls ≈ 70 s at the 1/s
  * limit".
  *

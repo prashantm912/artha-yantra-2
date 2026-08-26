@@ -7,8 +7,10 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /**
  * Scheduler isolation for the pure liveness DETECTORS (audit BEJ-01). Boot gives {@code @Scheduled}
- * a single default {@code ThreadPoolTaskScheduler} (pool size 1) shared by all ~32 scheduled methods
- * here, so a blocked sibling job (an EOD/backfill/snapshot job that hangs on I/O) silently freezes
+ * a single default {@code ThreadPoolTaskScheduler} (pool size 1) shared by most scheduled methods
+ * here (**29 of 38 as of 2026-08-26 — the exact figure is machine-checked by {@code
+ * ScheduledPoolCensusTest}, which is the only thing that can re-derive it; this sentence said
+ * "~32" for months with nothing able to confirm or refute it**), so a blocked sibling job (an EOD/backfill/snapshot job that hangs on I/O) silently freezes
  * every watchdog/canary sweep on the same thread — detection is starvable exactly when the stack is
  * most broken, even though the RECOVERY paths (feed restart, off-pool daemons) are decoupled. This
  * gives the detectors their own dedicated single-thread scheduler so their sweeps keep firing
@@ -227,7 +229,10 @@ public class MonitorSchedulingConfig {
    * <p><b>Why it cannot sit on the default pool — it would defeat the fix it is part of.</b> That
    * pool is ONE thread ({@link #taskScheduler} is {@code builder.build()}, pool size 1) shared by
    * <b>29 scheduled methods on the shared default pool (of 38 {@code @Scheduled} annotations in
-   * this service's main sources; 9 name a scheduler)</b>, and one of them is
+   * this service's main sources; 9 name a scheduler)</b> — figures RE-DERIVED, not asserted from
+   * memory: {@code ScheduledPoolCensusTest} walks the main sources and reddens when any of the
+   * three moves, printing the per-class, per-pool breakdown. The number here was once <b>55</b>,
+   * from a grep that also counted {@code @Scheduled} written inside javadoc. And one of the 29 is
    * {@code OptionsSnapshotService.scheduledSnapshot}:
    * every 2 minutes, and its own javadoc sizes a pass at "~70 batched calls ≈ 70 s at the 1/s
    * limit". The entire safety margin of the H31 design is the 2 minutes between the :13 refresh and

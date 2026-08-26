@@ -15,6 +15,7 @@ import in.arthayantra.strategysignal.signals.SignalEmitted;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SignalTaken;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
+import in.arthayantra.strategysignal.signals.TakeAdmission;
 import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
@@ -28,6 +29,9 @@ import org.springframework.context.ApplicationEventPublisher;
  * null/zero suggested qty is skipped so nothing is opened blind.
  */
 class AutoPaperListenerTest {
+
+  /** These cases predate the take gate; it is exercised in {@code AutoPaperTakeAdmissionTest}. */
+  private static final TakeAdmission ADMIT_ALL = (id, qty) -> TakeAdmission.Verdict.ADMITTED;
 
   private static SignalEmitted emitted(long id) {
     return new SignalEmitted(
@@ -53,7 +57,7 @@ class AutoPaperListenerTest {
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     SwingPaperEffectRepository effects = mock(SwingPaperEffectRepository.class);
 
-    new AutoPaperListener(risk, signals, books, events, effects).onSignalEmitted(emitted(7));
+    new AutoPaperListener(risk, signals, books, events, effects, ADMIT_ALL).onSignalEmitted(emitted(7));
 
     verifyNoInteractions(signals, events); // the toggle is OFF — nothing happens
     verify(effects).skipEntry(7L);
@@ -70,7 +74,7 @@ class AutoPaperListenerTest {
     when(signals.transitionIf(7L, "ACTIVE", "TAKEN")).thenReturn(true); // this caller wins the CAS
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
 
-    new AutoPaperListener(risk, signals, books, events).onSignalEmitted(emitted(7));
+    new AutoPaperListener(risk, signals, books, events, ADMIT_ALL).onSignalEmitted(emitted(7));
 
     verify(signals).transitionIf(7L, "ACTIVE", "TAKEN");
     ArgumentCaptor<SignalTaken> taken = ArgumentCaptor.forClass(SignalTaken.class);
@@ -91,7 +95,7 @@ class AutoPaperListenerTest {
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     SwingPaperEffectRepository effects = mock(SwingPaperEffectRepository.class);
 
-    new AutoPaperListener(risk, signals, books, events, effects).onSignalEmitted(emitted(7));
+    new AutoPaperListener(risk, signals, books, events, effects, ADMIT_ALL).onSignalEmitted(emitted(7));
 
     verify(effects).requireEntry(7L);
     verify(signals, never()).transitionIf(anyLong(), any(), any());
@@ -110,7 +114,7 @@ class AutoPaperListenerTest {
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     SwingPaperEffectRepository effects = mock(SwingPaperEffectRepository.class);
 
-    new AutoPaperListener(risk, signals, books, events, effects).onSignalEmitted(emitted(7));
+    new AutoPaperListener(risk, signals, books, events, effects, ADMIT_ALL).onSignalEmitted(emitted(7));
 
     verify(signals).transitionIf(7L, "ACTIVE", "TAKEN");
     verifyNoInteractions(effects);
@@ -130,7 +134,7 @@ class AutoPaperListenerTest {
     when(signals.transitionIf(7L, "ACTIVE", "TAKEN")).thenReturn(false); // lost the CAS
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
 
-    new AutoPaperListener(risk, signals, books, events).onSignalEmitted(emitted(7));
+    new AutoPaperListener(risk, signals, books, events, ADMIT_ALL).onSignalEmitted(emitted(7));
 
     verifyNoInteractions(events);
   }
@@ -145,7 +149,7 @@ class AutoPaperListenerTest {
     when(signals.find(7L)).thenReturn(Optional.of(row(null, null)));
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
 
-    new AutoPaperListener(risk, signals, books, events).onSignalEmitted(emitted(7));
+    new AutoPaperListener(risk, signals, books, events, ADMIT_ALL).onSignalEmitted(emitted(7));
 
     verify(signals, never()).transitionIf(anyLong(), any(), any());
     verifyNoInteractions(events);

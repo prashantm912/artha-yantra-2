@@ -864,7 +864,30 @@ Run in order; each answers one question. Canned SQL in §6.
     variant of the same dependency: a strategy-signal boot while market-data is unready installs
     `0 loaded / 38 unresolved` and self-heals on a later reload (08-14: ~90 s; 08-17: ~10 min) —
     judge on `unresolved == 0` reached before the open, and watch that transient's growth.
-39. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+39. **A `confluence-composite` block whose stored composite BEATS the threshold is the 60m-bias
+    VETO, not a score shortfall — read the check's `reason` before classifying** (added 2026-08-26,
+    settling the rollup watchlist's "positive blocking margin — unverified in code" item from
+    2026-07-20 / T14) — the confluence-composite rail contains a directional veto that fails the
+    check with reason **`"60m bias opposes the side"`** while the row stores the full composite as
+    `operand` (`margin: null`). On 2026-08-26 all 10 first-block rows of this rail carried
+    composite 0.6383–0.8235 against 0.6 with that reason. Three consequences: (a) T14's proposed
+    `blocking_margin < 0` persist-assert is WRONG for this class — the margin is null, not
+    negative; (b) the §3.5 would-have-fired query legitimately returns these rows — they are the
+    "blocked ONLY by the veto" class and the natural counterfactual set for judging the veto
+    itself; (c) judge the veto on that set (§3.13 rule), never on the per-rail shadow bucket —
+    the bucket read +₹8,840 all-time on the same day the veto's sole-blocker set resolved
+    **0W/8L (≈ +303 pts saved)**, because the bucket mixes score-shortfall and veto blocks from
+    different regimes. First measurement 2026-08-26 (down day, all 8 vetoed legs PE, all losers,
+    challenger-book corroborated on 3 of them); accumulate before any conclusion — n=1 session.
+    ```sql
+    -- split the rail's blocks into veto vs score-shortfall before any attribution
+    SELECT c->>'reason' reason, count(*),
+           min(r.composite_score) mn_cs, max(r.composite_score) mx_cs
+    FROM strategy.signal_rejections r, jsonb_array_elements(r.diagnostic->'checks') c
+    WHERE r.generated_at >= :d0 AND c->>'rail'='confluence-composite'
+      AND (c->>'pass')::boolean=false GROUP BY 1;
+    ```
+40. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

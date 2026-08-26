@@ -80,6 +80,39 @@ default**. Nothing outside market-data-service changes; the output is a `request
 
 ---
 
+## 2a. ⚠️ OWNER ANSWER 2026-08-26 — TOTP IS CURRENTLY **DISABLED** ON THE ACCOUNT (can be enabled any time)
+
+This settles open question 3 below, and **it changes §3's central argument in the owner's favour.** Read it before §3.
+
+**§3 says automating "collapses 2FA into 1FA". That framing assumed TOTP was ALREADY enrolled** and that we would be
+copying an existing second factor onto this box. With TOTP disabled today, the comparison is different:
+
+| | attacker **without** host access | attacker **with** host access |
+|---|---|---|
+| **today** (TOTP off) | no TOTP barrier | full access |
+| **after enrolling + storing the seed** | **now faces TOTP** — a barrier that does not exist today | full access (unchanged) |
+
+**So enrolling TOTP for this purpose is plausibly a NET IMPROVEMENT to the account's overall posture**, with a specific
+carve-out for this host. **The honest objection narrows** from *"you are destroying your 2FA"* to
+**"host compromise becomes full interactive account access"** — still serious, still the thing to weigh, but a materially
+smaller claim than §3 as written. §3 is left intact below rather than rewritten, because its reasoning is correct for the
+case it assumed; this section states which case actually applies.
+
+**Two consequences:**
+
+1. ⚠️ **Enrolling TOTP is now a PREREQUISITE, not an assumption** — and §3's suggested mitigation ("enrol a *separate*
+   external TOTP used only for this flow") **may not apply**: the seed enrolled would be *the* account's second factor,
+   not a spare. If a separate enrolment is possible, it is still worth preferring; if not, say so plainly rather than
+   implying a spare exists.
+2. ⚠️ **Sequencing — do not change the login and automate it in the same step.** Enable TOTP → confirm the **manual**
+   login works end-to-end → only then automate. Otherwise a newly-changed login flow and an untested automation arrive
+   together, at 06:00, for a 09:15 open.
+
+⚠️ **A consequence for §1 that is easy to miss:** if TOTP is off today, the current manual login does **not** use it, so
+the three-step flow this document scopes describes a login **that does not exist yet on this account**. The one-time
+manual observation in open question 1 must therefore be taken **AFTER** TOTP is enrolled — observing today's flow would
+capture the wrong contract.
+
 ## 3. ⚠️ The security trade — stated plainly
 
 **Automating this collapses two-factor authentication into one factor on this machine.** Today the seed lives on a
@@ -162,7 +195,7 @@ why it was declined.**
    only ever pin *our recorded understanding* of an undocumented API.
 2. **Exact server-side expiry semantics** — is ~06:00 a hard kill, and does a connected WS ticker survive past it until
    reconnect? Affects only how early the job can be scheduled.
-3. ⚠️ **Whether the account's 2FA is TOTP at all.** If it is app-approval or SMS, unit 2 does not apply as scoped and
+3. ✅ **ANSWERED by the owner 2026-08-26: TOTP is currently DISABLED and can be enabled any time.** See §2a — this makes enrolment a PREREQUISITE and narrows §3's objection. Superseded, kept for provenance: ⚠️ **Whether the account's 2FA is TOTP at all.** If it is app-approval or SMS, unit 2 does not apply as scoped and
    enrolment is a prerequisite. **The owner knows; the code does not.**
 4. **Host clock discipline** — TOTP needs ±30 s of true time. `assumed` Windows time sync is on; verify before build.
 5. ⚠️ **Captcha / device-check risk** — a captcha would make this approach **non-viable as scoped**, and bypassing one is

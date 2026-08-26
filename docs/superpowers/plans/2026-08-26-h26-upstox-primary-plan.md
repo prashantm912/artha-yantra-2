@@ -58,6 +58,24 @@ window is the cutover itself:
 
 Cost: roughly two extra months of ₹500 against cutting over with no way back. **Take the two months.**
 
+⚠️ **DEFINITION — "confirmed working with Upstox" (owner's cancel condition, 2026-08-26). Steps 1–3 do NOT satisfy it.**
+Proving Upstox works and proving you can GO BACK are different tests, and only the second one expires. Step 4 can be run
+**only while the subscription is still active** — after cancellation there is nothing to flip back to and nothing to
+verify against. The cancel gate is therefore ALL FIVE of:
+
+- [ ] Upstox-primary carries a full live session with no Kite dependency on any path (quotes, candles, ticker, master).
+- [ ] The instrument master refreshes **login-free**, and `ay_instrument_master_synth_mismatch_total` = 0 across ≥5
+      sessions **including one weekly expiry**.
+- [ ] `projected_upstox_30m` measured under real Upstox-primary load is **under the §4 stop rule (1440)** — measured,
+      not projected from Kite-era numbers.
+- [ ] **The rollback is PROVEN, not assumed**: flags flipped back to Kite, one clean live session verified, flags
+      flipped forward again. ⚠️ This is also the only opportunity to discover a Kite wire-format drift *before*
+      `ContractCanary` goes dark with the subscription.
+- [ ] A dated note in `docs/signal-analysis/` records all four with evidence.
+
+**Anyone reading "confirmed working" as steps 1–3 and cancelling has skipped the only check that cannot be repeated
+later.**
+
 ⚠️ **§4's kill criterion still applies and is now MORE binding, not less.** Under (b) there is no Kite to absorb a bad
 projection — if `projected_upstox_30m` exceeds the stop rule, the answer is not "fall back more often", it is "do not
 do this".

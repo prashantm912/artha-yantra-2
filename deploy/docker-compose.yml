@@ -26,9 +26,11 @@ secrets:
     file: ./secrets/kite_api_secret
   artha_master_key:
     file: ./secrets/artha_master_key
-  # Kite AUTO-LOGIN material (default-OFF feature: artha.kite.auto-login.enabled). `ay up` creates
-  # empty placeholders exactly as it does for the kite_api_* pair; the live stack boots fine with
-  # them blank while the flag is off, and fails fast at startup if the flag is ON and any is blank.
+  # Kite AUTO-LOGIN material (default-OFF feature: artha.kite.auto-login.enabled). These mount
+  # UNCONDITIONALLY, so EVERY path that boots compose must seed a placeholder first or `up` dies
+  # with `bind source path does not exist` before a container starts -- `ay up` (ay.ps1) and the
+  # E2E global-setup both do. The live stack boots fine with them blank while the flag is off, and
+  # fails fast at startup if the flag is ON and any is blank.
   # ⚠️ Storing the TOTP seed beside the password is the security trade this feature makes on
   # purpose — see docs/superpowers/plans/2026-08-26-kite-totp-login-scoping.md §3/§2a.
   kite_user_id:

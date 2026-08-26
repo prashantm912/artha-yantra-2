@@ -247,6 +247,43 @@ acceptable risk: stop at B, keep the 06:00 ritual, and record H26 as partially d
 
 ---
 
+## 4a. ⚠️ THE 1-YEAR TOKEN EXPIRY — UNTRACKED, AND IT IS AN END-STATE-(b) RISK
+
+**Owner question 2026-08-26: is the long-lived Upstox token enough, with TOTP only needed for real trades?**
+**Answer: YES for data — and that makes H26 deliver motivation (2) outright.**
+
+`sourced`: ALL FOUR data seams run on the **login-free 1-yr analytics token** — ticker
+(`UpstoxMarketFeedConfig:29-30`, *"proven 2026-06-24: the analytics token authorizes the v3 WS, so the live tick feed
+survives a missed daily Kite login"*), quotes, option chain and FII/DII (`application.yml:125-129`). The instrument
+master can come from the **public `complete.json.gz`, which needs no token at all**.
+
+> **So under H26 there is NO DAILY LOGIN ANYWHERE.** H26 fully delivers motivation (2), and the TOTP scoping doc
+> (`2026-08-26-kite-totp-login-scoping.md`) is the **INTERIM** answer for however long Kite stays primary — not a
+> parallel requirement. Real ORDER placement would need a daily-authenticated session, so TOTP returns only if and when
+> live trading starts, and only on the order path.
+
+### ⚠️ But nothing tracks when that token dies
+
+`computed` 2026-08-26: a repo-wide search for analytics-token expiry/renewal tracking returns **only option-expiry
+matches**. **Nothing warns before the token lapses.** A 1-year credential expires on a date **nobody chose** — no
+commit, no deploy, no review — which is the [[behaviour-that-arms-itself]] shape exactly.
+
+**Today that is survivable**: Kite is primary, so an expired analytics token degrades Upstox-only surfaces (FII/DII,
+expired backfill, margin, fundamentals, the analytics canary). **Under end state (b) it is NOT** — with Kite dormant
+and the subscription cancelled, the token lapsing takes **the entire live data path down at once, with no fallback and
+no advance warning**.
+
+Detection exists but is **after the fact**: the `UpstoxContractCanary` runs 18:20 weekdays and is **enabled live**
+(`ARTHA_UPSTOX_CANARY_ENABLED=true` — `computed` from `docker inspect`, **not** the YAML default, which reads
+`false`). It is a contract-DRIFT probe; whether an auth 401 registers as drift or is swallowed by its
+deliberate tolerance of empty payloads is `assumed`, not verified. Either way it fires on the day of failure, not before.
+
+**Required for (b), and cheap:** a **token-horizon canary** modelled on the market-calendar CD-2 pattern (which reds
+~45 days before the bundled holiday CSVs run out). It should red well ahead of expiry, and the renewal date belongs in
+the cancel-gate checklist — **do not cancel the Kite subscription without knowing when the Upstox token expires and
+who renews it.** Add the renewal to §7a's end-state-(b) column as a standing operational cost: (b) trades a
+₹500/month bill for an annual credential renewal with a hard cliff.
+
 ## 5. What could go wrong SILENTLY
 
 1. **A plausible-but-wrong synthesised tradingsymbol** duplicates an instrument row — subscriptions split across two keys,

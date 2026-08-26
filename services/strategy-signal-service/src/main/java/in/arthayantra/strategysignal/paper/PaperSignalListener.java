@@ -7,12 +7,18 @@ import in.arthayantra.strategysignal.signals.SignalTaken;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRetry;
 import in.arthayantra.strategysignal.swing.SwingBatchRefusalRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Opens a paper position when a TAKEN signal carries a qty (§F.6 "optionally opens a paper position").
@@ -32,12 +38,35 @@ public class PaperSignalListener {
   /** {@code swing_batch_refusals.reason} prefix for a permanent risk-governor entry refusal (H22). */
   private static final String GOVERNOR_REFUSAL_REASON = "RISK_ENTRY_BLOCKED:";
 
+  /** H43: a stranded {@code TAKEN} anchor released back out of the re-entry-suppressing set. */
+  static final String COMPENSATED_METRIC = "ay_signal_taken_anchor_compensated_total";
+
+  /**
+   * H43: a swallowed paper-open failure whose anchor was deliberately LEFT {@code TAKEN}. Tagged
+   * {@code reason} so the SAFE refusals (a real position exists) stay separable from the ones that
+   * mean a human should look ({@code probe_failed} / {@code ambient_transaction}). Every reason on
+   * this metric is a NON-EVENT worth an operator's attention; the benign "someone else already
+   * resolved it" outcome has its OWN metric below so this one stays alertable as-is.
+   */
+  static final String COMPENSATION_REFUSED_METRIC =
+      "ay_signal_taken_anchor_compensation_refused_total";
+
+  /**
+   * H43: the anchor had already left {@code TAKEN} by the time the CAS ran (a concurrent resolve or
+   * a replay got there first). BENIGN and deliberately NOT on the refused metric - nothing is
+   * stranded, nothing needs looking at, and folding it in would put routine noise on the counter an
+   * operator alerts on (cross-vendor round 1, Major).
+   */
+  static final String ALREADY_MOVED_METRIC = "ay_signal_taken_anchor_already_moved_total";
+
   private final PaperService paper;
   private final ScalperAccountModel scalperAccounts;
   private final SignalRepository signals;
   private final SwingPaperEffectRepository paperEffects;
   private final InstrumentMetaClient instruments;
   private final SwingBatchRefusalRepository refusals;
+  private final MeterRegistry meters;
+  private final TransactionTemplate compensationTx;
 
   /**
    * Wires the ledger service, the 5-account sub-ledger, the signal store, the instrument master +
@@ -50,13 +79,44 @@ public class PaperSignalListener {
       SignalRepository signals,
       SwingPaperEffectRepository paperEffects,
       InstrumentMetaClient instruments,
-      SwingBatchRefusalRepository refusals) {
+      SwingBatchRefusalRepository refusals,
+      MeterRegistry meters,
+      PlatformTransactionManager transactionManager) {
     this.paper = paper;
     this.scalperAccounts = scalperAccounts;
     this.signals = signals;
     this.paperEffects = paperEffects;
     this.instruments = instruments;
     this.refusals = refusals;
+    this.meters = meters;
+    // Default propagation (REQUIRED). Compensation refuses outright when a transaction is already
+    // active (see compensateStrandedAnchor), so this template always starts a REAL one - which is
+    // what gives `execute` a genuine commit boundary to hang the success counter off.
+    this.compensationTx =
+        transactionManager == null ? null : new TransactionTemplate(transactionManager);
+  }
+
+  /** Backwards-compatible constructor for focused paper-listener tests. */
+  public PaperSignalListener(
+      PaperService paper,
+      ScalperAccountModel scalperAccounts,
+      SignalRepository signals,
+      SwingPaperEffectRepository paperEffects,
+      InstrumentMetaClient instruments,
+      SwingBatchRefusalRepository refusals,
+      MeterRegistry meters) {
+    this(paper, scalperAccounts, signals, paperEffects, instruments, refusals, meters, null);
+  }
+
+  /** Backwards-compatible constructor for focused paper-listener tests. */
+  public PaperSignalListener(
+      PaperService paper,
+      ScalperAccountModel scalperAccounts,
+      SignalRepository signals,
+      SwingPaperEffectRepository paperEffects,
+      InstrumentMetaClient instruments,
+      SwingBatchRefusalRepository refusals) {
+    this(paper, scalperAccounts, signals, paperEffects, instruments, refusals, new SimpleMeterRegistry());
   }
 
   /** Backwards-compatible constructor for focused paper-listener tests. */
@@ -84,18 +144,34 @@ public class PaperSignalListener {
     this(paper, scalperAccounts, signals, null, null, null);
   }
 
-  /** Opens a position (or, for a straddle, both legs) from the signal when a qty was supplied. */
+  /**
+   * Opens a position (or, for a straddle, both legs) from the signal when a qty was supplied.
+   *
+   * <p>The {@code ACTIVE->TAKEN} CAS has ALREADY committed one frame up (in {@code
+   * SignalsController#taken} or {@link AutoPaperListener}), so a throw swallowed here used to leave
+   * the anchor {@code TAKEN} with no order, no position and no rejection row - and {@code
+   * SignalRepository.activeEntry} reads {@code status IN ('ACTIVE','TAKEN')}, so that anchor
+   * suppressed re-entry on the instrument for that version FOREVER ({@link TakenSignalResolver}
+   * fires only on {@code PaperPositionClosed}, which can never arrive for a position that was never
+   * opened). H43 measured four such rows. {@link #compensateStrandedAnchor} releases the anchor -
+   * but only when it can PROVE nothing was opened; see that method for why the asymmetry runs the
+   * way it does.
+   */
   @EventListener
   public void onSignalTaken(SignalTaken event) {
     if (event.qty() == null || event.qty() <= 0) {
       return;
     }
+    // Set BEFORE the call it guards: the swing-effect lease owns its own recovery, so a throw from
+    // under it must never be compensated here (see compensateStrandedAnchor).
+    boolean swingEffectPath = false;
     try {
       Optional<SwingPaperEffectRepository.Effect> swingEffect =
           paperEffects == null ? Optional.empty() : paperEffects.findOpenBySignal(event.signalId());
       if (swingEffect.isPresent()) {
         String decision = swingEffect.get().decision();
         if ("REQUIRED".equals(decision)) {
+          swingEffectPath = true;
           openSwingEffect(event, swingEffect.get());
           return;
         }
@@ -128,7 +204,179 @@ public class PaperSignalListener {
       }
     } catch (Exception e) {
       log.warn("paper position not opened for taken signal {}: {}", event.signalId(), e.getMessage());
+      compensateStrandedAnchor(event.signalId(), swingEffectPath, e);
     }
+  }
+
+  /**
+   * H43 - releases a {@code TAKEN} anchor whose paper open failed, so it stops suppressing re-entry.
+   *
+   * <p>{@code TAKEN->EXPIRED}, not {@code TAKEN->ACTIVE}, and the choice is deliberate. {@code
+   * ACTIVE} would put the SAME signal back in the takeable feed at a price and a bar that have both
+   * moved on, and invite an immediate retry straight back into the condition that just refused - a
+   * stale tick and a deployment cap both persist for minutes. {@code EXPIRED} only removes the
+   * anchor from {@code activeEntry}'s {@code ('ACTIVE','TAKEN')} set: the engine is then free to
+   * emit a FRESH entry on the next qualifying bar, priced off that bar, through its own admission
+   * gate. It is also the state {@link TakenSignalResolver} already writes for the ordinary "this
+   * anchor no longer holds a position" case, so nothing downstream sees a new one.
+   *
+   * <p>THE ASYMMETRY. {@code PaperService.openPosition} AVERAGES into an existing open position
+   * rather than rejecting it ({@code uq_paper_positions_open} guards the ROW, not the quantity), so
+   * releasing an anchor whose open PARTIALLY succeeded invites a second entry that silently doubles
+   * a live position. A stranded anchor is a suppressed slot; a double-open is real money. So this
+   * compensates ONLY on positive proof that nothing was opened, and every other outcome - including
+   * "the proof itself failed" - leaves the anchor {@code TAKEN} and logs ERROR.
+   *
+   * <p>The proof is settled against the DURABLE decision records first, exactly as the swing ledger
+   * was built to be ({@code requireEntry} / {@code confirmEntry} / {@code skipEntry}), and only then
+   * against the position table - a position can be opened and closed again between the throw and
+   * this read, whereas a {@code FILLED} {@code paper_orders} row cannot be un-written.
+   */
+  private void compensateStrandedAnchor(long signalId, boolean swingEffectPath, Exception failure) {
+    if (swingEffectPath) {
+      // Not this method's anchor to release. The lease is durable: a transient fault stays CLAIMED
+      // for the swing catch-up to replay, and a governor verdict is closed terminally by
+      // resolveGovernorRefusal. Expiring the anchor would ALSO break that replay outright -
+      // PaperService.openOrder refuses to fill against an EXPIRED signal.
+      refuseToCompensate(signalId, "swing_effect_path", failure, null);
+      return;
+    }
+    if (compensationTx == null) {
+      refuseToCompensate(signalId, "no_transaction_manager", failure, null);
+      return;
+    }
+    if (TransactionSynchronizationManager.isActualTransactionActive()) {
+      // Machine-checked precondition, not an assumption. Joining a caller's transaction would break
+      // BOTH halves of the guarantee: a rollback-only caller silently discards the CAS while the
+      // success counter still fires, and a caller already holding anchor lock 4801 would make a
+      // REQUIRES_NEW variant self-deadlock. No publisher is transactional today; if one ever
+      // becomes so this refuses LOUDLY instead of degrading into either failure.
+      refuseToCompensate(signalId, "ambient_transaction", failure, null);
+      return;
+    }
+    String outcome;
+    try {
+      outcome = compensationTx.execute(status -> decideUnderAnchorLock(signalId));
+    } catch (CompensationAborted aborted) {
+      refuseToCompensate(signalId, aborted.reason, failure, aborted);
+      return;
+    } catch (RuntimeException txFailure) {
+      // The lock acquisition, the commit itself, or anything else in the transaction machinery.
+      refuseToCompensate(signalId, "transaction_failed", failure, txFailure);
+      return;
+    }
+    // Past this line the transaction has COMMITTED. Incrementing inside the callback would have
+    // let a rollback leave a counter claiming a compensation that never happened.
+    if (ALREADY_MOVED.equals(outcome)) {
+      meters.counter(ALREADY_MOVED_METRIC).increment();
+      log.info(
+          "taken signal {} needed no release - another writer had already moved it off TAKEN before"
+              + " the compensating transition ran",
+          signalId);
+      return;
+    }
+    if (outcome != null) {
+      refuseToCompensate(signalId, outcome, failure, null);
+      return;
+    }
+    meters.counter(COMPENSATED_METRIC).increment();
+    log.warn(
+        "taken signal {} released TAKEN->EXPIRED: its paper open failed and nothing was opened, so"
+            + " the anchor was suppressing re-entry on that instrument with no way to resolve: {}",
+        signalId, failure.getMessage());
+  }
+
+  /** The {@code already_moved} sentinel - a lost CAS, which is benign, not a refusal. */
+  private static final String ALREADY_MOVED = "already_moved";
+
+  /** A classified abort from inside the compensation transaction; carries its bounded reason tag. */
+  private static final class CompensationAborted extends RuntimeException {
+    private final String reason;
+
+    CompensationAborted(String reason, RuntimeException cause) {
+      super(reason, cause);
+      this.reason = reason;
+    }
+  }
+
+  /**
+   * The whole decision - lock, probe, CAS - inside ONE transaction. Returns {@code null} when the
+   * anchor was released, {@link #ALREADY_MOVED} when it had already left {@code TAKEN}, otherwise
+   * the refusal reason.
+   *
+   * <p>⚠️ THE LOCK IS THE POINT (cross-vendor round 1, Critical). Probing and then transitioning as
+   * separate autocommit statements let a concurrent signal-linked open interleave: it reads
+   * {@code TAKEN}, creates an UNCOMMITTED fill, our ladder sees no committed order and no position,
+   * we expire the anchor, and then its fill commits - an OPEN position under an EXPIRED anchor,
+   * which the next entry then AVERAGES into. Reading and deciding in the same transaction under the
+   * same per-anchor advisory lock every signal-linked open already takes ({@code
+   * PaperService.openOrder} -> {@code SignalRepository.lockAnchors}) is what makes the evidence
+   * mean anything: whichever side commits first, the loser observes committed state.
+   *
+   * <p>⚠️ ANCHOR LOCK ONLY. {@code ANCHOR_LOCK_NAMESPACE=4801} is taken BEFORE
+   * {@code BOOK_CAPITAL_LOCK_NAMESPACE=4802} by every entry path
+   * ({@code PaperService.lockAnchorsBeforeBook}), and this repo has already deadlocked two money
+   * -path opens by inverting that order. Compensation takes 4801 and NOTHING else - no book lock,
+   * so no order to invert. Nothing added here may take 4802.
+   */
+  private String decideUnderAnchorLock(long signalId) {
+    signals.lockAnchors(List.of(signalId));
+    String refusal;
+    try {
+      refusal = whyNotCompensable(signalId);
+    } catch (RuntimeException probeFailure) {
+      throw new CompensationAborted("probe_failed", probeFailure);
+    }
+    if (refusal != null) {
+      return refusal;
+    }
+    try {
+      return signals.transitionIf(signalId, "TAKEN", "EXPIRED") ? null : ALREADY_MOVED;
+    } catch (RuntimeException transitionFailure) {
+      throw new CompensationAborted("transition_failed", transitionFailure);
+    }
+  }
+
+  /**
+   * The reason this anchor must stay {@code TAKEN}, or {@code null} when nothing was opened.
+   *
+   * <p>Ordered strongest-evidence-first, and every arm fails CLOSED: with no ledger to consult at
+   * all there is no proof, so there is no compensation.
+   */
+  private String whyNotCompensable(long signalId) {
+    if (paperEffects == null) {
+      return "no_ledger";
+    }
+    if (paperEffects.pendingEntry(signalId)) {
+      // An unconfirmed durable ENTRY decision exists for this signal. Recovery owns it.
+      return "swing_effect_pending";
+    }
+    if (paperEffects.entryConfirmedByPaper(signalId)) {
+      // A FILLED paper_orders row for this signal: money moved, even if the position has since
+      // closed. This is the arm that catches a fill-then-throw and a partly-opened multi-leg take.
+      return "filled_order";
+    }
+    if (paper.openQuantityForSignal(signalId) > 0) {
+      return "open_position";
+    }
+    return null;
+  }
+
+  /** Counts and pages the refusal - a stranded anchor must be LOUD, never a silent annoyance. */
+  private void refuseToCompensate(
+      long signalId, String reason, Exception failure, RuntimeException compensationFailure) {
+    meters.counter(COMPENSATION_REFUSED_METRIC, "reason", reason).increment();
+    if (compensationFailure != null) {
+      log.error(
+          "taken signal {} LEFT TAKEN after a swallowed paper-open failure ({}) [{}] - the"
+              + " compensation itself could not complete, and releasing an anchor whose open may"
+              + " have partially succeeded would double-open on the next entry",
+          signalId, failure.getMessage(), reason, compensationFailure);
+      return;
+    }
+    log.error(
+        "taken signal {} LEFT TAKEN after a swallowed paper-open failure [{}]: {}",
+        signalId, reason, failure.getMessage());
   }
 
   /** Replays a previously claimed swing ENTRY only after the catch-up verified no filled order exists. */

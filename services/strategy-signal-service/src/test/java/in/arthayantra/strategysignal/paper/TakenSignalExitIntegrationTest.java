@@ -119,6 +119,57 @@ class TakenSignalExitIntegrationTest extends StrategySignalIntegrationTestBase {
     assertThat(pos.takeProfit()).isEqualByComparingTo("120.00");
   }
 
+
+  /**
+   * H43 end-to-end: a paper open that REFUSES must not leave the anchor suppressing re-entry.
+   *
+   * <p>Reproduces the measured shape with the real listener, the real signal store and the real
+   * effect ledger: a TAKEN entry whose open throws DATA_STALE (a tick present but far past
+   * {@code artha.paper.tick-max-age-seconds}) wrote no order and no position, and the anchor stayed
+   * TAKEN forever because {@link TakenSignalResolver} only ever fires on a position CLOSE. The
+   * decisive assertion is the last one -- {@code activeEntry} empty is what "re-entry is possible
+   * again" actually means to the engine; a status read alone would not prove it.
+   */
+  @Test
+  void aRefusedPaperOpenReleasesTheAnchorSoTheInstrumentCanBeReEntered() {
+    String slug = "taken-h43-" + UUID.randomUUID().toString().substring(0, 8);
+    UUID strategyId =
+        registry
+            .create(
+                "Taken H43 IT " + slug,
+                null,
+                List.of("it"),
+                CONFIG.replace("id: taken-exit-it", "id: " + slug))
+            .id();
+    registry.publish(strategyId, null, null);
+    UUID versionId = strategyRepo.latestVersion(strategyId).orElseThrow().id();
+
+    String sym = "H43IT-" + UUID.randomUUID().toString().substring(0, 8);
+    OffsetDateTime now = OffsetDateTime.now();
+    long signalId =
+        signals.insert(
+            versionId, "NFO", sym, "1m", "ENTRY", "BUY",
+            new BigDecimal("80.00"), new BigDecimal("40.00"), new BigDecimal("120.00"),
+            new BigDecimal("0.80"), "{}", now, now.plusHours(1), null);
+    signals.transition(signalId, "TAKEN");
+    assertThat(signals.activeEntry(versionId, "NFO", sym)).isPresent();
+
+    // A tick that EXISTS but is far too old: openOrder refuses DATA_STALE rather than falling back
+    // to the signal's own entry price (the no-tick-at-all branch), so nothing is ever opened.
+    redis.opsForHash().put(
+        "ticks:last", "NFO:" + sym,
+        "{\"lastPrice\":\"82.00\",\"timestamp\":\"" + now.minusHours(3) + "\"}");
+
+    // fillPrice null so the CALLER-supplied price cannot win over the stale tick.
+    events.publishEvent(new SignalTaken(signalId, 50, null));
+
+    assertThat(positions.findOpen("other", "NFO", sym, "BUY")).isEmpty();
+    assertThat(signals.find(signalId).orElseThrow().status()).isEqualTo("EXPIRED");
+    // THE POINT: the anchor is out of activeEntry's ('ACTIVE','TAKEN') set, so the engine may emit
+    // a fresh entry on this instrument for this version again.
+    assertThat(signals.activeEntry(versionId, "NFO", sym)).isEmpty();
+  }
+
   private record Seed(UUID versionId, long signalId, String sym) {}
 
   /** Publishes a fresh strategy, inserts a taken ENTRY (SL 40 / TP 120) and opens its position. */

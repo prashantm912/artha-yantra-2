@@ -17,6 +17,7 @@ import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SignalTaken;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
 import in.arthayantra.strategysignal.swing.SwingBatchRefusalRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -24,6 +25,10 @@ import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** The E10 stamping seam: a scalper take charges the paper open to a round-robin sub-account. */
 class PaperSignalListenerTest {
@@ -353,6 +358,382 @@ class PaperSignalListenerTest {
 
     verify(effects, never()).refuseEntry(anyLong());
     verify(effects, never()).confirm(anyLong());
+  }
+
+
+  // ---------------------------------------------------------------------------------------------
+  // H43: a swallowed paper-open failure used to STRAND the TAKEN anchor forever.
+  //
+  // The ACTIVE->TAKEN CAS commits one frame up, so any throw caught by onSignalTaken left the
+  // signal TAKEN with no order and no position. SignalRepository.activeEntry anchors
+  // status IN ('ACTIVE','TAKEN'), so that row suppressed re-entry on the instrument for that
+  // version, and TakenSignalResolver (the only TAKEN->EXPIRED writer) fires only on
+  // PaperPositionClosed -- which can never arrive for a position that was never opened.
+  // Measured: signals 20/23/26 (minervini, 2026-07-03) and 193 (SALSTEEL, manas-arora-vcp,
+  // 2026-08-13) -- zero orders, zero positions, zero rejections, empty paper_admin_audit.
+  //
+  // The compensation is deliberately ONE-SIDED. PaperService.openPosition AVERAGES into an open
+  // position instead of rejecting it, so releasing an anchor whose open PARTIALLY succeeded invites
+  // a silent double-open. A stranded anchor is a suppressed slot; a double-open is real money.
+  // ---------------------------------------------------------------------------------------------
+
+  /** A clean nothing-was-opened ledger: no pending effect, no filled order, no open quantity. */
+  private static SwingPaperEffectRepository cleanLedger() {
+    SwingPaperEffectRepository effects = mock(SwingPaperEffectRepository.class);
+    when(effects.findOpenBySignal(anyLong())).thenReturn(Optional.empty());
+    when(effects.pendingEntry(anyLong())).thenReturn(false);
+    when(effects.entryConfirmedByPaper(anyLong())).thenReturn(false);
+    return effects;
+  }
+
+  private static PaperSignalListener listener(
+      PaperService paper,
+      SignalRepository signals,
+      SwingPaperEffectRepository effects,
+      SimpleMeterRegistry meters) {
+    return listener(paper, signals, effects, meters, mock(PlatformTransactionManager.class));
+  }
+
+  /**
+   * The listener with an observable transaction manager. A plain Mockito {@link
+   * PlatformTransactionManager} is enough for {@link
+   * org.springframework.transaction.support.TransactionTemplate}: it calls {@code getTransaction},
+   * runs the callback, then {@code commit} - so the mock records the real ORDER of those calls
+   * against the repository calls, which is exactly what the Critical is about.
+   */
+  private static PaperSignalListener listener(
+      PaperService paper,
+      SignalRepository signals,
+      SwingPaperEffectRepository effects,
+      SimpleMeterRegistry meters,
+      PlatformTransactionManager transactionManager) {
+    return new PaperSignalListener(
+        paper, mock(ScalperAccountModel.class), signals, effects, null, null, meters,
+        transactionManager);
+  }
+
+  private static double counter(SimpleMeterRegistry meters, String name, String... tags) {
+    var found = meters.find(name).tags(tags).counter();
+    return found == null ? 0d : found.count();
+  }
+
+  /** The defect, closed: a failed open releases the anchor so the instrument can be re-entered. */
+  @Test
+  void aFailedOpenReleasesTheStrandedTakenAnchor() {
+    PaperService paper = mock(PaperService.class);
+    SignalRepository signals = noStraddle();
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    when(paper.openQuantityForSignal(193L)).thenReturn(0L);
+    when(paper.openOrder(any()))
+        .thenThrow(new ApiException(422, ErrorCodes.DATA_STALE, "last tick is 41s old"));
+    when(signals.transitionIf(193L, "TAKEN", "EXPIRED")).thenReturn(true);
+
+    listener(paper, signals, cleanLedger(), meters)
+        .onSignalTaken(new SignalTaken(193L, 206, new BigDecimal("69.38"), false));
+
+    // EXPIRED, never ACTIVE: released from activeEntry's ('ACTIVE','TAKEN') set without inviting an
+    // immediate retry into the same failing condition.
+    verify(signals).transitionIf(193L, "TAKEN", "EXPIRED");
+    verify(signals, never()).transitionIf(anyLong(), eq("TAKEN"), eq("ACTIVE"));
+    assertThat(counter(meters, PaperSignalListener.COMPENSATED_METRIC)).isEqualTo(1d);
+    assertThat(meters.find(PaperSignalListener.COMPENSATION_REFUSED_METRIC).counters()).isEmpty();
+  }
+
+  /**
+   * THE HAZARD. An open that partially succeeded -- a filled order whose position has since been
+   * closed, so the position table reads EMPTY -- must NOT be released. Compensating here would let
+   * the next entry average into a live book on a signal that already spent its money.
+   *
+   * <p>This is the arm the position-table read alone cannot see, which is why the proof consults
+   * the durable paper_orders record FIRST.
+   */
+  @Test
+  void aPartiallySucceededOpenIsNeverReverted() {
+    PaperService paper = mock(PaperService.class);
+    SignalRepository signals = noStraddle();
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    SwingPaperEffectRepository effects = cleanLedger();
+    // leg 1 filled, then the confirm/second leg threw; the position table is empty by the time we look
+    when(effects.entryConfirmedByPaper(193L)).thenReturn(true);
+    when(paper.openQuantityForSignal(193L)).thenReturn(0L);
+    when(paper.openOrder(any())).thenThrow(new RuntimeException("failure after the fill commit"));
+
+    listener(paper, signals, effects, meters)
+        .onSignalTaken(new SignalTaken(193L, 206, new BigDecimal("69.38"), false));
+
+    verify(signals, never()).transitionIf(anyLong(), eq("TAKEN"), anyString());
+    assertThat(counter(meters, PaperSignalListener.COMPENSATED_METRIC)).isZero();
+    assertThat(
+            counter(
+                meters, PaperSignalListener.COMPENSATION_REFUSED_METRIC, "reason", "filled_order"))
+        .isEqualTo(1d);
+  }
+
+  /** The same one-sidedness against a still-OPEN leg. */
+  @Test
+  void anOpenPositionOnTheSignalBlocksCompensation() {
+    PaperService paper = mock(PaperService.class);
+    SignalRepository signals = noStraddle();
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    when(paper.openQuantityForSignal(193L)).thenReturn(206L);
+    when(paper.openOrder(any())).thenThrow(new RuntimeException("failure after the fill commit"));
+
+    listener(paper, signals, cleanLedger(), meters)
+        .onSignalTaken(new SignalTaken(193L, 206, new BigDecimal("69.38"), false));
+
+    verify(signals, never()).transitionIf(anyLong(), eq("TAKEN"), anyString());
+    assertThat(
+            counter(
+                meters, PaperSignalListener.COMPENSATION_REFUSED_METRIC, "reason", "open_position"))
+        .isEqualTo(1d);
+  }
+
+  /** An unconfirmed durable ENTRY decision means recovery owns the anchor, not this listener. */
+  @Test
+  void aPendingSwingEffectDecisionBlocksCompensation() {
+    PaperService paper = mock(PaperService.class);
+    SignalRepository signals = noStraddle();
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    SwingPaperEffectRepository effects = cleanLedger();
+    when(effects.pendingEntry(193L)).thenReturn(true);
+    when(paper.openQuantityForSignal(193L)).thenReturn(0L);
+    when(paper.openOrder(any())).thenThrow(new RuntimeException("connection reset"));
+
+    listener(paper, signals, effects, meters)
+        .onSignalTaken(new SignalTaken(193L, 206, new BigDecimal("69.38"), false));
+
+    verify(signals, never()).transitionIf(anyLong(), eq("TAKEN"), anyString());
+    assertThat(
+            counter(
+                meters,
+                PaperSignalListener.COMPENSATION_REFUSED_METRIC,
+                "reason",
+                "swing_effect_pending"))
+        .isEqualTo(1d);
+  }
+
+  /**
+   * A proof that cannot be taken is not a proof. The probe throwing leaves the anchor TAKEN --
+   * failing in the direction of a suppressed slot rather than a doubled position.
+   */
+  @Test
+  void aFailedProofLeavesTheAnchorTaken() {
+    PaperService paper = mock(PaperService.class);
+    SignalRepository signals = noStraddle();
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    SwingPaperEffectRepository effects = cleanLedger();
+    when(effects.pendingEntry(193L)).thenThrow(new RuntimeException("ledger read failed"));
+    when(paper.openOrder(any())).thenThrow(new RuntimeException("connection reset"));
+
+    listener(paper, signals, effects, meters)
+        .onSignalTaken(new SignalTaken(193L, 206, new BigDecimal("69.38"), false));
+
+    verify(signals, never()).transitionIf(anyLong(), eq("TAKEN"), anyString());
+    assertThat(
+            counter(
+                meters, PaperSignalListener.COMPENSATION_REFUSED_METRIC, "reason", "probe_failed"))
+        .isEqualTo(1d);
+  }
+
+  /** A SUCCESSFUL open leaves the anchor TAKEN -- it holds a real position the engine exits through. */
+  @Test
+  void aSuccessfulOpenLeavesTheAnchorTaken() {
+    PaperService paper = mock(PaperService.class);
+    SignalRepository signals = noStraddle();
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+
+    listener(paper, signals, cleanLedger(), meters)
+        .onSignalTaken(new SignalTaken(193L, 206, new BigDecimal("69.38"), false));
+
+    verify(paper).openOrder(any());
+    verify(signals, never()).transitionIf(anyLong(), eq("TAKEN"), anyString());
+    assertThat(meters.find(PaperSignalListener.COMPENSATED_METRIC).counters()).isEmpty();
+    assertThat(meters.find(PaperSignalListener.COMPENSATION_REFUSED_METRIC).counters()).isEmpty();
+  }
+
+  /**
+   * The swing-effect lease path is EXCLUDED, and not merely as a scoping nicety: the lease is
+   * durable (a transient fault stays CLAIMED for the catch-up to replay), and PaperService.openOrder
+   * REFUSES to fill against an EXPIRED signal -- so expiring the anchor would permanently break the
+   * very replay that recovers it.
+   */
+  @Test
+  void theSwingEffectLeasePathIsNeverCompensated() {
+    PaperService paper = mock(PaperService.class);
+    SignalRepository signals = noStraddle();
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    SwingPaperEffectRepository effects = claimingRepository();
+    // A throw from INSIDE the REQUIRED branch but ABOVE openSwingEffect's own try — the only way
+    // this path reaches the outer catch at all. Nothing was opened and the position table is
+    // empty, so WITHOUT the swing-path exclusion every other arm of the proof would pass and the
+    // anchor would be EXPIRED out from under a live lease.
+    when(paper.openQuantityForSignal(SALSTEEL_SIGNAL)).thenReturn(0L);
+    when(effects.claimOpen(anyLong(), anyLong(), anyInt()))
+        .thenThrow(new RuntimeException("lease claim failed"));
+
+    listener(paper, signals, effects, meters)
+        .onSignalTaken(new SignalTaken(SALSTEEL_SIGNAL, 206, new BigDecimal("69.38"), false));
+
+    verify(signals, never()).transitionIf(anyLong(), eq("TAKEN"), anyString());
+    assertThat(counter(meters, PaperSignalListener.COMPENSATED_METRIC)).isZero();
+    assertThat(
+            counter(
+                meters,
+                PaperSignalListener.COMPENSATION_REFUSED_METRIC,
+                "reason",
+                "swing_effect_path"))
+        .isEqualTo(1d);
+  }
+
+  /**
+   * A lost CAS is BENIGN and must stay off the refused metric (cross-vendor round 1, Major).
+   * Another writer already moved the anchor off TAKEN, so nothing is stranded and nothing needs an
+   * operator - counting it as a refusal put routine noise on the counter alerts key off, and
+   * logging it "LEFT TAKEN" said the opposite of what had happened.
+   */
+  @Test
+  void anAnchorAlreadyMovedOffTakenIsBenignAndNotARefusal() {
+    PaperService paper = mock(PaperService.class);
+    SignalRepository signals = noStraddle();
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    when(paper.openQuantityForSignal(193L)).thenReturn(0L);
+    when(paper.openOrder(any())).thenThrow(new RuntimeException("connection reset"));
+    when(signals.transitionIf(193L, "TAKEN", "EXPIRED")).thenReturn(false);
+
+    listener(paper, signals, cleanLedger(), meters)
+        .onSignalTaken(new SignalTaken(193L, 206, new BigDecimal("69.38"), false));
+
+    assertThat(counter(meters, PaperSignalListener.COMPENSATED_METRIC)).isZero();
+    assertThat(counter(meters, PaperSignalListener.ALREADY_MOVED_METRIC)).isEqualTo(1d);
+    // the alertable metric stays CLEAN
+    assertThat(meters.find(PaperSignalListener.COMPENSATION_REFUSED_METRIC).counters()).isEmpty();
+  }
+
+  /**
+   * THE CRITICAL (cross-vendor round 1). The probes and the CAS used to run as separate autocommit
+   * statements with no per-anchor lock, so a concurrent signal-linked open could read TAKEN, create
+   * an UNCOMMITTED fill, let our ladder see nothing committed, and then commit that fill AFTER we
+   * expired the anchor - an OPEN position under an EXPIRED anchor, which the next entry AVERAGES
+   * into. The unique index cannot save that.
+   *
+   * <p>Asserted as strict ORDER across ALL the collaborating mocks, not just one: the transaction
+   * must OPEN, the anchor lock must be taken FIRST inside it, every probe and the CAS must run
+   * after the lock, and only then may the transaction commit. An InOrder over a single mock would
+   * be blind to the other's call landing in the gap it forbids.
+   */
+  @Test
+  void theProbesAndTheCasRunInOneTransactionUnderTheAnchorLock() {
+    PaperService paper = mock(PaperService.class);
+    SignalRepository signals = noStraddle();
+    SwingPaperEffectRepository effects = cleanLedger();
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+    when(paper.openQuantityForSignal(193L)).thenReturn(0L);
+    when(paper.openOrder(any()))
+        .thenThrow(new ApiException(422, ErrorCodes.DATA_STALE, "last tick is 41s old"));
+    when(signals.transitionIf(193L, "TAKEN", "EXPIRED")).thenReturn(true);
+
+    listener(paper, signals, effects, meters, transactionManager)
+        .onSignalTaken(new SignalTaken(193L, 206, new BigDecimal("69.38"), false));
+
+    InOrder order = org.mockito.Mockito.inOrder(transactionManager, signals, effects, paper);
+    order.verify(transactionManager).getTransaction(any());
+    order.verify(signals).lockAnchors(List.of(193L));
+    order.verify(effects).pendingEntry(193L);
+    order.verify(effects).entryConfirmedByPaper(193L);
+    order.verify(paper).openQuantityForSignal(193L);
+    order.verify(signals).transitionIf(193L, "TAKEN", "EXPIRED");
+    order.verify(transactionManager).commit(any());
+    assertThat(counter(meters, PaperSignalListener.COMPENSATED_METRIC)).isEqualTo(1d);
+  }
+
+  /**
+   * The success counter hangs off the COMMIT, not off the CAS returning true (cross-vendor round 1,
+   * follow-on). A commit that fails must leave NO counter claiming a compensation that never
+   * happened - the success-shaped-nothing case.
+   */
+  @Test
+  void aFailedCommitLeavesNoSuccessCounter() {
+    PaperService paper = mock(PaperService.class);
+    SignalRepository signals = noStraddle();
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+    org.mockito.Mockito.doThrow(new RuntimeException("commit failed"))
+        .when(transactionManager)
+        .commit(org.mockito.ArgumentMatchers.<TransactionStatus>any());
+    when(paper.openQuantityForSignal(193L)).thenReturn(0L);
+    when(paper.openOrder(any())).thenThrow(new RuntimeException("connection reset"));
+    when(signals.transitionIf(193L, "TAKEN", "EXPIRED")).thenReturn(true);
+
+    listener(paper, signals, cleanLedger(), meters, transactionManager)
+        .onSignalTaken(new SignalTaken(193L, 206, new BigDecimal("69.38"), false));
+
+    assertThat(counter(meters, PaperSignalListener.COMPENSATED_METRIC)).isZero();
+    assertThat(
+            counter(
+                meters,
+                PaperSignalListener.COMPENSATION_REFUSED_METRIC,
+                "reason",
+                "transaction_failed"))
+        .isEqualTo(1d);
+  }
+
+  /** A throwing CAS is counted under its OWN bounded reason instead of escaping uncounted. */
+  @Test
+  void aThrowingTransitionIsCountedAsTransitionFailed() {
+    PaperService paper = mock(PaperService.class);
+    SignalRepository signals = noStraddle();
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    when(paper.openQuantityForSignal(193L)).thenReturn(0L);
+    when(paper.openOrder(any())).thenThrow(new RuntimeException("connection reset"));
+    when(signals.transitionIf(193L, "TAKEN", "EXPIRED"))
+        .thenThrow(new RuntimeException("deadlock detected"));
+
+    listener(paper, signals, cleanLedger(), meters)
+        .onSignalTaken(new SignalTaken(193L, 206, new BigDecimal("69.38"), false));
+
+    assertThat(counter(meters, PaperSignalListener.COMPENSATED_METRIC)).isZero();
+    assertThat(
+            counter(
+                meters,
+                PaperSignalListener.COMPENSATION_REFUSED_METRIC,
+                "reason",
+                "transition_failed"))
+        .isEqualTo(1d);
+  }
+
+  /**
+   * An ambient transaction is a machine-checked precondition, not an assumption. Joining a caller's
+   * transaction would break both halves of the guarantee - a rollback-only caller silently discards
+   * the CAS while the counter still fires, and a caller already holding anchor lock 4801 would make
+   * a REQUIRES_NEW variant self-deadlock. No publisher is transactional today; this refuses loudly
+   * if one ever becomes so.
+   */
+  @Test
+  void anAmbientTransactionRefusesInsteadOfJoiningIt() {
+    PaperService paper = mock(PaperService.class);
+    SignalRepository signals = noStraddle();
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    when(paper.openQuantityForSignal(193L)).thenReturn(0L);
+    when(paper.openOrder(any())).thenThrow(new RuntimeException("connection reset"));
+
+    TransactionSynchronizationManager.setActualTransactionActive(true);
+    try {
+      listener(paper, signals, cleanLedger(), meters)
+          .onSignalTaken(new SignalTaken(193L, 206, new BigDecimal("69.38"), false));
+    } finally {
+      TransactionSynchronizationManager.setActualTransactionActive(false);
+    }
+
+    verify(signals, never()).lockAnchors(any());
+    verify(signals, never()).transitionIf(anyLong(), eq("TAKEN"), anyString());
+    assertThat(
+            counter(
+                meters,
+                PaperSignalListener.COMPENSATION_REFUSED_METRIC,
+                "reason",
+                "ambient_transaction"))
+        .isEqualTo(1d);
   }
 
   private static final long SALSTEEL_SIGNAL = 193L;

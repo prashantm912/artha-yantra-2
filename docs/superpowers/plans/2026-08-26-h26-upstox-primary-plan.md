@@ -8,6 +8,80 @@
 
 ---
 
+## ⚠️ OWNER DECISION 2026-08-26 — END STATE (b), WITH KITE KEPT DORMANT
+
+**The owner chose (b) Upstox-only — cancel the Kite Connect subscription — but KEEP the Kite code in the tree,
+dormant and selectable, so a future pricing change can be answered with a flag flip rather than a rebuild.**
+
+This is a better position than either variant §7a costed, and it **materially shrinks this plan**. Read this section
+before §1; several units below are now out of scope.
+
+**Why dormancy is cheap, `sourced` not assumed.** The ₹500/month is the *subscription*, not the source. And the Kite
+REST path is **WireMock-testable by design** — that is precisely why it is hand-rolled rather than using the SDK, which
+pins `Routes._rootUrl` with no setter and cannot be stubbed. Five WireMock-backed test classes cover the surface a
+switch-back would need: `LiveQuoteGatewayTest`, `LiveHistoricalCandleGatewayTest`, `LiveInstrumentDumpGatewayTest`,
+`KiteOauthIntegrationTest`, `ContractCanaryIntegrationTest`. **Dormant Kite code therefore keeps full wire-level
+coverage with no subscription.**
+
+⚠️ **The honest residual:** what dormancy loses is *live* verification. `ContractCanary` — the thing that exists to
+catch Kite changing a field under us — **goes dark without a subscription**. So if Kite's wire format drifts during
+dormancy, it is discovered at switch-back, not on the day it happened. That is acceptable for a break-glass path, and
+it is exactly why step 4 below is not ceremony.
+
+### What (b)+dormant REMOVES from this plan
+
+- **U-B1's composite (`CompositeQuoteGateway`) and U-C1's `FailoverTickerHandle` are OUT OF SCOPE.** With no
+  subscription there is nothing to fail over *to*, so a runtime composite is dead weight. §1.1 stands as a record of
+  what was designed and why it is not being built.
+- **The switch-back mechanism already exists and needs no new code**: `artha.marketdata.source.*` selects
+  **mutually exclusive** beans (`LiveKiteConfig.java:200-203,242-245,268-272`). What §0 premise 1 records as the
+  *obstacle* to (a) is precisely the *mechanism* for (b) — flip the flag, redeploy, Kite is primary again.
+- **U-B1 retains only** the `UpstoxQuoteGateway` chunking defect (§8) plus making Upstox the default value.
+
+### What remains — and it is now the whole item
+
+**U-A1** (V059), **U-A2** (login-free master + grammar shadow soak — still the crux), **U-B2**
+(`UpstoxHistoricalCandleGateway`, still required since Kite candles go away), the Upstox ticker as primary, and
+**U-D1** (drop the Kite session requirement).
+
+### ⚠️ Ordering — do NOT cancel the subscription when the code is ready
+
+Cancel it when the **rollback is proven**. Under (b) every silent-failure mode in §5 is unmitigated, and the dangerous
+window is the cutover itself:
+
+1. Build the Upstox primary paths and the login-free master.
+2. Run Upstox-primary live **with the Kite subscription STILL ACTIVE**.
+3. Soak, including **at least one weekly expiry** — the case a wrong synthesised symbol breaks (§5.1).
+4. **Prove the rollback**: flip the flags back to Kite, verify a clean session, flip forward again. This is the only
+   step that would surface a Kite contract that drifted while the canary was still running.
+5. **Then** cancel.
+
+Cost: roughly two extra months of ₹500 against cutting over with no way back. **Take the two months.**
+
+⚠️ **DEFINITION — "confirmed working with Upstox" (owner's cancel condition, 2026-08-26). Steps 1–3 do NOT satisfy it.**
+Proving Upstox works and proving you can GO BACK are different tests, and only the second one expires. Step 4 can be run
+**only while the subscription is still active** — after cancellation there is nothing to flip back to and nothing to
+verify against. The cancel gate is therefore ALL FIVE of:
+
+- [ ] Upstox-primary carries a full live session with no Kite dependency on any path (quotes, candles, ticker, master).
+- [ ] The instrument master refreshes **login-free**, and `ay_instrument_master_synth_mismatch_total` = 0 across ≥5
+      sessions **including one weekly expiry**.
+- [ ] `projected_upstox_30m` measured under real Upstox-primary load is **under the §4 stop rule (1440)** — measured,
+      not projected from Kite-era numbers.
+- [ ] **The rollback is PROVEN, not assumed**: flags flipped back to Kite, one clean live session verified, flags
+      flipped forward again. ⚠️ This is also the only opportunity to discover a Kite wire-format drift *before*
+      `ContractCanary` goes dark with the subscription.
+- [ ] A dated note in `docs/signal-analysis/` records all four with evidence.
+
+**Anyone reading "confirmed working" as steps 1–3 and cancelling has skipped the only check that cannot be repeated
+later.**
+
+⚠️ **§4's kill criterion still applies and is now MORE binding, not less.** Under (b) there is no Kite to absorb a bad
+projection — if `projected_upstox_30m` exceeds the stop rule, the answer is not "fall back more often", it is "do not
+do this".
+
+---
+
 ## 0. Premise verification (STEP 0)
 
 All load-bearing premises confirmed except one, which is **refuted**.

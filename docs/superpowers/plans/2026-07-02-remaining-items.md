@@ -12,7 +12,76 @@ the two 2026-07-02 audits (both fix queues fully closed) and the open-PR/issue l
 
 ## 0. Work queue (consolidated 2026-07-10; 2-pass-audited same day)
 
-### 📍 CURRENT STATE — as of 2026-08-25 ~23:20 IST (update this block at every session close)
+### 📍 CURRENT STATE — as of 2026-08-28 ~02:45 IST (update this block at every session close)
+
+⚠️ **NIGHT SESSION 2026-08-27/28. FOURTEEN PRs merged, SIX deploys, Kite auto-login ARMED. The most
+useful output was again the corrections: a rationed Codex slot found THREE Majors, two of which were
+me asserting reasons I had never checked, and red-proofs caught TWO bad tests of my own.**
+
+✅ **SHIPPED:** [#1505](https://github.com/prashantm912/artha-yantra-2/pull/1505) `22fb9df6` H40
+`shadow_reason` + V064 (deployed, column DB-probed) · [#1508](https://github.com/prashantm912/artha-yantra-2/pull/1508)
+`fbe1e2d3` H31 phase guard · [#1510](https://github.com/prashantm912/artha-yantra-2/pull/1510) +
+[#1511](https://github.com/prashantm912/artha-yantra-2/pull/1511) auto-login boot catch-up, both
+halves · [#1512](https://github.com/prashantm912/artha-yantra-2/pull/1512) `a8d431b2` breaker
+diagnostics · [#1515](https://github.com/prashantm912/artha-yantra-2/pull/1515) `ff6ef539` the
+authorize-endpoint fix. Plus H41/H43 deployed, and the e2e compose-secrets fix.
+
+## ⚠️ THREE FINDINGS THAT WERE ON NO QUEUE THIS MORNING
+
+**(1) `strategy.exit_oracle_shadow` has NEVER had a row.** `computed` post-deploy: `count(*)` = 0
+since V056 shipped, and there is no retention policy, no `drop_chunks` and no prune job referencing
+it — so 0 means never written, not aged out. H40's column is therefore either about to become useful
+or is decoration. **Do not read H40's DONE flag as "the measurement surface is live."** The deciding
+check is in the row: next held position evaluated by the exit oracle, confirm a row appears carrying
+a non-null `shadow_reason`.
+
+**(2) The `kite-rest` breaker cost 19 capture minutes and the cause is UNKNOWN — because it was
+structurally undiagnosable.** 564 `circuit open` lines on 2026-08-27, and every one is a CONSUMER
+seeing an already-open breaker, never the opening. The obvious answer does not survive: Kite 403s are
+confined to 08:40:20–08:40:39 (boot) while the clusters begin 09:13. #1512 instruments the NEXT
+occurrence; it does nothing for this one. **This is the highest-value open question on the board.**
+
+**(3) Our own H31 precompute moved [[H26]]'s Upstox baseline 6.1× — silently resetting a
+kill-criterion's tally.** Upstox batch calls 1,272 → 210 while the Kite term held stable
+(≈1,414 → ≈1,340 per 30-min window). That stability is what rules out "a quieter session", and it
+came from the scheduled routine's independent 15:28 capture, not from me. **The 08-26 row is
+PRE-FIX; the tally is at ONE post-fix session, not two. Before adding a session, ask what deployed
+since the last row.**
+
+## ⚠️ WHAT THE REVIEW SLOT CAUGHT, AND IT IS A PATTERN
+
+Three Majors on #1515. **Two were assertions I never checked:** cookie scope written down as the
+*measured* cause when only the failing STEP was measured, and a token-exchange justification for
+keeping `kite.trade` allowlisted that was simply false. The second was not cosmetic — one allowlist
+governs BOTH configurable origins, so it let an override recreate the very failure being fixed.
+
+**Red-proofs separately caught two bad tests of mine:** a test NAMED for the shipped defaults whose
+helper passed every host explicitly (so changing the default reddened nothing), and FIVE
+`assertThatThrownBy` cases that would have kept passing on the allowlist rather than the defect each
+names. **Green builds were not what kept this session honest.**
+
+⚠️ **Enumeration: no positional heuristic works on these status cells.** Tail-anchored misclassifies
+every rule-following row (they lead with ✅ then say "OPEN" in prose); lead-anchored misclassifies
+rows that bury the verdict; whole-cell ✅ closes a row on a sub-item's checkmark. Lead-anchored is
+the right default (29 open of 140) but ~8 leads come back as sentence fragments (escaped-pipe trap:
+`D4`, `E4`, `G13`, `G15`, `H5`, `H8`, `A13`, `B11`). **Run two methods and investigate every
+disagreement.** Also: merge status and deploy status drift INDEPENDENTLY — H41 and H43 both read
+`MERGED, NOT DEPLOYED` the morning after they were deployed.
+
+## OPEN AT SESSION CLOSE
+
+- **Kite auto-login is ARMED and its first real morning run is untested.** Success is silent;
+  failure pages via the 08:15 watchdog. A failed attempt CANNOT cost a working session (the store
+  writes only on success).
+- **The breaker cause** (finding 2) — a research spike, not a build.
+- **H37** needs 3 more clean bhavcopy sessions; **H26** needs 4 more post-fix rate sessions.
+  ⚠️ `h26-daily-rate-capture` OPENS a PR it does not merge — that is why #1502 sat unmerged all
+  evening and why I wrongly reported the capture had not run. Merge it, or the tally stalls.
+- **`daily_loss_limit`**: measured, recommendation is LEAVE IT (1 of 15 days affected, the one
+  firing avoided a ~₹588 loss). Unasked residue: the profit-target twin ratchets on the same base,
+  making it EASIER to hit as the book loses.
+- **F5 §7 row 7 (FE funnel view)** is the one clean-tier buildable item the enumeration surfaced.
+
 
 ⚠️ **NIGHT SESSION 2026-08-25. FIVE PRs merged, TWO strategy-signal deploys probed — and the most
 useful output is again a correction to MY OWN work: an enumeration pass I handed the owner reported

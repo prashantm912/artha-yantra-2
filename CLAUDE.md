@@ -368,7 +368,8 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   already reached a #1354 review comment; this revision replaced three entries that went stale
   within three days of that. Never quote the YAML `${ENV:default}` values; they differ from what is
   deployed.
-  Morning: **08:30** swing-canary + notifier-health · **08:35** swing-catchup (⚠️ the only
+  Morning: **08:05** kite-auto-login · **08:15** auto-login watchdog (both ARMED 2026-08-28,
+  see the auto-login bullet below) · **08:30** swing-canary + notifier-health · **08:35** swing-catchup (⚠️ the only
   AUTOMATIC path that takes swing ENTRIES — see below) · **08:45** ingest-coverage · **08:50**
   paper-reconciliation · **08:52** past-expiry-recon. Afternoon: **16:05** bhavcopy-close-prefetch.
   Evening: **18:20** upstox-canary · **18:45** bhavcopy-eod · **18:46** nse-eod · **18:47**
@@ -395,6 +396,66 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   reading it that way produced a false "Friday's screens were never consumed" alarm on 2026-08-17.
   Read `marketdata.ingest_runs` + `marketdata.canary_runs`/`strategy.canary_runs` for the real times,
   never the defaults.
+- **Kite TOTP auto-login is ARMED (2026-08-28) and it touches the live broker session.** market-data
+  logs in at **08:05** IST weekdays and a watchdog pages at **08:15** if the session is still not
+  CONNECTED. `ARTHA_KITE_AUTO_LOGIN_ENABLED=true` lives in `.env`; the bean is
+  `@ConditionalOnProperty(havingValue = "true")`, so with it false **no bean exists and neither
+  `@Scheduled` is registered** — "it did not run" and "it is disabled" look identical in the logs.
+  Credentials are three Docker secrets (`kite_user_id` / `kite_password` / `kite_totp_seed`) mounted
+  into market-data ONLY, read per call, never cached, never logged.
+  ⚠️ **Those three files mount UNCONDITIONALLY, so a missing one breaks `up` for every path** with
+  `bind source path does not exist` — and worse, **docker then creates a DIRECTORY there**, which
+  poisons the mount and crash-loops the service. `ay up` seeds empty placeholders; raw
+  `docker compose` does not. **`wc -c` on a directory returns 0 and reads exactly like an empty
+  placeholder** — test with `[ -f ]`, never a size.
+  ⚠️ **08:05, NOT the 07:30 everyone reaches for:** the box is off 19:00–08:00 IST, so a 07:30 job
+  would never fire at all, silently, every day (`OperatingWindowTest` refuses it). Both slots sit
+  ahead of the 08:30 `InstrumentSyncScheduler`, which is the first thing needing a live token.
+  ⚠️ **A cron never backfills, so BOTH also run on boot** (`catchUpOnBoot`, #1510/#1511) — the box
+  started 08:40 on 08-27 and 08:41 on 08-26, so without it an armed login would have done nothing
+  on both of the last two trading days. The boot path is bounded to **08:00–15:30 IST**: without a
+  window it fires on EVERY start, and market-data was recreated four times between 20:00 and 21:30
+  on 08-27 alone. It routes through `attemptIfStillNeeded`, inheriting the already-connected
+  stand-down, the durable terminal-day gate and the 2/day cap — never call the wire directly.
+  ⚠️ **The authorize step is on the LOGIN host** (`kite.zerodha.com/connect/login`), same origin as
+  credential and 2FA. It defaulted to `kite.trade` and produced a live failure on the first real
+  run — `UNEXPECTED_RESPONSE (redirect carried no request_token)`, 2026-08-27 21:25 IST. **WHY is
+  still unsettled** (an intermediate 302 carrying no token, or cookie scope); only the failing STEP
+  was measured, and the fix is the same either way. `PINNED_ORIGINS` now holds exactly ONE origin —
+  `kite.trade` was kept at first on a token-exchange justification that was **false** (that uses
+  `KiteHttpProperties.baseUrl` = `api.kite.trade`, a different property in a different class), and
+  the one set governs BOTH configurable origins, so allowlisting it let an override recreate the
+  failure. `crossOriginCookies` stays EMPTY: the fix removes the need to send a credential across
+  origins rather than authorising one.
+  ⚠️ **A failed attempt cannot cost a working session** — the store writes only on success — but
+  the durable terminal-day ledger records a VERDICT only (a transport blip is retryable and writes
+  no row), so a restart may legitimately retry. Judge a morning on `ay_kite_session_valid` and the
+  watchdog alert, never on the absence of log lines.
+- ⚠️ **The `day-context` precompute is correct only because of a PHASE GAP between two schedules in
+  two different services, and it is invisible in either knob.** market-data refreshes at
+  **:13/:28/:43/:58** and holds the snapshot for **300 s**; strategy-signal's `InsightSweeper` reads
+  at **:00/:15/:30/:45**. Read naively that is the H31 trap again — a TTL shorter than its caller's
+  interval, stale for 10 of every 15 minutes. It works ONLY because the refresh lands two minutes
+  ahead of the sweep, so the real margin is **`120 s − refresh duration`**. **Moving either cron
+  alone, or lowering max-age below the gap, silently reinstates the defect** — callers resume paying
+  the upstream reads inline, with no error and no other failing test. `DayContextRefreshPhaseTest`
+  (#1508) guards it and parses BOTH crons out of the files that declare them; a copy of the
+  consumer's schedule would pin market-data's BELIEF about a collaborator and keep passing after the
+  collaborator moved. It also requires 60 s of real lead, because max-age alone is not the
+  invariant: a refresh at `:14:59` scores an age of 1 s and passes while leaving no time to FINISH.
+  ⚠️ **Judge a refresh on DURATION, never on `ay_day_context_snapshot_refresh_failed_total`** — the
+  upstream Upstox call fails SOFT and the snapshot still publishes, so five morning refreshes ran
+  5.2–34.0 s against a ~300 ms baseline while that counter never moved. Three near-identical
+  durations are a TIMEOUT, not variable work.
+- **A circuit breaker now says WHY it opened** (#1512). `resilience4j_circuitbreaker_state` is a
+  GAUGE and the failure counter names neither exception nor moment, and both reset on restart — so
+  a breaker that opens and recovers between scrapes was invisible. On 2026-08-27 `kite-rest` was
+  open in bursts all session (**564** `circuit open; serving cached data` lines) and cost **19
+  minutes** of `futures_oi` capture with **no recoverable cause**: every one of those lines is a
+  CONSUMER seeing an already-open breaker, never the opening. `CircuitBreakerDiagnostics` logs each
+  state transition and, on OPEN, the recent failures behind it (resilience4j does not retain the
+  throwables, hence the small ring). **What opens `kite-rest` is still UNKNOWN** — the boot 403s are
+  confined to 08:40:20–08:40:39 and the clusters start 09:13, so they are not the cause.
 - **3m reads are a read-time 1m→3m rollup** (`CandleRepository.rangeRolledFromOneMinute`, #365): the
   live SignalEngine 3m-primary depends on this rollup. The unused `candles_3m` cagg + its refresh
   policy were DROPPED (V027, #427) — 3m has no materialized view; only the 1m base feeds it.

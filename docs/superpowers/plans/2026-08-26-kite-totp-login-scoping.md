@@ -1,6 +1,37 @@
 # Scoping: automating the daily Kite login with TOTP — 2026-08-26
 
-**Status:** SCOPING ONLY — no code, no credentials, no login attempted. **Owner decision required before any build.**
+**Status: SUPERSEDED 2026-08-28 — BUILT, DEPLOYED AND ARMED. Everything below is the pre-build
+scoping and is kept for its reasoning, not its status.**
+
+> ⚠️ **The line that used to sit here read "SCOPING ONLY — no code, no credentials, no login
+> attempted."** All three are now false. A real login HAS been run against the live broker.
+>
+> **What actually happened, in order:**
+>
+> - **Built and merged** [#1501](https://github.com/prashantm912/artha-yantra-2/pull/1501)
+>   `d2924f06` — 3 Codex rounds + 1 same-vendor round, 3 Criticals and 6 Majors closed.
+> - **Boot catch-up** [#1510](https://github.com/prashantm912/artha-yantra-2/pull/1510) and the
+>   **watchdog half** [#1511](https://github.com/prashantm912/artha-yantra-2/pull/1511): a cron
+>   never backfills, so a late boot got no login AND no alert. The box started 08:40 on 08-27
+>   and 08:41 on 08-26 — this was the common case, not an edge case.
+> - **First real login, 2026-08-27 21:25 IST: FAILED at AUTHORIZE** —
+>   `UNEXPECTED_RESPONSE (redirect carried no request_token)`. Credential POST and 2FA both
+>   SUCCEEDED, so the TOTP generation and credential handling are demonstrated working against
+>   the real broker. Only the final step failed.
+> - **Fixed** [#1515](https://github.com/prashantm912/artha-yantra-2/pull/1515) `ff6ef539`: the
+>   authorize step is on the LOGIN host, not the API host. ⚠️ **WHY it failed is NOT settled** —
+>   an intermediate 302 carrying no token, or cookie scope; only the failing STEP was measured,
+>   and the fix is identical either way. Do not let the fix imply the mechanism.
+> - **ARMED 2026-08-28** (owner decision), deployed and probed. The first morning run is the
+>   real test of the fix.
+>
+> **Where §2a's security objection landed:** the owner placed the three secret files, so the
+> TOTP seed now sits beside the password on this box — the trade §3 named, accepted knowingly.
+> `crossOriginCookies` remains EMPTY and the fix deliberately removed the need to send a
+> credential across origins rather than authorising one.
+>
+> **Live traps now live in CLAUDE.md** (auto-login bullet), which is where an operator will
+> actually look. This file is history.
 **Basis:** read-only exploration on 2026-08-26. Claims labelled `computed` / `sourced` / `recalled` / `assumed`.
 
 ## Verdict

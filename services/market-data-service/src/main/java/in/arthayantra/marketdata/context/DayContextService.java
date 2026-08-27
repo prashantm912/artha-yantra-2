@@ -401,6 +401,11 @@ public class DayContextService {
    * (every 2 min, ~70 s per pass), so a refresh queued behind one could land after the :15 sweep and
    * reproduce H31 with every test still green. See that bean's javadoc.
    */
+  // ⚠️ H31 PHASE COUPLING: the :13/:28/:43/:58 minutes land two minutes AHEAD of the
+  // insight sweep (:00/:15/:30/:45, InsightSweeper in strategy-signal). With max-age at 300 s
+  // the snapshot is stale for 10 of every 15 minutes, so this fix is correct BECAUSE of that
+  // gap, not despite it. Moving these minutes -- or lowering max-age below the gap --
+  // reinstates the inline compute with NO error. DayContextRefreshPhaseTest guards both.
   @Scheduled(
       // ⚠️ `cron` and `zone` must stay on ONE line: CronPassthroughParityTest matches the
       // @Scheduled site PER LINE (activeCronSites) and asserts the zone on that same slice, so

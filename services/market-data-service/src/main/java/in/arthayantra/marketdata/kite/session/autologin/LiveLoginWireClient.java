@@ -171,7 +171,11 @@ public class LiveLoginWireClient implements LoginWireClient {
   }
 
   /**
-   * The authorize GET on the API host.
+   * The authorize GET — on the LOGIN host, same origin as credential and 2FA.
+   *
+   * <p>⚠️ It said "on the API host" until 2026-08-28, matching a default that pointed at
+   * {@code kite.trade} and produced a live AUTHORIZE failure. See
+   * {@link KiteAutoLoginProperties} for what is and is not established about why.
    *
    * <p>⚠️ {@code skip_session=true} is required — without it Zerodha does not hand back the
    * redirect this whole feature reads.

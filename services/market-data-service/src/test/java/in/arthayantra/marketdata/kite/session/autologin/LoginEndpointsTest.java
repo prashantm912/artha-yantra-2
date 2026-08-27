@@ -39,17 +39,28 @@ class LoginEndpointsTest {
   }
 
   private static KiteAutoLoginProperties defaults() {
-    return with("https://kite.zerodha.com", "https://kite.trade", "/api/login");
+    // Both origins are kite.zerodha.com: PINNED_ORIGINS holds exactly one entry since
+    // 2026-08-28, so kite.trade would now be rejected by the allowlist itself.
+    return with("https://kite.zerodha.com", "https://kite.zerodha.com", "/api/login");
   }
 
   @Test
-  @DisplayName("the shipped defaults resolve to the two pinned Zerodha origins")
+  @DisplayName("the SHIPPED defaults resolve to the documented Zerodha endpoints")
   void theDefaultsResolveWhereWeExpect() {
-    LoginEndpoints endpoints = LoginEndpoints.pinned(defaults());
+    // ⚠️ Real defaults (all-null), NOT the with(...) helper. Until 2026-08-28 this test was
+    // named for the shipped defaults while its helper passed every host EXPLICITLY, so it
+    // asserted URL assembly and never the defaults at all. Changing the authorize default
+    // reddened nothing here, which is how the gap surfaced. A test name is a coverage claim.
+    LoginEndpoints endpoints =
+        LoginEndpoints.pinned(
+            new KiteAutoLoginProperties(null, null, null, null, null, null, null, null, null));
 
     assertThat(endpoints.credentials().toString()).isEqualTo("https://kite.zerodha.com/api/login");
     assertThat(endpoints.twofa().toString()).isEqualTo("https://kite.zerodha.com/api/twofa");
-    assertThat(endpoints.authorize().toString()).isEqualTo("https://kite.trade/connect/login");
+    assertThat(endpoints.authorize().toString())
+        .as("the LITERAL documented endpoint — same-origin alone is not the invariant, since"
+            + " moving BOTH hosts to kite.trade would stay same-origin and still fail")
+        .isEqualTo("https://kite.zerodha.com/connect/login");
   }
 
   @Test
@@ -58,7 +69,7 @@ class LoginEndpointsTest {
     // ⚠️ THE case. Under the original concatenation this exact value silently sent the user id and
     // password to attacker.example while every test stayed green.
     assertThatThrownBy(() -> LoginEndpoints.pinned(with(
-            "https://kite.zerodha.com", "https://kite.trade", "@attacker.example/api/login")))
+            "https://kite.zerodha.com", "https://kite.zerodha.com", "@attacker.example/api/login")))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("credential-path");
   }
@@ -83,7 +94,7 @@ class LoginEndpointsTest {
       assertThatThrownBy(
               () ->
                   LoginEndpoints.pinned(
-                      with("https://kite.zerodha.com", "https://kite.trade", path)))
+                      with("https://kite.zerodha.com", "https://kite.zerodha.com", path)))
           .as("hostile credential-path %s must be refused", rendered)
           .isInstanceOf(IllegalStateException.class);
     }
@@ -104,7 +115,7 @@ class LoginEndpointsTest {
             "https://kite.zerodha.com:8443"); // right host, unexpected port
 
     for (String origin : lookalikes) {
-      assertThatThrownBy(() -> LoginEndpoints.pinned(with(origin, "https://kite.trade", "/api/login")))
+      assertThatThrownBy(() -> LoginEndpoints.pinned(with(origin, "https://kite.zerodha.com", "/api/login")))
           .as("origin %s must not be accepted as a pinned Zerodha origin", origin)
           .isInstanceOf(IllegalStateException.class);
     }
@@ -116,7 +127,7 @@ class LoginEndpointsTest {
     assertThatThrownBy(
             () ->
                 LoginEndpoints.pinned(
-                    with("https://kite.zerodha.com@attacker.example", "https://kite.trade", "/api/login")))
+                    with("https://kite.zerodha.com@attacker.example", "https://kite.zerodha.com", "/api/login")))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("login-base-url");
   }
@@ -129,7 +140,7 @@ class LoginEndpointsTest {
             "https://kite.zerodha.com/api",
             "https://kite.zerodha.com?next=https://attacker.example",
             "https://kite.zerodha.com#x")) {
-      assertThatThrownBy(() -> LoginEndpoints.pinned(with(origin, "https://kite.trade", "/api/login")))
+      assertThatThrownBy(() -> LoginEndpoints.pinned(with(origin, "https://kite.zerodha.com", "/api/login")))
           .as("origin %s is not bare", origin)
           .isInstanceOf(IllegalStateException.class);
     }
@@ -174,21 +185,63 @@ class LoginEndpointsTest {
     // rejection list to match.
     for (String path : List.of("/api/login", "/", "/a/b/c", "/api.login", "/api/login/")) {
       LoginEndpoints endpoints =
-          LoginEndpoints.pinned(with("https://kite.zerodha.com", "https://kite.trade", path));
+          LoginEndpoints.pinned(with("https://kite.zerodha.com", "https://kite.zerodha.com", path));
       assertThat(endpoints.credentials().getHost())
           .as("path %s must not move the credential host", path)
           .isEqualTo("kite.zerodha.com");
       assertThat(endpoints.credentials().getUserInfo()).isNull();
       assertThat(endpoints.credentials().getScheme()).isEqualTo("https");
-      assertThat(endpoints.authorize().getHost()).isEqualTo("kite.trade");
+      assertThat(endpoints.authorize().getHost()).isEqualTo("kite.zerodha.com");
     }
   }
 
   @Test
-  @DisplayName("the pinned set is exactly the two Zerodha origins — widening it is a deliberate act")
-  void thePinnedSetIsExactlyTwo() {
+  @DisplayName("the pinned set is exactly ONE Zerodha origin — widening it is a deliberate act")
+  void thePinnedSetIsExactlyOne() {
     assertThat(LoginEndpoints.PINNED_ORIGINS)
         .as("adding an origin here must be a reviewed change, never a quiet one")
-        .containsExactlyInAnyOrder("https://kite.zerodha.com", "https://kite.trade");
+        .containsExactly("https://kite.zerodha.com");
+  }
+
+  /**
+   * ⚠️ The live AUTHORIZE failure of 2026-08-27, pinned so it cannot come back as a default.
+   *
+   * <p>Credential and 2FA both succeeded; AUTHORIZE returned {@code UNEXPECTED_RESPONSE
+   * (redirect carried no request_token)}. <b>Only the failing STEP was measured — the mechanism
+   * is not established</b>, and {@link KiteAutoLoginProperties} records the two candidates.
+   * This test deliberately pins neither of them; it pins the DEFAULT.
+   *
+   * <p>⚠️ The literal endpoint is primary and same-origin is secondary, which is the reverse of
+   * this test's first draft. Cross-vendor review supplied the counter-example: pointing BOTH
+   * defaults at {@code kite.trade} keeps them same-origin and still fails, because
+   * {@code kite.trade/connect/login} answers with an intermediate 302 carrying no token. A
+   * relationship-only assertion would have passed that.
+   */
+  @Test
+  void theAuthorizeStepIsSameOriginAsLoginSoTheSessionCookieTravels() {
+    KiteAutoLoginProperties defaults =
+        new KiteAutoLoginProperties(null, null, null, null, null, null, null, null, null);
+    LoginEndpoints endpoints = LoginEndpoints.pinned(defaults);
+
+    // ⚠️ The LITERAL endpoint is the load-bearing invariant; same-origin is a consequence of it,
+    // not a substitute. Cross-vendor review, 2026-08-28: pointing BOTH defaults at kite.trade
+    // would satisfy a same-origin-only assertion and still reproduce the live failure, because
+    // kite.trade/connect/login answers with an intermediate 302 carrying no token.
+    assertThat(endpoints.authorize().toString())
+        .as("the endpoint Kite Connect documents and its official SDK pins")
+        .isEqualTo("https://kite.zerodha.com/connect/login");
+    assertThat(endpoints.authorize().getHost())
+        .as("secondary: authorize must carry the login session, so it stays same-origin as 2FA")
+        .isEqualTo(endpoints.twofa().getHost());
+    assertThat(endpoints.authorize().getScheme()).isEqualTo(endpoints.twofa().getScheme());
+  }
+
+  /** The empty cross-origin allowlist is the security posture; the fix must not have widened it. */
+  @Test
+  void theFixDidNotWidenTheCrossOriginCookieAllowlist() {
+    KiteAutoLoginProperties defaults =
+        new KiteAutoLoginProperties(null, null, null, null, null, null, null, null, null);
+
+    assertThat(defaults.crossOriginCookies()).isEmpty();
   }
 }

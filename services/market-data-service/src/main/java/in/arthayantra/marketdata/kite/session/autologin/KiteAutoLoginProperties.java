@@ -29,10 +29,36 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *       this file used to assert on its own.
  * </ul>
  *
- * <p>⚠️ <b>The two hosts are genuinely different and that is not a typo.</b> The credential and 2FA
- * steps are served by the login host; the authorize step lives on the API host. A single base URL
- * would be simpler and wrong.
+ * <p>⚠️ <b>CORRECTED 2026-08-28: the authorize default pointed at the wrong host, and that is
+ * the cause of the live AUTHORIZE failure.</b> This javadoc used to say "the two hosts are
+ * genuinely different and that is not a typo", and defaulted {@code authorizeBaseUrl} to
+ * {@code https://kite.trade}. Measured live 2026-08-27: credential and 2FA both succeeded,
+ * then AUTHORIZE returned {@code UNEXPECTED_RESPONSE (redirect carried no request_token)}.
+ * Kite Connect documents the authorize endpoint as {@code https://kite.zerodha.com/connect/login},
+ * and the official SDK pins that literal URL.
  *
+ * <p>⚠️ <b>WHY it failed is NOT settled. The two candidates are different MECHANISMS, but they
+ * share the same fix</b> — which is what lets this ship with the mechanism open.
+ * Only the failing STEP was measured, never the mechanism. Both of these fit the evidence:
+ *
+ * <ul>
+ *   <li><b>Intermediate redirect</b> — {@code kite.trade/connect/login} answers with a 302 to
+ *       {@code kite.zerodha.com} carrying no token, and this client disables redirects and
+ *       treats the FIRST 3xx as the token-bearing one. This is the more direct explanation and
+ *       needs no cookie reasoning at all.
+ *   <li><b>Cookie scope</b> — the 2FA session cookie is set on the login origin and
+ *       {@link LoginCookieJar} correctly refuses to send it cross-origin.
+ * </ul>
+ *
+ * <p><b>The fix is the same either way</b> (default to the documented endpoint), which is why it
+ * ships without the mechanism settled — but do not repeat the earlier mistake of writing one
+ * candidate down as measured fact. Only a successful live run, or captured redirect metadata,
+ * distinguishes them. Cross-vendor review, 2026-08-28.
+ *
+ * <p>{@code LoginEndpoints.PINNED_ORIGINS} now holds ONE origin. An earlier draft of this
+ * javadoc justified keeping {@code kite.trade} by claiming the token exchange needed it;
+ * that was false — the exchange uses {@code KiteHttpProperties.baseUrl} — and the allowlist
+ * would have permitted an override that recreates this very failure.
  * <p>⚠️ <b>{@link #crossOriginCookies} is EMPTY by default and that is a security decision, not a
  * placeholder.</b> It names the cookies — by name — that may travel from the login origin to the
  * authorize origin. Forwarding the whole jar across two registrable domains was Critical 2 of the
@@ -55,10 +81,13 @@ public record KiteAutoLoginProperties(
     String totpSeedFile,
     Set<String> crossOriginCookies) {
 
-  /** Defaults: the two Zerodha hosts, the corroborated paths, Docker secret files. */
+  /** Defaults: the ONE Zerodha login host, the documented paths, Docker secret files. */
   public KiteAutoLoginProperties {
     loginBaseUrl = loginBaseUrl == null ? "https://kite.zerodha.com" : loginBaseUrl;
-    authorizeBaseUrl = authorizeBaseUrl == null ? "https://kite.trade" : authorizeBaseUrl;
+    // The endpoint Kite Connect documents and its SDK pins. A kite.trade default here produced
+    // the live 2026-08-27 AUTHORIZE failure; see the class javadoc for the two candidate
+    // mechanisms, neither of which is established.
+    authorizeBaseUrl = authorizeBaseUrl == null ? "https://kite.zerodha.com" : authorizeBaseUrl;
     credentialPath = credentialPath == null ? "/api/login" : credentialPath;
     twofaPath = twofaPath == null ? "/api/twofa" : twofaPath;
     authorizePath = authorizePath == null ? "/connect/login" : authorizePath;

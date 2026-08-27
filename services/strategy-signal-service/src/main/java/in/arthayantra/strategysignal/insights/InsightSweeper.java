@@ -72,6 +72,11 @@ public class InsightSweeper {
   }
 
   /** 15-min market-hours context sweep — CONTEXT_SHIFT + MARKET_STRUCTURE + REJECTION_NEARMISS (§6.2). */
+  // H31: market-data PRE-COMPUTES the day-context two minutes before each of these fires
+  // (its refresh cron is :13/:28/:43/:58 against this :00/:15/:30/:45) and holds it for only
+  // 300 s. That phase gap is load-bearing, not decorative: MOVING THIS CRON ALONE makes every
+  // sweep miss the snapshot and pay the upstream reads inline again, silently and with no
+  // error. DayContextRefreshPhaseTest (market-data) reads THIS line and fails if you do.
   @Scheduled(cron = "${artha.insights.context-cron:0 */15 9-15 * * MON-FRI}", zone = "Asia/Kolkata")
   public void contextSweep() {
     try {

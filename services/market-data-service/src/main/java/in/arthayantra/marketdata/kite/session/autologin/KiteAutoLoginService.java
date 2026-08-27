@@ -9,9 +9,12 @@ import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.Scheduled;
 
@@ -152,6 +155,60 @@ public class KiteAutoLoginService {
     this.taskScheduler = taskScheduler;
     this.meterRegistry = meterRegistry;
     this.retryDelay = retryDelay;
+  }
+
+  /**
+   * Earliest and latest wall-clock IST at which a BOOT catch-up may reach the wire.
+   *
+   * <p>The window exists because the catch-up fires on every start, and most starts are not
+   * mornings. Tonight (2026-08-27) market-data was recreated four times between 20:00 and 21:30
+   * during a deploy and a test; without a window an armed service would have attempted a broker
+   * login on each one. The lower bound matches the login cron's hour, the upper bound is the
+   * close -- after it a session is not needed again until tomorrow, so touching the wire buys
+   * nothing and spends the daily attempt cap.
+   */
+  private static final LocalTime CATCH_UP_FROM = LocalTime.of(8, 0);
+
+  private static final LocalTime CATCH_UP_UNTIL = LocalTime.of(15, 30);
+
+  /** Lets the context settle before a synchronous HTTP login runs. */
+  private static final Duration CATCH_UP_DELAY = Duration.ofSeconds(20);
+
+  /**
+   * Boot catch-up: a cron fires at a wall-clock minute and NEVER backfills, so a machine that
+   * comes up after the login cron gets no attempt AND no watchdog -- the alert misses too, because
+   * it is armed on an event rather than on elapsed time. The first symptom would be the feed
+   * failing at the 09:15 open.
+   *
+   * <p><b>This is the common case here, not an edge case.</b> The containers started 08:40:03 IST
+   * on 2026-08-27 and 08:41 on 2026-08-26 -- both after 08:05, so on both of the last two trading
+   * days an armed auto-login would have done nothing at all, silently.
+   *
+   * <p>⚠️ It goes through {@link #attemptIfStillNeeded} like every other entry point rather than
+   * calling the wire directly. That is review Major 5 restated: a manual login completed while the
+   * app was starting must suppress this, and only re-evaluating every precondition at the moment
+   * of the attempt gets that right. It also inherits the durable terminal-day gate and the daily
+   * attempt cap, so a restart loop cannot turn into a login loop.
+   *
+   * <p>⚠️ Scheduled onto {@code monitorTaskScheduler}, never run inline on the event thread: an
+   * {@code @EventListener} is synchronous, so a blocking HTTP login here would delay startup and
+   * the health check with it.
+   */
+  @EventListener(ApplicationReadyEvent.class)
+  public void catchUpOnBoot() {
+    LocalTime nowIst = LocalTime.now(clock.withZone(Ist.ZONE));
+    if (nowIst.isBefore(CATCH_UP_FROM) || nowIst.isAfter(CATCH_UP_UNTIL)) {
+      log.info(
+          "kite auto-login boot catch-up: {} IST is outside the {}-{} window — not attempting",
+          nowIst, CATCH_UP_FROM, CATCH_UP_UNTIL);
+      return;
+    }
+    log.info(
+        "kite auto-login boot catch-up: started at {} IST, inside the window — will attempt in {}s"
+            + " if the session is still not connected",
+        nowIst, CATCH_UP_DELAY.toSeconds());
+    taskScheduler.schedule(
+        () -> attemptIfStillNeeded(true), clock.instant().plus(CATCH_UP_DELAY));
   }
 
   /**

@@ -20,6 +20,38 @@ market-data is recreated — so it must be captured before any post-close deploy
 | session | coverage | Upstox 30m peak | 1m peak | 1s peak | Upstox batch / live | live refused | Kite QUOTE | Kite HIST | Kite DUMP |
 |---|---|---|---|---|---|---|---|---|---|
 | **2026-08-26** (Wed) | **100%** — process up 08:41 IST, before the 09:15 open; captured 16:23 pre-deploy | **632 / 1800** (35%) | 254 / 450 (56%) | 17 / 45 (38%) | 1,272 / 32 | **0** | **17,669** | 596 | 1 |
+| **2026-08-27** (Thu) | **100%** — process up 08:40 IST (host downtime boot), before the 09:15 open; captured 19:22, post-close, NO deploy since boot so the high-water marks are the session's | **215 / 1800** (12%) | 194 / 450 (43%) | 9 / 45 (20%) | 210 / 50 | **0** | **16,886** | 661 | 1 |
+
+## ⚠️ Reading of 2026-08-27 — THE BASELINE MOVED, AND THE TWO ROWS ARE NOT COMPARABLE
+
+**`computed` 2026-08-27 19:22. Upstox batch calls fell 1,272 → 210 (6.1×) and the 30-min peak
+632 → 215, while the Kite side barely moved (QUOTE 17,669 → 16,886, HISTORICAL 596 → 661).**
+
+⚠️ **This is not a quieter session. It is a DIFFERENT SYSTEM, and the change is ours.** The H31
+`day-context` precompute deployed on the evening of 2026-08-26 — *after* that day's 16:23 capture.
+`overnightCues()` reaches `UpstoxGlobalInstrumentsClient.worldIndices()`, an **uncached** batched
+Upstox `/v2/market-quote/quotes` call, on **every** `day-context` compute; the precompute collapsed
+those from once-per-caller to **4 per hour on a dedicated schedule**. The Upstox term this log
+exists to measure is therefore a **direct function of a fix we shipped for an unrelated reason**.
+
+**Consequences, and they are load-bearing for the stop rule:**
+
+1. **The 2026-08-26 row is a PRE-FIX observation and must not be averaged with post-fix ones.**
+   A five-session projection mixing the two measures neither system. On the current count this
+   leaves **one** post-fix session, not two.
+2. **The direction is favourable and should not be over-read.** Upstox headroom is now 12% of the
+   30-min window against 35% the day before, `live_refused` still **0**. But the migrating Kite
+   share — the term that actually decides H26 — is **unchanged**, so the naive projection
+   (215 + ~1,414 ≈ 1,629) still fails the 1440 stop rule. **The call-shape factor remains the
+   whole question; nothing measured today changes that.**
+3. **A general lesson worth carrying: an unrelated fix moved the metric a kill-criterion is keyed
+   on, silently.** Nothing in the H31 work mentioned Upstox rate consumption, and nothing in this
+   log would have flagged the discontinuity if the two numbers had happened to land closer
+   together. **Before adding a session to this tally, ask what deployed since the last row.**
+
+⚠️ **Capture provenance:** today's 15:25 `h26-daily-rate-capture` task **did not append a row** —
+this one was taken by hand at 19:22 and survived only because no deploy had recreated the process.
+That is exactly the silent loss the header warns about; it is recorded rather than quietly fixed.
 
 ## Reading of 2026-08-26 — `computed`, and it is ONE session
 

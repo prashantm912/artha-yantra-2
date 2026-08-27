@@ -818,6 +818,16 @@ Run in order; each answers one question. Canned SQL in §6.
     docker logs ay-strategy-signal-service --since <open-UTC> 2>&1 \
       | grep -E "risk cap .* tripped|ENTRY suppressed by scalper risk gate" | head -30
     ```
+    ⚠️ **AMENDED 2026-08-27 — the LOSS twin fired for the first time, and the limit BASE is
+    CURRENT EQUITY, not the allocation.** First live `daily_loss_limit` trip (14:07:16 IST,
+    `risk_audit` id 88): `day P&L -4155.1400 breached limit 4013.9835`. The knob is
+    `{"mode":"pct","value":3}` and `limitInr` resolves the pct against the book's CURRENT equity
+    (₹133,799 that day, after cumulative losses) — **so the effective loss limit ratchets DOWN as
+    the book loses**; a naive 3%-of-₹150k read (₹4,500) says the trip should not have happened.
+    Same telemetry shape as the profit-target: `discipline-paused` stays 0 (risk gate is
+    upstream), entry-only, one suppression log line per fire, open positions run to their own
+    exits. Whether the equity-based ratchet is intended is an owner question (findings
+    2026-08-27 NEW-10), not a defect.
 37. **Log-dependent checks DIE with the container — inventory the DB fallbacks before reading a
     recreated stack, and snapshot logs BEFORE any post-close recreate** (added 2026-08-13) — a
     ROUTINE post-close deploy at 15:44 IST (14 minutes after close, before the EOD forensics run)

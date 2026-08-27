@@ -414,7 +414,7 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   ⚠️ **A cron never backfills, so BOTH also run on boot** (`catchUpOnBoot`, #1510/#1511) — the box
   started 08:40 on 08-27 and 08:41 on 08-26, so without it an armed login would have done nothing
   on both of the last two trading days. The boot path is bounded to **08:00–15:30 IST**: without a
-  window it fires on EVERY start, and market-data was recreated four times between 20:00 and 21:30
+  window it fires on EVERY start, and market-data was recreated repeatedly inside half an hour
   on 08-27 alone. It routes through `attemptIfStillNeeded`, inheriting the already-connected
   stand-down, the durable terminal-day gate and the 2/day cap — never call the wire directly.
   ⚠️ **The authorize step is on the LOGIN host** (`kite.zerodha.com/connect/login`), same origin as

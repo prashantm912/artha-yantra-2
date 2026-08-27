@@ -71,22 +71,21 @@ public class ExitOracleShadowWriter {
    * thread, mid-exit-evaluation) returns in O(1) whether the record is queued or — on a saturated
    * queue — dropped and counted. Never throws.
    *
-   * <p>⚠️ <b>THIS TABLE CANNOT DISCRIMINATE THE FOUR CAUSES OF AN ALL-NULL SENTIMENT SHADOW, AND A
-   * READER MUST NOT INFER by-design-vs-failure FROM ITS NULLS.</b> {@code SentimentLevelShadow} now
-   * carries a {@code reason} discriminator (COMPUTED / NO_OI_CONTEXT / MONTHLY_EXPIRY_SUPPRESSED /
-   * LEVEL_UNAVAILABLE / SIDE_UNRESOLVED) and it rides both JSONB surfaces — {@code
-   * signals.fired_diagnostic} and {@code signal_rejections.diagnostic}. It does <b>not</b> ride
-   * here: {@code exit_oracle_shadow} decomposes the shadow into typed columns and has no column to
-   * put it in, so {@code shadow.reason()} is deliberately DROPPED below. {@code
-   * shadow_verdict_known} records a DIFFERENT fact ({@code counterfactual != null}) and cannot
-   * substitute for it.
+   * <p><b>WHY EACH ROW CARRIES A {@code shadow_reason} (V064, H40).</b> {@code
+   * SentimentLevelShadow} carries a {@code reason} discriminator (COMPUTED / NO_OI_CONTEXT /
+   * MONTHLY_EXPIRY_SUPPRESSED / LEVEL_UNAVAILABLE / SIDE_UNRESOLVED) which rides both JSONB
+   * surfaces — {@code signals.fired_diagnostic} and {@code signal_rejections.diagnostic}. For a
+   * while it did NOT ride here: this table decomposes the shadow into typed columns, had no column
+   * for it, and the value was dropped on the floor. {@code shadow_verdict_known} records a
+   * DIFFERENT fact ({@code counterfactual != null}) and never substituted for it, so on an NSE
+   * monthly index expiry every exit-oracle row for the whole session was the same nulls with no
+   * discriminator — the exact wall that cost two investigations on 2026-08-25. V064 adds the
+   * column and the value is written on EVERY row, including rows whose verdict is not known.
    *
-   * <p>Consequence, stated so the next analyst does not re-run the 2026-08-25 investigation: on an
-   * NSE monthly index expiry every exit-oracle row for the whole session carries the same nulls with
-   * no discriminator, exactly the wall the {@code reason} field was built to remove on the other two
-   * surfaces. Adding {@code shadow_reason} needs a new suffix-versioned migration (V056 is applied
-   * and checksum-locked, so it can never be edited in place) — queued as its own ledger row rather
-   * than smuggled into a diagnostic PR. Cross-vendor-equivalent review finding, 2026-08-25.
+   * <p>⚠️ <b>A NULL {@code shadow_reason} IS A PRE-V064 ROW, NOT A FIFTH CAUSE.</b> Same contract as
+   * the absent-key rule on the JSONB surfaces: exclude such rows from a cause breakdown and say how
+   * many were excluded. It cannot be forged by a new row — {@link SentimentLevelShadow}'s canonical
+   * constructor rejects a null reason, so every row this method writes carries one.
    */
   public void record(
       long entrySignalId,
@@ -132,7 +131,12 @@ public class ExitOracleShadowWriter {
                 // than it knows, and self-contradictory beside shadow_would_fire=true. Take the
                 // gate's tag-aware value, which is already null when the tag is unarmed.
                 shadow.sentimentDotWouldSupport(),
-                known ? counterfactual.slopeGatePass() : null);
+                known ? counterfactual.slopeGatePass() : null,
+                // V064 (H40): WHY the verdict above is or is not computable. Unconditional and
+                // NOT gated on `known` -- the reason is exactly what a NOT-known row needs, and
+                // the record's constructor guarantees it is non-null, so a NULL in the column can
+                // only mean "written before V064 deployed".
+                shadow.reason());
             return true;
           } catch (RuntimeException e) {
             log.warn(

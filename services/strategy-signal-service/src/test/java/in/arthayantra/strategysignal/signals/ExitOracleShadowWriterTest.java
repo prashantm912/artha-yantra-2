@@ -35,6 +35,11 @@ import org.junit.jupiter.api.Test;
  * judged against {@code heldSide} through the same {@code confluenceFlippedAgainst} predicate the
  * live exit uses.
  *
+ * <p>V064 (H40) added {@code shadow_reason}. These assertions pin the ARGUMENT only — that the
+ * column exists and the SQL round-trips into it is
+ * {@link ExitOracleShadowRepositoryIntegrationTest}, because a swallowed insert makes a schema
+ * mismatch invisible here.
+ *
  * <p>Ported from {@link RiskSuppressionWriterTest} — same {@link BoundedAsyncWriter} seam.
  */
 class ExitOracleShadowWriterTest {
@@ -76,7 +81,7 @@ class ExitOracleShadowWriterTest {
         .when(repo)
         .insert(
             anyLong(), any(), any(), any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(),
-            any(), any(), any(), any(), any(), any(), any(), any(), any());
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     ExitOracleShadowWriter writer = new ExitOracleShadowWriter(repo, meters);
     try {
       int n = ExitOracleShadowWriter.QUEUE_CAPACITY * 8;
@@ -110,14 +115,14 @@ class ExitOracleShadowWriterTest {
         .when(repo)
         .insert(
             anyLong(), any(), any(), any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(),
-            any(), any(), any(), any(), any(), any(), any(), any(), any());
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     ExitOracleShadowWriter writer = new ExitOracleShadowWriter(repo, meters);
     try {
       assertThatCode(() -> record(writer)).doesNotThrowAnyException();
       verify(repo, timeout(5_000))
           .insert(
               anyLong(), any(), any(), any(), any(), any(), anyBoolean(), any(), any(),
-              anyBoolean(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+              anyBoolean(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     } finally {
       writer.drainAndShutdown(500L);
     }
@@ -143,7 +148,7 @@ class ExitOracleShadowWriterTest {
               new BigDecimal("0.00"), new BigDecimal("30"),
               true, true, "CE", true,
               new BigDecimal("0.94"), new BigDecimal("0.6"), true, null,
-              true, true);
+              true, true, SentimentLevelShadow.Reason.COMPUTED);
     } finally {
       writer.drainAndShutdown(500L);
     }
@@ -169,7 +174,7 @@ class ExitOracleShadowWriterTest {
               new BigDecimal("0.00"), new BigDecimal("30"),
               true, true, "CE", false,
               new BigDecimal("0.94"), new BigDecimal("0.6"), true, null,
-              true, true);
+              true, true, SentimentLevelShadow.Reason.COMPUTED);
     } finally {
       writer.drainAndShutdown(500L);
     }
@@ -196,7 +201,7 @@ class ExitOracleShadowWriterTest {
               new BigDecimal("0.00"), new BigDecimal("30"),
               true, false, null, false,
               new BigDecimal("0.94"), new BigDecimal("0.6"), true, "strike-pick",
-              true, true);
+              true, true, SentimentLevelShadow.Reason.COMPUTED);
     } finally {
       writer.drainAndShutdown(500L);
     }
@@ -224,7 +229,11 @@ class ExitOracleShadowWriterTest {
       verify(repo, timeout(5_000))
           .insert(
               7L, "slug", BAR, "CE", "CE", null, false, new BigDecimal("1.5"), null,
-              false, null, null, null, null, null, null, null, null, null);
+              false, null, null, null, null, null, null, null, null, null,
+              // ⚠️ THE POINT OF V064: the reason is written even though the VERDICT is not known.
+              // Every other shadow_* column above is null here, which is exactly the row an
+              // analyst cannot interpret without this one.
+              SentimentLevelShadow.Reason.LEVEL_UNAVAILABLE);
     } finally {
       writer.drainAndShutdown(500L);
     }
@@ -258,7 +267,8 @@ class ExitOracleShadowWriterTest {
               true, true, "CE", true,
               new BigDecimal("0.94"), new BigDecimal("0.6"), true, null,
               true,
-              null); // ← the contract: unarmed tag ⇒ NULL, never the raw false
+              null, // ← the contract: unarmed tag ⇒ NULL, never the raw false
+              SentimentLevelShadow.Reason.COMPUTED);
     } finally {
       writer.drainAndShutdown(500L);
     }
@@ -283,7 +293,8 @@ class ExitOracleShadowWriterTest {
               true, true, "CE", true,
               new BigDecimal("0.94"), new BigDecimal("0.6"), true, null,
               true,
-              true); // ← the GATE's tag-aware verdict, not the shadow's raw false
+              true, // ← the GATE's tag-aware verdict, not the shadow's raw false
+              SentimentLevelShadow.Reason.COMPUTED);
     } finally {
       writer.drainAndShutdown(500L);
     }

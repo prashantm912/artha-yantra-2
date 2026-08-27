@@ -133,6 +133,16 @@ public class KiteAutoLoginService {
   private final Duration retryDelay;
   private final AtomicReference<DayLedger> ledger = new AtomicReference<>();
 
+  /**
+   * The last trading day on which the watchdog alerted, so repeated starts do not repeat the page.
+   *
+   * <p>Needed only because the watchdog now also runs on BOOT: the cron fires once a day, but a
+   * morning with several restarts would otherwise send one alert per restart. In-memory on purpose
+   * -- a restart losing it costs at most one duplicate alert, which is the safe direction for a
+   * detector.
+   */
+  private final AtomicReference<LocalDate> lastWatchdogAlertDay = new AtomicReference<>();
+
   /** Wires the login leg, the existing exchange seam, alerting, the calendar and the clock. */
   public KiteAutoLoginService(
       LoginWireClient wireClient,
@@ -209,6 +219,17 @@ public class KiteAutoLoginService {
         nowIst, CATCH_UP_DELAY.toSeconds());
     taskScheduler.schedule(
         () -> attemptIfStillNeeded(true), clock.instant().plus(CATCH_UP_DELAY));
+    // ⚠️ The watchdog needs the SAME catch-up, and leaving it out would have been the more
+    // dangerous half. Suppression paths deliberately do not alert -- LEDGER_UNAVAILABLE says so in
+    // its own javadoc -- on the stated grounds that "the 08:15 watchdog keys on the OUTCOME". That
+    // reasoning holds only while the watchdog actually RUNS. On a late boot it does not, so a
+    // suppressed catch-up would leave the owner with no login AND no alert.
+    //
+    // Scheduled after the attempt AND its possible delayed re-attempt have had time to settle, so
+    // it reports the outcome rather than racing a login that is still in flight.
+    taskScheduler.schedule(
+        this::watchdog,
+        clock.instant().plus(CATCH_UP_DELAY).plus(retryDelay).plus(Duration.ofMinutes(1)));
   }
 
   /**
@@ -242,6 +263,13 @@ public class KiteAutoLoginService {
     if (store.state() == KiteSessionStore.State.CONNECTED) {
       return;
     }
+    if (!lastWatchdogAlertDay.compareAndSet(null, today())
+        && today().equals(lastWatchdogAlertDay.get())) {
+      // Already paged for this day. A second identical page tells the owner nothing new and
+      // trains them to ignore the channel.
+      return;
+    }
+    lastWatchdogAlertDay.set(today());
     meterRegistry.counter(WATCHDOG_ALERTS).increment();
     alert(
         "Kite session is NOT connected (state=" + store.state() + "). The 08:30 instrument sync and"

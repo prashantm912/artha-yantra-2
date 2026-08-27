@@ -192,6 +192,16 @@ class KiteAutoLoginServiceTest {
         Duration.ofMinutes(2));
   }
 
+  /**
+   * Count of a counter that may never have been registered. {@link #counter} uses the REQUIRED
+   * search, which throws {@code MeterNotFoundException} when a counter never fired -- turning a
+   * clean "expected 1 but was 0" into an exception whose stack trace buries the actual claim.
+   */
+  private double countOrZero(String name) {
+    var found = meters.find(name).counter();
+    return found == null ? 0d : found.count();
+  }
+
   private double counter(String name, String... tags) {
     RequiredSearch search = meters.get(name);
     if (tags.length > 0) {
@@ -648,7 +658,7 @@ class KiteAutoLoginServiceTest {
     service(new CountingWireClient(null)).watchdog();
 
     verify(ntfy, never()).send(anyString(), anyString(), anyString());
-    assertThat(meters.find("ay_kite_auto_login_watchdog_alerts_total").counter()).isNull();
+    assertThat(countOrZero("ay_kite_auto_login_watchdog_alerts_total")).isZero();
   }
 
   /**
@@ -669,7 +679,7 @@ class KiteAutoLoginServiceTest {
     // Deferred onto the scheduler, never run inline: an @EventListener is synchronous, and a
     // blocking HTTP login on the boot thread would delay startup and the health check with it.
     assertThat(wireClient.calls).isZero();
-    runTheScheduledReattempt();
+    runTheBootLogin();
     assertThat(wireClient.calls).isOne();
   }
 
@@ -685,7 +695,7 @@ class KiteAutoLoginServiceTest {
     CountingWireClient wireClient = new CountingWireClient(null);
 
     service(wireClient).catchUpOnBoot();
-    runTheScheduledReattempt();
+    runTheBootLogin();
 
     assertThat(wireClient.calls).isZero();
   }
@@ -722,7 +732,74 @@ class KiteAutoLoginServiceTest {
     assertThat(wireClient.calls).isZero();
   }
 
+  /**
+   * A boot schedules TWO tasks: the login attempt, then the watchdog after it has settled. These
+   * name which one they run, because a positional {@code times(1)} silently breaks the moment a
+   * second task is added -- which is exactly how the watchdog half was caught.
+   */
+  private void runTheBootLogin() {
+    captureBootTasks().get(0).run();
+  }
+
+  private void runTheBootWatchdog() {
+    captureBootTasks().get(1).run();
+  }
+
+  private java.util.List<Runnable> captureBootTasks() {
+    ArgumentCaptor<Runnable> captor = ArgumentCaptor.forClass(Runnable.class);
+    verify(taskScheduler, times(2)).schedule(captor.capture(), any(Instant.class));
+    return captor.getAllValues();
+  }
+
   private static Instant atIst(LocalDate day, int hour, int minute) {
     return LocalDateTime.of(day, LocalTime.of(hour, minute)).atZone(Ist.ZONE).toInstant();
+  }
+
+  /**
+   * ⚠️ The half that was nearly left open. Suppression paths deliberately do NOT alert -- the
+   * LEDGER_UNAVAILABLE javadoc says so outright, on the grounds that "the 08:15 watchdog keys on
+   * the OUTCOME". That reasoning holds only while the watchdog RUNS, and on a late boot it never
+   * does. Without this the owner gets no login AND no alert.
+   */
+  @Test
+  void aLateBootAlsoRunsTheWatchdogTheCronMissed() {
+    clock.now = atIst(firstTradingDay(), 8, 35);
+    when(store.state()).thenReturn(KiteSessionStore.State.DISCONNECTED);
+
+    service(new CountingWireClient(null)).catchUpOnBoot();
+    runTheBootWatchdog();
+
+    assertThat(countOrZero("ay_kite_auto_login_watchdog_alerts_total")).isOne();
+  }
+
+  /** A connected session is the normal case and must stay silent. */
+  @Test
+  void theBootWatchdogStaysSilentWhenTheSessionIsConnected() {
+    clock.now = atIst(firstTradingDay(), 8, 35);
+    when(store.state()).thenReturn(KiteSessionStore.State.CONNECTED);
+
+    service(new CountingWireClient(null)).catchUpOnBoot();
+    runTheBootWatchdog();
+
+    // find(), not get(): a counter that never fired was never REGISTERED, so the required-search
+    // form throws MeterNotFoundException instead of reporting zero.
+    assertThat(countOrZero("ay_kite_auto_login_watchdog_alerts_total")).isZero();
+  }
+
+  /**
+   * Several restarts on one bad morning must not page several times -- that trains the owner to
+   * ignore the channel, which is worse than not alerting.
+   */
+  @Test
+  void repeatedBootsOnTheSameDayPageOnlyOnce() {
+    clock.now = atIst(firstTradingDay(), 8, 35);
+    when(store.state()).thenReturn(KiteSessionStore.State.DISCONNECTED);
+    KiteAutoLoginService svc = service(new CountingWireClient(null));
+
+    svc.watchdog();
+    svc.watchdog();
+    svc.watchdog();
+
+    assertThat(countOrZero("ay_kite_auto_login_watchdog_alerts_total")).isOne();
   }
 }

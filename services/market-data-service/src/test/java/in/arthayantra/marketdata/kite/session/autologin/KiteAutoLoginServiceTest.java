@@ -650,4 +650,79 @@ class KiteAutoLoginServiceTest {
     verify(ntfy, never()).send(anyString(), anyString(), anyString());
     assertThat(meters.find("ay_kite_auto_login_watchdog_alerts_total").counter()).isNull();
   }
+
+  /**
+   * The reason this catch-up exists: a cron fires at a wall-clock minute and never backfills, so a
+   * machine up at 08:35 gets no login AND no watchdog. Measured: the containers started 08:40:03
+   * IST on 2026-08-27 and 08:41 on 2026-08-26, so on both of the last two trading days an armed
+   * auto-login would have done nothing at all, silently.
+   */
+  @Test
+  void aLateBootInsideTheWindowAttemptsTheLoginTheCronMissed() {
+    LocalDate day = firstTradingDay();
+    clock.now = atIst(day, 8, 35);
+    when(store.state()).thenReturn(KiteSessionStore.State.DISCONNECTED);
+    CountingWireClient wireClient = new CountingWireClient(null);
+
+    service(wireClient).catchUpOnBoot();
+
+    // Deferred onto the scheduler, never run inline: an @EventListener is synchronous, and a
+    // blocking HTTP login on the boot thread would delay startup and the health check with it.
+    assertThat(wireClient.calls).isZero();
+    runTheScheduledReattempt();
+    assertThat(wireClient.calls).isOne();
+  }
+
+  /**
+   * The owner's actual requirement, and the half a naive catch-up gets wrong: it must check
+   * whether a login already happened rather than logging in again on every start.
+   */
+  @Test
+  void aLateBootStandsDownWhenTheSessionIsAlreadyConnected() {
+    LocalDate day = firstTradingDay();
+    clock.now = atIst(day, 8, 35);
+    when(store.state()).thenReturn(KiteSessionStore.State.CONNECTED);
+    CountingWireClient wireClient = new CountingWireClient(null);
+
+    service(wireClient).catchUpOnBoot();
+    runTheScheduledReattempt();
+
+    assertThat(wireClient.calls).isZero();
+  }
+
+  /**
+   * ⚠️ Without a window the catch-up fires on EVERY start, and most starts are not mornings.
+   * market-data was recreated four times between 20:00 and 21:30 on 2026-08-27 during a deploy and
+   * a test; an armed service would have attempted a broker login on each one.
+   */
+  @Test
+  void anEveningBootDoesNotReachTheWireAtAll() {
+    LocalDate day = firstTradingDay();
+    clock.now = atIst(day, 21, 25);
+    when(store.state()).thenReturn(KiteSessionStore.State.DISCONNECTED);
+    CountingWireClient wireClient = new CountingWireClient(null);
+
+    service(wireClient).catchUpOnBoot();
+
+    assertNothingWasScheduled();
+    assertThat(wireClient.calls).isZero();
+  }
+
+  /** The upper bound is the close: after it a session is not needed again until tomorrow. */
+  @Test
+  void aBootJustAfterTheCloseIsOutsideTheWindow() {
+    LocalDate day = firstTradingDay();
+    clock.now = atIst(day, 15, 31);
+    when(store.state()).thenReturn(KiteSessionStore.State.DISCONNECTED);
+    CountingWireClient wireClient = new CountingWireClient(null);
+
+    service(wireClient).catchUpOnBoot();
+
+    assertNothingWasScheduled();
+    assertThat(wireClient.calls).isZero();
+  }
+
+  private static Instant atIst(LocalDate day, int hour, int minute) {
+    return LocalDateTime.of(day, LocalTime.of(hour, minute)).atZone(Ist.ZONE).toInstant();
+  }
 }

@@ -20,6 +20,7 @@ market-data is recreated — so it must be captured before any post-close deploy
 | session | coverage | Upstox 30m peak | 1m peak | 1s peak | Upstox batch / live | live refused | Kite QUOTE | Kite HIST | Kite DUMP |
 |---|---|---|---|---|---|---|---|---|---|
 | **2026-08-26** (Wed) | **100%** — process up 08:41 IST, before the 09:15 open; captured 16:23 pre-deploy | **632 / 1800** (35%) | 254 / 450 (56%) | 17 / 45 (38%) | 1,272 / 32 | **0** | **17,669** | 596 | 1 |
+| **2026-08-27** (Thu) | **100%** — process up 08:40 IST, before the 09:15 open; captured **15:28 IST, pre-close** | **215 / 1800** (12%) | 194 / 450 (43%) | 7 / 45 (16%) | 210 / 35 | **0** | **16,657** | 403 | 1 |
 
 ## Reading of 2026-08-26 — `computed`, and it is ONE session
 
@@ -46,6 +47,52 @@ What this row genuinely establishes:
   question than the raw number suggests, and it is the next thing to measure.
 
 ⚠️ **One session is not a rate.** The stop rule needs **five**. Do not act on this row alone.
+
+## Reading of 2026-08-27 — `computed` unless labelled
+
+**Same qualitative result as 08-26: the raw-transfer model still fails the stop rule. Two sessions, not five.**
+
+- Elapsed session at capture = 09:15 → 15:28 = **373 min = 12.43** half-hour windows (`computed`).
+- Kite `QUOTE` 16,657 / 12.43 ≈ **1,340 requests per 30-min window** (mean; the peak window is higher).
+  08-26 was ≈1,414 on the same arithmetic — **the migrating Kite term is stable across the two sessions**.
+- Naive projection: 215 + 1,340 = **≈1,555** against the **1,440 (80%) stop rule** — over it, as on 08-26.
+  ⚠️ Still NOT a verdict: this is the raw-transfer model the plan already names as wrong. The call-shape factor is
+  mandatory, not a refinement.
+- **Upstox headroom remains comfortable** — 12% of the 30-min window, `live_refused` = **0**.
+
+### ⚠️ The two rows are NOT directly comparable, and the Upstox side moved a lot
+
+08-26 was captured at **16:23 (post-close)**; this row at **15:28 (pre-close, per the task spec)**. The Upstox terms
+differ far more than the Kite ones:
+
+| term | 08-26 @16:23 | 08-27 @15:28 |
+|---|---|---|
+| Upstox 30m peak | 632 | **215** |
+| Upstox `batch` calls | 1,272 | **210** |
+| Kite `QUOTE` per 30m | ≈1,414 | ≈1,340 |
+
+**The cause of the ~1,060-call Upstox `batch` gap is NOT established.** `assumed` explanations were checked and one was
+ruled out rather than adopted:
+
+- ❌ **NOT the 16:05 `bhavcopy-close-prefetch`** (the obvious candidate, since it sits inside the 15:28→16:23 gap).
+  `sourced`: `BhavcopyCloseCanary.prefetchPopulation()` seeds through `GapBackfiller` — the **Kite** backfiller
+  (`marketdata/kite/GapBackfiller.java`) — so it debits no Upstox budget at all.
+- ❓ Unattributed. Candidates not separated: a one-off job on 08-26, or genuine day-to-day variance in one of the
+  Upstox clients. **Do not carry a cause into the next row without a distinguishing check.**
+
+**Procedural consequence:** capture at ≈15:25 IST every session, as the task specifies. 08-26's 16:23 reading includes
+post-close activity and should be treated as an over-count of the Upstox terms when comparing rows, not as a session peak
+taken on the same basis as the rest.
+
+### Environment notes for this row
+
+- All **11** containers started **2026-08-27 08:40:03 IST** within ~33 ms of each other, `RestartCount=0` (`computed`
+  from `docker inspect`) — the host-boot signature, same as 08-26, **not** a market-data recreate. No mid-session
+  restart, so the peaks are genuine session peaks. Counters include 08:40–09:15 pre-open.
+- **Two Upstox `Connect timed out` WARNs** on `GET https://api.upstox.com/v2/market-quote/quotes`
+  (`UpstoxGlobalInstrumentsClient`, 09:43:15 and 09:58:15 IST). Relevant to H26 only as a reminder that Upstox
+  reachability is not unconditional; two isolated timeouts in a session is not a signal on its own. `live_refused` = 0,
+  so nothing was budget-throttled.
 
 ## Next
 

@@ -53,6 +53,36 @@ exists to measure is therefore a **direct function of a fix we shipped for an un
 this one was taken by hand at 19:22 and survived only because no deploy had recreated the process.
 That is exactly the silent loss the header warns about; it is recorded rather than quietly fixed.
 
+### Independent corroboration from the 15:28 scheduled capture (PR #1502, closed unmerged)
+
+⚠️ **The 15:25 task DID run.** It captured at 15:28 IST and opened [#1502](https://github.com/prashantm912/artha-yantra-2/pull/1502);
+the PR was never merged, so the row never reached `main`. An earlier note in this file said the capture
+"did not append a row" — that was **wrong, and wrong in an instructive way**: the file on `main` was checked
+and the open PRs were not. Absence from a file is not absence of work.
+
+**Its numbers are kept here rather than as a second row, because this file allows ONE row per session.**
+Captured 15:28 (pre-close) against the merged row's 19:22 (post-close), so the two are not directly
+comparable — and the difference is itself informative:
+
+| term | 15:28 capture | 19:22 capture (the row above) |
+|---|---|---|
+| Upstox 30m peak | 215 | 215 |
+| Upstox `batch` | 210 | 210 |
+| Kite `QUOTE` | 16,657 | 16,886 |
+| Kite `HIST` | 403 | 661 |
+
+**The Upstox terms are IDENTICAL at both times, and the Kite terms are not.** So the Upstox load had already
+stopped growing by 15:28 while Kite kept working through the evening chain — consistent with the H31
+precompute having capped the Upstox term at 4 calls/hour, and with the evening jobs being Kite-only.
+
+⚠️ **The fact worth keeping, which the merged row does not carry:** normalised per 30-min window, the
+migrating Kite term is **≈1,340 (08-27) vs ≈1,414 (08-26) — STABLE across the two sessions**, while the
+Upstox term moved 6.1×. That is what makes the H31 precompute the credible cause of the Upstox shift rather
+than a quieter market: a quiet session would have moved BOTH terms.
+
+⚠️ #1502 also recorded the Upstox gap as **unexplained**, which was correct at 15:28. It is explained now
+(the precompute deployed the previous evening) — recorded so the "unexplained" framing is not re-inherited.
+
 ## Reading of 2026-08-26 — `computed`, and it is ONE session
 
 **The raw-transfer model FAILS the stop rule, exactly as the plan predicted.**

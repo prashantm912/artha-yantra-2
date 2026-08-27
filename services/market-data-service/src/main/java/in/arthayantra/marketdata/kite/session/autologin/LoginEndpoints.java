@@ -42,12 +42,22 @@ import java.util.Set;
 public final class LoginEndpoints {
 
   /**
-   * The only origins production may ever talk to. Compared as parsed scheme + host + port.
+   * The only origin auto-login may ever talk to. Compared as parsed scheme + host + port.
    *
-   * <p>Two, not one, and that is not an oversight: the credential and 2FA steps are served by the
-   * login host while the authorize step lives on the API host.
+   * <p>⚠️ <b>ONE, not two, since 2026-08-28.</b> It held {@code https://kite.trade} as well, on
+   * the stated grounds that authorize lived there — which the live failure disproved — and then
+   * briefly on the grounds that it was needed for the token exchange. <b>That second reason was
+   * also false, and cross-vendor review caught it:</b> the token exchange uses
+   * {@code KiteHttpProperties.baseUrl} ({@code https://api.kite.trade}) via
+   * {@code LiveSessionWireClient}, a different property in a different class, and
+   * {@code api.kite.trade} is not the same origin as {@code kite.trade} in any case.
+   *
+   * <p>Leaving it here was not merely untidy: {@link #resolve} applies this one set to BOTH
+   * configurable origins, so an operator repointing authorize at {@code kite.trade} would pass
+   * validation and reproduce the exact live failure this change exists to fix. An allowlist that
+   * permits the known-bad value is not an allowlist.
    */
-  static final Set<String> PINNED_ORIGINS = Set.of("https://kite.zerodha.com", "https://kite.trade");
+  static final Set<String> PINNED_ORIGINS = Set.of("https://kite.zerodha.com");
 
   private final URI credentials;
   private final URI twofa;

@@ -109,7 +109,14 @@ and the timestamps refuse it. `ay_kite_session_valid` reads **1.0** now. **Unsiz
 
 - **Do not treat the 15-minute cron and the 300 s max-age as independent knobs.** If either moves,
   re-derive `120 s − refresh duration`. A guard asserting the cron lands inside max-age of the sweep
-  is the right shape, and is not built.
+  is the right shape, and **is now BUILT** — `DayContextRefreshPhaseTest`
+  ([#1508](https://github.com/prashantm912/artha-yantra-2/pull/1508) @ `fbe1e2d3`). It parses BOTH
+  crons out of the files that declare them rather than copying the consumer's schedule, because a
+  copy would pin market-data's BELIEF about a collaborator and keep passing after the collaborator
+  moved. It asserts two things, since max-age alone is not the invariant: every sweep reads a
+  snapshot inside max-age, AND the refresh fires at least 60 s ahead of it — a refresh moved to
+  `:14:59` would score an age of 1 s and pass while leaving no time to COMPLETE. Four red-proofs,
+  including one that moves the CONSUMER cron in strategy-signal and reddens this market-data test.
 - **Judge a refresh on DURATION, not on the failed counter** — the counter cannot see a soft-failing
   upstream.
 - The Upstox `worldIndices()` call is uncached on a path that now runs 4×/hour rather than

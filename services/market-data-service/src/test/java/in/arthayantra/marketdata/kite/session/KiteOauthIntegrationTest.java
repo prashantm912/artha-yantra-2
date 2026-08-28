@@ -156,7 +156,7 @@ class KiteOauthIntegrationTest extends MarketDataIntegrationTestBase {
     store.store("fake-access-token-456", "AB1234");
 
     // a fresh store over the same row = the container restart path
-    KiteSessionStore rebooted = new KiteSessionStore(repository, cipher);
+    KiteSessionStore rebooted = new KiteSessionStore(repository, cipher, java.time.Clock.systemUTC());
     rebooted.loadFromDatabase();
 
     assertThat(rebooted.currentToken()).contains("fake-access-token-456");
@@ -170,7 +170,8 @@ class KiteOauthIntegrationTest extends MarketDataIntegrationTestBase {
 
     byte[] otherKey = new byte[32];
     KiteSessionStore wrongKeyStore =
-        new KiteSessionStore(repository, new AesGcmTokenCipher(otherKey));
+        new KiteSessionStore(
+            repository, new AesGcmTokenCipher(otherKey), java.time.Clock.systemUTC());
     wrongKeyStore.loadFromDatabase();
 
     assertThat(wrongKeyStore.currentToken()).isEmpty();

@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.kite.session;
 
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.kite.AccessTokenProvider;
+import java.time.Clock;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.util.Optional;
@@ -35,10 +36,19 @@ public class KiteSessionStore implements AccessTokenProvider {
   private volatile OffsetDateTime encryptedAt;
   private volatile OffsetDateTime lastValidatedAt;
 
-  /** Wires persistence + crypto. */
-  public KiteSessionStore(KiteSessionRepository repository, AesGcmTokenCipher cipher) {
+  private final Clock clock;
+
+  /**
+   * Wires persistence + crypto.
+   *
+   * <p>The {@link Clock} exists so the restore can ask whether a persisted token is already
+   * dead. Injected rather than {@code now()} so the boundary is testable at all.
+   */
+  public KiteSessionStore(
+      KiteSessionRepository repository, AesGcmTokenCipher cipher, Clock clock) {
     this.repository = repository;
     this.cipher = cipher;
+    this.clock = clock;
   }
 
   /** Decrypt-and-resume on startup; a wrong master key degrades to DISCONNECTED, never crashes. */
@@ -52,7 +62,40 @@ public class KiteSessionStore implements AccessTokenProvider {
                 kiteUserId = row.kiteUserId();
                 encryptedAt = row.encryptedAt();
                 lastValidatedAt = row.lastValidatedAt();
+                // ⚠️ Kite tokens die ~06:00 IST, and until 2026-08-28 this restored YESTERDAY'S
+                // token as tentatively CONNECTED regardless. The cost was measured that
+                // morning: every scheduled Kite consumer then made authenticated calls with a
+                // dead token, took ten straight 403 TokenException, and opened the SHARED
+                // kite-rest breaker at 08:39:58 -- browning out unrelated consumers until the
+                // owner logged in at 08:46.
+                //
+                // The store already KNEW: tokenValidUntil() computes the death time and was
+                // used for the status surface but never for this decision. Consulting it makes
+                // the adapters short-circuit LOCALLY (they gate on token presence), so a dead
+                // token costs zero wire calls.
+                //
+                // ⚠️ "and zero breaker pressure and zero rate budget" was NOT true when this
+                // was written, and cross-vendor review caught it: LiveInstrumentDumpGateway
+                // resolved the token INSIDE the executor supplier, so a tokenless boot still
+                // burned the 1-per-30-minute DUMP permit and recorded a kite-rest failure.
+                // Fixed in the same change. If a future gateway resolves its token inside
+                // executor.execute(...), this paragraph quietly becomes false again.
+                OffsetDateTime validUntil = tokenValidUntil();
+                if (validUntil != null && !OffsetDateTime.now(clock).isBefore(validUntil)) {
+                  markExpired();
+                  // encrypted_at is carried on BOTH paths deliberately: it answers the only
+                  // operational question this log exists for -- WHICH token was found -- and an
+                  // expired restore needs that answer at least as much as a resumed one. The
+                  // Kite user id stays out of both, for the reason below.
+                  log.info(
+                      "kite session restore: persisted token from {} expired at {} — NOT"
+                          + " resumed; a fresh login is required",
+                      encryptedAt,
+                      validUntil);
+                  return;
+                }
                 state = State.CONNECTED; // tentative until the next health probe
+
                 // ⚠️ The Kite user id is DELIBERATELY not logged (cross-vendor review,
                 // Critical 3, 2026-08-26). It is half of the interactive broker-account credential,
                 // and the TOTP auto-login path now exercises this restore on every morning boot --

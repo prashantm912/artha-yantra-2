@@ -119,7 +119,18 @@ and the timestamps refuse it. `ay_kite_session_valid` reads **1.0** now. **Unsiz
   including one that moves the CONSUMER cron in strategy-signal and reddens this market-data test.
 - **Judge a refresh on DURATION, not on the failed counter** — the counter cannot see a soft-failing
   upstream.
-- The Upstox `worldIndices()` call is uncached on a path that now runs 4×/hour rather than
-  per-caller, which is *why* [[H26]]'s Upstox baseline moved 6.1× — see `h26-rate-capture-log.md`.
+- ⚠️ **REFUTED 2026-08-28 — this bullet claimed the `worldIndices()` change is "why" [[H26]]'s
+  Upstox baseline moved 6.1×. It is not, and the disproof is one metric read.**
+  `ay_day_context_snapshot_refresh_total` = **27** per session, and `worldIndices()` is ONE
+  batched call per refresh — so the whole term is ~27 Upstox calls and is **arithmetically
+  incapable** of moving a ~1,000-call swing in either direction. The real driver is
+  `ExpiredBackfillAutoResume`: 0 rows written on 08-27 (65 s) against **978,059** on 08-28
+  (4 h 17 m), and the Upstox `batch` count tracks that (210 vs 1,286).
+  ⚠️ **How it passed: a plausible mechanism plus a correlated deploy, and nobody asked whether
+  the mechanism was BIG ENOUGH.** A correlated deploy is a hypothesis; the order of magnitude
+  is the test. Caught by the `h26-daily-rate-capture` routine, not by me.
+  **What survives:** the Kite term really is stable across sessions (≈1,414 → ≈1,340 per
+  30-min window) — that half was measured rather than inferred, and it is the half H26 turns
+  on. See `h26-rate-capture-log.md`.
 - The breaker cause is the open thread, and it is worth one session's attention: it degraded 564 log
   lines' worth of chain broadcasts to cached data and cost 19 capture minutes, silently.

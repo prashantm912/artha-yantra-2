@@ -116,3 +116,67 @@ sessions, compute `projected_upstox_30m = 30m peak + Σ(Kite 30m rate × call-sh
 
 ⚠️ Under end state **(b)** (Upstox-only, Kite dormant — owner decision 2026-08-26) there is **no fallback to absorb a bad
 projection**, so the stop rule is **more binding, not less**.
+
+---
+
+## Row — 2026-08-28
+
+| session | coverage | Upstox 30m peak | 1m peak | 1s peak | Upstox batch / live | live refused | Kite QUOTE | Kite HIST | Kite DUMP |
+|---|---|---|---|---|---|---|---|---|---|
+| **2026-08-28** (Fri) | **~99%** — process up **08:39:35 IST**, before the 09:15 open, **no restart**; captured **15:27**, 3 min before close. ⚠️ An expired-backfill self-heal resume was **still running** at capture, so the peak is a **lower bound** | **1291 / 1800** (**72%**) | 360 / 450 (**80%**) | 16 / 45 (36%) | 1,286 / 40 | **0** | **17,726** | 390 | 1 |
+
+`computed` 2026-08-28 15:27 IST from `ay-market-data-service` `/actuator/prometheus`; container start `sourced` from `docker inspect` (`2026-08-28T03:09:35Z`).
+
+## ⚠️ Reading of 2026-08-28 — THE 08-27 ATTRIBUTION IN THIS FILE IS WRONG, AND THIS ROW DISPROVES IT
+
+The two sections above attribute the 08-27 collapse in Upstox load (batch 1,272 → 210, 30m peak 632 → 215)
+to the **H31 `day-context` precompute** capping `worldIndices()` at 4 calls/hour. **That is not the cause.**
+
+**`computed`, two independent measurements:**
+
+1. **`ay_day_context_snapshot_refresh_total` = 27** at 15:27 today. `UpstoxGlobalInstrumentsClient.worldIndices()`
+   is **one batched call** per refresh (`UpstoxGlobalInstrumentsClient:38`, `DayContextService:521-526`), so the
+   whole H31 term is **~27 Upstox calls per session**. It is **arithmetically incapable** of moving a ~1,000-call
+   swing in either direction.
+2. **The real driver is `ExpiredBackfillAutoResume`'s per-session workload**, `sourced` from the boot logs:
+
+   | session | boot resume ran | duration | outcome | Upstox `batch` |
+   |---|---|---|---|---|
+   | 2026-08-27 | 03:10:23–03:11:28Z | **65 s** | 104 expiries, **0 written**, 31,923 skipped, **0 rows** | **210** |
+   | 2026-08-28 | 03:09:51–07:27:00Z | **4 h 17 m** | 105 expiries, **269 written**, 168 failed, **978,059 rows** | **1,286** |
+
+   On 08-27 the backfill had **nothing to fetch**; today it fetched a year of contracts. The Upstox term tracks
+   that, not the precompute. (08-27's own boot log survives at
+   `/c/Trading/ArthaYantra/log-snapshots/2026-08-27/market-data-service.log`.)
+
+⚠️ **How the wrong attribution passed.** H31 deployed on the evening of 08-26, the number moved on 08-27, and the
+mechanism was plausible — nobody checked whether the mechanism was **big enough**. One metric read
+(`refresh_total = 27`) falsifies it. **A correlated deploy is a hypothesis; the order of magnitude is the test.**
+Same shape as [[a-diagnostic-inferred-from-one-case]]: a rule induced from one confirmed instance.
+
+⚠️ **The claim that survives, and it matters more:** the 08-27 note observed the migrating **Kite** term was
+**stable** (≈1,340 vs ≈1,414 per 30-min window) while Upstox moved 6.1×. That is still true today — Kite `QUOTE`
+17,726 at 15:27 vs 16,657 at the same clock time on 08-27. **The Kite side, which is the term H26 actually turns
+on, has been flat across all three sessions.** Only the Upstox baseline is noisy, and now we know why.
+
+### What this row does to the stop rule
+
+- **Upstox headroom is no longer comfortable.** 30m peak **1291/1800 = 72%**, 1m peak **360/450 = 80%** — both the
+  highest recorded, and the 30-min figure is already **within 12% of the 1440 stop threshold before adding a single
+  migrated Kite call.** `live_refused` is still **0**, so nothing was throttled.
+- ⚠️ **The peak is ~97% of the session's entire Upstox call count** (1291 of batch+live = 1,326; corroborated by
+  `http_client_requests_seconds_count` to `api.upstox.com` = 1,326). **The load is one concentrated burst, not a
+  session rate.** Which sub-window carried it is `assumed` — the counter cannot be sliced by caller.
+- **Consequence for the projection, and it changes the model:** the Upstox term is **dominated by a batch backfill
+  whose size depends on how much history is outstanding**, not by steady session load. Averaging it across five
+  sessions measures the backlog schedule, not capacity. **The five-session projection must separate the
+  backfill burst from the steady term**, or it will report whatever the backfill happened to be doing that week.
+
+⚠️ **Still no verdict.** Post-fix sessions: 08-27, 08-28 — **two of five**, and the two disagree by 6×. Do not act.
+
+⚠️ **Unrelated observation, recorded not acted on:** the boot log carries
+`kite session status -> TOKEN_EXPIRED` at 08:40 IST. PRs
+[#1518](https://github.com/prashantm912/artha-yantra-2/pull/1518),
+[#1519](https://github.com/prashantm912/artha-yantra-2/pull/1519) and
+[#1520](https://github.com/prashantm912/artha-yantra-2/pull/1520) are open against exactly that. Out of scope for
+this read-only capture.

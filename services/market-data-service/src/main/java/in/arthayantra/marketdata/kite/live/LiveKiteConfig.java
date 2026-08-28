@@ -132,8 +132,10 @@ public class LiveKiteConfig {
   @Bean
   public in.arthayantra.marketdata.kite.session.KiteSessionStore kiteSessionStore(
       in.arthayantra.marketdata.kite.session.KiteSessionRepository repository,
-      in.arthayantra.marketdata.kite.session.AesGcmTokenCipher cipher) {
-    var store = new in.arthayantra.marketdata.kite.session.KiteSessionStore(repository, cipher);
+      in.arthayantra.marketdata.kite.session.AesGcmTokenCipher cipher,
+      java.time.Clock clock) {
+    var store =
+        new in.arthayantra.marketdata.kite.session.KiteSessionStore(repository, cipher, clock);
     store.loadFromDatabase();
     return store;
   }

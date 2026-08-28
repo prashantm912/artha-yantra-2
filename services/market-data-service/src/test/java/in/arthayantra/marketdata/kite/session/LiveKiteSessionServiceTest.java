@@ -16,7 +16,7 @@ class LiveKiteSessionServiceTest {
     String storedUser;
 
     RecordingStore() {
-      super(null, null);
+      super(null, null, java.time.Clock.systemUTC());
     }
 
     @Override

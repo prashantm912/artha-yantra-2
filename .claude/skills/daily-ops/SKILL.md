@@ -12,23 +12,45 @@ The operational clock and the watch routine. All times IST; the DB stores UTC
 
 | IST | What | Where it runs |
 |---|---|---|
-| ~06:00 | Kite token expires → ticker DISCONNECTED until owner re-logins | Kite |
-| 08:30 | NotifierHealthCheck — trailing-24h delivery failure-rate, alarms BOTH channels (#689) | strategy-signal |
+| **08:05** | **Kite TOTP auto-login — ARMED 2026-08-28.** Also runs ON BOOT (08:00–15:30 window) because a cron never backfills. Judge a morning on `ay_kite_session_valid`, never on log lines | market-data |
+| **08:15** | Auto-login watchdog — pages if the session is still not CONNECTED | market-data |
+| 08:30 | SwingCanary · NotifierHealthCheck (trailing-24h delivery failure-rate, alarms BOTH channels, #689) | strategy-signal |
+| **08:35** | **SwingBatchCatchUp — the only AUTOMATIC swing ENTRY path.** The evening settles are EXITS-ONLY. ⚠️ Manual `POST /api/v1/signals/<batch>-swing/run` also takes entries, so reason about entry paths as TWO | strategy-signal |
 | ~08:40 | Futures roll re-resolve (dated front contract for live signals) | strategy-signal |
 | 08:45 | IngestCoverageCanary — previous trading day per-source `ingest_runs` coverage (#689, live-only) | market-data |
+| **08:50** | PaperReconciliationScheduler — V5 position↔order-leg + V16 TAKEN↔position (#701). **MORNING since #1358, not 21:15** | strategy-signal |
+| **08:52** | Past-expiry reconciliation | strategy-signal |
 | 09:15 | Market open — tick feed, 1m bars, live scalper engine | market-data / strategy-signal |
 | 09:42 | **live-data-health-check** (scheduled Claude task, read-only) | scheduled task |
+| **:13/:28/:43/:58**, 08–15 | day-context snapshot refresh. ⚠️ Its 120 s LEAD over the consumer's :00/:15/:30/:45 sweep is load-bearing — moving either cron alone silently reinstates the defect (`DayContextRefreshPhaseTest`) | market-data |
+| **09:50 / 11:50 / 14:50** | NSE FII retry — **absent from CLAUDE.md's list too**, found 2026-08-28 | market-data |
+| every 10 min, 09:00–15:59 | Session heartbeat | strategy-signal |
 | all session | 3-min full OI chain capture (NIFTY+SENSEX); rejections accrue; PartialBucketCanary sweeps 60s (#683) | market-data / strategy-signal |
 | 15:30 | Market close |  |
-| 15:45 | Intraday paper square-off (swing books excluded) — settles on last REAL tick, never breakeven (#694); expect a daily `ay_paper_stale_settle_total` baseline (post-close ticks), alert on the REFUSE counter | strategy-signal |
+| ~15:44 | Intraday paper square-off (swing books excluded) — settles on last REAL tick, never breakeven (#694); expect a daily `ay_paper_stale_settle_total` baseline (post-close ticks), alert on the REFUSE counter | strategy-signal |
 | 15:47 | **post-market-session-analysis** (scheduled Claude task → [session-analysis]) | scheduled task |
-| 19:00 | NseEod pulls (FII/DII cash, participant-OI, FII-derivative) → `ingest_runs` rows (also ~2/day incl. boot pull) | market-data |
-| 20:00 | Minervini swing EOD batch (`MinerviniSwingEngine`) | strategy-signal |
-| 20:05 | Manas Arora swing EOD batch | strategy-signal |
-| 21:00 | Graduation promotion scheduler (flag-gated) | strategy-signal |
-| 21:15 | PaperReconciliationScheduler — V5 position↔order-leg + V16 TAKEN↔position → `paper_reconciliation_runs` + ntfy (#701) | strategy-signal |
+| 16:05 | bhavcopy close prefetch | market-data |
+| 18:20 | Upstox canary | market-data |
+| **18:45** | **bhavcopy EOD — the anchor.** Most cash equities have NO intraday 1d bar; their session bar is written HERE, which is why the swing settles moved after it (H27) | market-data |
+| **18:46** | NseEod pulls (FII/DII cash, participant-OI, FII-derivative) → `ingest_runs`. **NOT 19:00 — this table said 19:00 until 2026-08-28** | market-data |
+| 18:47 / 18:48 | Minervini screen · Manas screen | market-data |
+| 18:49 / 18:50 / 18:51 | Market context · Data quality · Equity breadth | market-data |
+| **18:52 / 18:53** | Minervini · Manas swing SETTLE. ⚠️ **EXITS ONLY — 0 candidates AND 0 exits is a LEGITIMATE result.** Judge on the STALE-bar count and `exit_skipped`, NEVER on the exit count | strategy-signal |
+| 18:54 / 18:55 | Heartbeat swing · Graduation promotion (flag-gated) | strategy-signal |
+| 18:56 / 18:57 | Insights: strategy-evidence · sell-decision | both |
+| 18:58 | bhavcopy close | market-data |
+| **18:59** | Evening chain check (**absent from CLAUDE.md's list too**) · Minervini buyable-alerts — the latter is **DISABLED** (`ARTHA_MINERVINI_BUYABLE_ALERTS_ENABLED=false`, so the bean does not exist and "it did not run" is CORRECT, not a fault) | market-data |
 | night | pg_dump backup (db-backup container) — **contends with long backtests** | deploy |
 
+⚠️ **RE-READ `docker inspect`, DO NOT TRUST THIS TABLE.** Every time above is `computed` 2026-08-28 from the DEPLOYED env of `ay-market-data-service` / `ay-strategy-signal-service`.
+Never quote the `application.yml` `${ENV:default}` values — they differ from what is deployed.
+
+```bash
+docker inspect ay-market-data-service     --format '{{range .Config.Env}}{{println .}}{{end}}' | grep CRON=
+docker inspect ay-strategy-signal-service --format '{{range .Config.Env}}{{println .}}{{end}}' | grep CRON=
+```
+
+⚠️ **THIS TABLE WAS ~11 DAYS STALE WHEN CORRECTED ON 2026-08-28, AND IT IS THE RUNBOOK A DAILY-OPS SESSION FOLLOWS.** It still described the PRE-#1358 world: NseEod at 19:00 (really 18:46), the swing batches at 20:00/20:05 (really 18:52/18:53, and EXITS-ONLY), graduation at 21:00 (18:55), the paper reconciler at 21:15 (**08:50 — it moved to MORNING**), and a Kite token expiring at ~06:00 with no mention that auto-login has been ARMED since 08-28. An operator following it would have hunted a 21:15 job for three hours after it had already run. A stale cron list here has ALREADY produced a false "Friday's screens were never consumed" alarm (2026-08-17).
 Morning board: `/data-ops/ingest-health` (per-source last-run/verdicts/missing-days, #699)
 before hand-digging any "batch missed" report.
 

@@ -408,8 +408,20 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   poisons the mount and crash-loops the service. `ay up` seeds empty placeholders; raw
   `docker compose` does not. **`wc -c` on a directory returns 0 and reads exactly like an empty
   placeholder** — test with `[ -f ]`, never a size.
-  ⚠️ **08:05, NOT the 07:30 everyone reaches for:** the box is off 19:00–08:00 IST, so a 07:30 job
-  would never fire at all, silently, every day (`OperatingWindowTest` refuses it). Both slots sit
+  ⚠️ **08:05, NOT the 07:30 everyone reaches for:** the box is not up before ~08:30, so a 07:30 job
+  would never fire at all, silently, every day (`OperatingWindowTest` refuses it).
+  ⚠️ **"OFF 19:00–08:00" WAS WRONG ON THE EVENING END and is corrected here (`computed`
+  2026-08-28 from the Windows System log, event 6006, 30 days): 13 shutdowns, and **ZERO** fell in
+  the 18:45–19:15 evening-chain window.** Measured times: 03:02, 02:52, 02:07 (08-26..28), 15:34/15:36
+  (weekends), 20:28/20:38 (08-20/21), 00:41, 23:55. **The box routinely runs to ~02:00–03:00.** The
+  MORNING half stands and is what matters here — startups measured **08:24–08:41**, which is exactly
+  why `catchUpOnBoot` exists and why 07:30 would never fire.
+  ⚠️ **This also refutes ledger H37's premise** ("the machine is routinely shut down at ~19:00 — a
+  one-minute margin"). The 2026-08-20 event that created that row shut down at **20:28**, ~90 minutes
+  AFTER the chain ended. H37 inferred the shutdown time from the containers' **last log line at
+  18:58** — but that is when the last JOB ran, not when the box went down. **Never infer a host
+  shutdown from a container's last log line; read event 6006.** A quiet log after the evening chain
+  is the chain finishing, not the machine dying. Both slots sit
   ahead of the 08:30 `InstrumentSyncScheduler`, which is the first thing needing a live token.
   ⚠️ **A cron never backfills, so BOTH also run on boot** (`catchUpOnBoot`, #1510/#1511) — the box
   started 08:40 on 08-27 and 08:41 on 08-26, so without it an armed login would have done nothing

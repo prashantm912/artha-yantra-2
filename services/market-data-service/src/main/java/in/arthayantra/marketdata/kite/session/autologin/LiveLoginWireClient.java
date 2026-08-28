@@ -58,6 +58,9 @@ public class LiveLoginWireClient implements LoginWireClient {
 
   private static final Logger log = LoggerFactory.getLogger(LiveLoginWireClient.class);
 
+  /** Redirect budget for the authorize chain. A loop must fail loudly, never spin. */
+  private static final int MAX_AUTHORIZE_HOPS = 5;
+
   /** The credential step's envelope. Only {@code data.request_id} is consumed. */
   @JsonIgnoreProperties(ignoreUnknown = true)
   record CredentialResponse(@JsonProperty("data") CredentialData data) {
@@ -153,9 +156,7 @@ public class LiveLoginWireClient implements LoginWireClient {
     }
     log.debug("kite auto-login: {} cookie(s) held for the login origin", jar.sizeFor(twofaUri));
 
-    ResponseEntity<Void> step3 =
-        call(Step.AUTHORIZE, LoginRefusal.AUTHORIZE_REJECTED, () -> authorize(jar));
-    return requestTokenFrom(step3);
+    return authorizeFollowingRedirects(jar);
   }
 
   private ResponseEntity<String> postForm(
@@ -185,14 +186,124 @@ public class LiveLoginWireClient implements LoginWireClient {
    * which is EMPTY by default — see {@link LoginCookieJar} for why forwarding the whole jar across
    * two registrable domains was a Critical.
    */
-  private ResponseEntity<Void> authorize(LoginCookieJar jar) {
-    URI uri =
-        UriComponentsBuilder.fromUri(endpoints.authorize())
-            .queryParam("v", "3")
-            .queryParam("api_key", apiKey)
-            .queryParam("skip_session", "true")
-            .build(true)
-            .toUri();
+  /**
+   * Walks the authorize redirect chain until a hop carries the {@code request_token}.
+   *
+   * <p><b>Why a chain and not a single hop.</b> The first cut read only the FIRST 3xx and
+   * failed live on 2026-08-27 and again on 2026-08-28 with {@code redirect carried no
+   * request_token}. That message is the discriminating evidence: the status WAS 3xx and the
+   * {@code Location} WAS a valid URI, it simply held no token. Zerodha answers with an
+   * intermediate hop, so reading only the first one can never succeed.
+   *
+   * <p>WARNING: changing the authorize HOST (#1515) did NOT fix this. That is what rules the
+   * earlier cookie-scope theory OUT and this one in — two live failures with an identical
+   * message across a host change is a stronger signal than either theory on its own.
+   *
+   * <p><b>It stops at the token and never REQUESTS the final destination.</b> The last hop
+   * points at the registered redirect URL, which is not ours to fetch and may not be reachable;
+   * the token is already in the {@code Location} header we hold. Following it would be a
+   * pointless outbound call carrying a live token.
+   *
+   * <p><b>Only SAME-ORIGIN hops are followed.</b> A redirect off the login origin is where the
+   * chain leaves Zerodha; following it would send a request to a host this feature never
+   * vetted. Bounded by {@link #MAX_AUTHORIZE_HOPS} so a redirect loop fails loudly.
+   * <p><b>OPEN DOUBT for the first live run</b> (cross-vendor review, 2026-08-28): hop responses
+   * are NOT stored back into {@link LoginCookieJar}. The observed chain carries its intermediate
+   * state in a {@code sess_id} QUERY parameter rather than a cookie, so this is not believed to
+   * matter — but Kite does not document its intermediate redirects. If a live run still fails
+   * here, check whether a hop set a {@code Set-Cookie} header, WITHOUT logging its value.
+   */
+  private String authorizeFollowingRedirects(LoginCookieJar jar) {
+    URI target = authorizeUri();
+    String loginOrigin = LoginCookieJar.originOf(endpoints.credentials());
+    for (int hop = 1; hop <= MAX_AUTHORIZE_HOPS; hop++) {
+      final URI current = target;
+      ResponseEntity<Void> response =
+          call(Step.AUTHORIZE, LoginRefusal.AUTHORIZE_REJECTED, () -> authorize(current, jar));
+      String token = tokenIfPresent(response);
+      if (token != null) {
+        log.info("kite auto-login: request_token found at authorize hop {}", hop);
+        return token;
+      }
+      URI next = sameOriginRedirectTarget(response, current, loginOrigin, hop);
+      if (next == null) {
+        // Nothing further to follow: let the single-response reader name the precise refusal.
+        return requestTokenFrom(response);
+      }
+      target = next;
+    }
+    throw new LoginRefused(
+        Step.AUTHORIZE,
+        LoginRefusal.UNEXPECTED_RESPONSE,
+        "authorize did not yield a request_token within " + MAX_AUTHORIZE_HOPS + " redirects");
+  }
+
+  /** The token if this response carries one, else null. Never throws: the chain may continue. */
+  private static String tokenIfPresent(ResponseEntity<Void> response) {
+    if (!response.getStatusCode().is3xxRedirection()) {
+      return null;
+    }
+    String location = response.getHeaders().getFirst(HttpHeaders.LOCATION);
+    if (location == null || location.isBlank()) {
+      return null;
+    }
+    try {
+      String token =
+          UriComponentsBuilder.fromUriString(location)
+              .build()
+              .getQueryParams()
+              .getFirst("request_token");
+      return token == null || token.isBlank() ? null : token;
+    } catch (IllegalArgumentException unparseable) {
+      return null;
+    }
+  }
+
+  /**
+   * The next hop, or null to stop.
+   *
+   * <p>WARNING: the diagnostic line logs scheme, host and PATH only. The query is where a
+   * {@code request_token} lives, and on a failed login the submitted parameters too — logging a
+   * whole {@code Location} is exactly how a credential reaches a log file.
+   */
+  private static URI sameOriginRedirectTarget(
+      ResponseEntity<Void> response, URI current, String loginOrigin, int hop) {
+    if (!response.getStatusCode().is3xxRedirection()) {
+      return null;
+    }
+    String location = response.getHeaders().getFirst(HttpHeaders.LOCATION);
+    if (location == null || location.isBlank()) {
+      return null;
+    }
+    URI next;
+    try {
+      next = current.resolve(location);
+    } catch (IllegalArgumentException unresolvable) {
+      return null;
+    }
+    boolean sameOrigin = LoginCookieJar.originOf(next).equals(loginOrigin);
+    log.info(
+        "kite auto-login: authorize hop {} answered HTTP {}, Location {}://{}{}"
+            + " (query redacted), same-origin={}",
+        hop,
+        response.getStatusCode().value(),
+        next.getScheme(),
+        next.getHost(),
+        next.getRawPath(),
+        sameOrigin);
+    return sameOrigin ? next : null;
+  }
+
+  private URI authorizeUri() {
+    return UriComponentsBuilder.fromUri(endpoints.authorize())
+        .queryParam("v", "3")
+        .queryParam("api_key", apiKey)
+        .queryParam("skip_session", "true")
+        .build(true)
+        .toUri();
+  }
+
+  private ResponseEntity<Void> authorize(URI uri, LoginCookieJar jar) {
     RestClient.RequestHeadersSpec<?> request = restClient.get().uri(uri);
     String cookies = jar.cookieHeaderFor(uri, LoginCookieJar.originOf(endpoints.credentials()));
     if (cookies != null) {

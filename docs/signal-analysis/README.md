@@ -1001,6 +1001,45 @@ restart services, or write during market hours.
   operand's session min/max **before** reaching for a data explanation.
 - Capture liveness: `max(bucket)` on 1m candles + snapshot counts vs wall clock.
 
+### 4.1b The BOOT WINDOW is a first-class reporting section — §3.41
+
+⚠️ **Report the window from container boot to the first successful Kite login SEPARATELY, and
+state a zero explicitly when it is clean.** "Zero in-session outage lines" is NOT a statement
+about this window, and using it as one is how a real, recurring defect stayed invisible for days.
+
+**The measured cost of not having this rule.** On 2026-08-26 a routine wrote, in its own working
+notes, *"kite-rest circuit open pre-login, 30 lines at 03:04:13Z, healed by 08:35:53"* — a correct
+diagnosis of a real defect. The committed findings file for that day says **"zero in-session
+outage lines, 2nd consecutive clean in-session day"**. Both statements are true: pre-login IS
+before the session. The finding was classified as transient and dropped.
+
+Two days later the same defect was investigated from scratch as an unknown, declared
+*"structurally undiagnosable"*, and a whole instrumentation change ([#1512]) was built to
+rediscover on 08-28 what had been written down on 08-26. The root cause — the store resumes a
+dead token, every consumer then 403s, and the SHARED breaker opens — is now [#1520].
+
+**Why it was invisible by construction, which is the part worth internalising:** every
+in-session window in this document starts at 09:15. A defect that lives entirely between boot
+and first login cannot appear in any of them, so scoping the report to the session guarantees it
+is never seen. The fix is a section that must be filled in, not a sharper eye.
+
+Report, every session:
+
+- **boot time** (`docker inspect <svc> --format {{.State.StartedAt}}`, converted to IST) and
+  whether it precedes the 08:05 auto-login slot.
+- **first CONNECTED moment** — `ay_kite_session_valid`, or the `kite session restore` /
+  auto-login log line. If the session was absent at boot, say for how long.
+- **circuit-breaker transitions in that window**: `grep "circuit breaker .* State transition"`.
+  Since [#1512] the OPEN line names the failures that caused it — quote the exception class, not
+  just the count.
+- **capture minutes lost to it**, if any (`futures_oi_snapshots` per-minute gaps bounded to the
+  window). ⚠️ Attribute only what overlaps; the 08-27 clusters from 09:13 are still unexplained
+  and must NOT be folded in.
+
+⚠️ **"Benign" and "absent" are different verdicts and must be written differently.** A benign
+boot-window event still gets a line saying what happened and why it was harmless. Omitting it
+reads to every later session as "nothing happened", and that reading is what cost two days here.
+
 ### 4.2 Live counterfactual — "would loosening knob X have made money TODAY?"
 v1 (approximate, works now, zero code):
 1. Take the §3.5 would-have-fired rows (or re-run the query intraday) → each has `bar_time`, side,
@@ -1189,6 +1228,8 @@ Session character: <VIX level, index range/trend, expiry day?, notable events>.
 ## 2 Rail findings          (§3.3/3.5/3.8 — per flagged rail: evidence, verdict, proposed tune)
 ## 3 Composite + dots       (§3.4/3.6 — distribution, dead dots, cap math)
 ## 4 Data health            (§3.7 — nulls/zeros table, new-vs-known)
+## 4b BOOT WINDOW          (§3.41 — boot -> first login. REQUIRED, and "nothing" must be
+##                          written as an explicit zero, never omitted)
 ## 5 Shadow-book outcomes   (per-rail PnL attribution + per-position table; §4.2 manual
 ##                           counterfactuals only for rejection classes the shadow book skips)
 ## 6 New data points / anomalies   (anything not covered by current dimensions → promote to §3)

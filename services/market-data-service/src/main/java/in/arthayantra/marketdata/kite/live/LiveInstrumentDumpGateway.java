@@ -58,10 +58,12 @@ public class LiveInstrumentDumpGateway implements InstrumentDumpGateway {
     // manual sync trigger from hammering Kite. KiteCallExecutor skips its internal retry for
     // DUMP (a 2nd attempt would need a permit the bucket can't refill for ~30 min); the actual
     // retry mechanism for this family is InstrumentSyncScheduler.morningSyncCatchUp.
-    return executor.execute(in.arthayantra.marketdata.kite.KiteCallExecutor.Family.DUMP, this::fetchAllExchanges);
-  }
-
-  private List<InstrumentRecord> fetchAllExchanges() {
+    // ⚠️ The token is resolved BEFORE entering the executor, and that ordering is load-bearing.
+    // Inside the decorated supplier it was too late: the executor had already acquired the
+    // limiter permit and recorded the local KITE_TOKEN_EXPIRED as a kite-rest failure, so a
+    // tokenless boot burned the ONE dump permit the bucket refills every ~30 minutes and
+    // pressured the shared breaker -- while making zero wire calls. Found by cross-vendor
+    // review, 2026-08-28; the quote and historical gateways already resolve first.
     String token =
         tokenProvider
             .currentToken()
@@ -69,6 +71,12 @@ public class LiveInstrumentDumpGateway implements InstrumentDumpGateway {
                 () ->
                     new ApiException(
                         401, ErrorCodes.KITE_TOKEN_EXPIRED, "no live Kite session for dump sync"));
+    return executor.execute(
+        in.arthayantra.marketdata.kite.KiteCallExecutor.Family.DUMP,
+        () -> fetchAllExchanges(token));
+  }
+
+  private List<InstrumentRecord> fetchAllExchanges(String token) {
     List<InstrumentRecord> all = new ArrayList<>();
     for (String exchange : EXCHANGES) {
       byte[] body =

@@ -68,7 +68,16 @@ class KiteSessionRestoreLogTest {
                     encryptedAt)));
     when(cipher.decrypt(new byte[] {1, 2, 3}, new byte[] {4, 5, 6})).thenReturn("token-value");
 
-    new KiteSessionStore(repository, cipher).loadFromDatabase();
+    // ⚠️ A FIXED clock, not systemUTC(). The restore now refuses a token past its ~06:00 IST
+    // expiry, so a wall-clock store would make this test pass on 2026-08-26 and fail every day
+    // after -- a time bomb, and one this test would report as a LEAK regression rather than a
+    // clock problem. Pinned an hour after issuance so it exercises the RESUMED path, which is
+    // the one whose log line this test is about.
+    java.time.Clock justAfterIssuance =
+        java.time.Clock.fixed(
+            java.time.OffsetDateTime.parse("2026-08-26T09:05:00+05:30").toInstant(),
+            in.arthayantra.common.web.time.Ist.ZONE);
+    new KiteSessionStore(repository, cipher, justAfterIssuance).loadFromDatabase();
 
     assertThat(logs.list)
         .as("the restore must still be observable — a silent restore is its own problem")

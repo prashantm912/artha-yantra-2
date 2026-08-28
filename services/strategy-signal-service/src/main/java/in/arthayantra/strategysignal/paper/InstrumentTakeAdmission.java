@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.paper;
 
 import in.arthayantra.common.web.error.ErrorCodes;
+import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.TakeAdmission;
@@ -79,16 +80,58 @@ public class InstrumentTakeAdmission implements TakeAdmission {
   private final MeterRegistry meters;
   private final boolean executionLive;
 
+  /**
+   * H44 mirror. This port exists because a refusal raised INSIDE the paper writer arrives too
+   * late on the take path: {@code PaperSignalListener} catches it, compensates the stranded
+   * anchor, and {@code SignalsController} still answers 200 with a detail body -- so an armed
+   * gate would silently report SUCCESS for a take that opened nothing (cross-vendor review,
+   * round 2). The verdict has to be reached BEFORE the ACTIVE->TAKEN CAS, which is here.
+   */
+  private final LastTickReader lastTick;
+
+  private final boolean refuseNoTickEntries;
+
+
   /** Wires the signal store, the instrument master, the refusal counter and the execution mode. */
+  // Two public constructors exist (the second is the disarmed test convenience), so Spring must be
+  // TOLD which one to inject through -- without this it looks for a no-arg constructor and every
+  // context in the service fails to start.
+  @org.springframework.beans.factory.annotation.Autowired
   public InstrumentTakeAdmission(
       SignalRepository signals,
       InstrumentMetaClient instruments,
       MeterRegistry meters,
-      @Value("${artha.scalper.execution:paper}") String executionMode) {
+      @Value("${artha.scalper.execution:paper}") String executionMode,
+      LastTickReader lastTick,
+      @Value("${artha.paper.refuse-no-tick-entries:false}") boolean refuseNoTickEntries) {
     this.signals = signals;
     this.instruments = instruments;
     this.meters = meters;
     this.executionLive = "live".equalsIgnoreCase(executionMode);
+    this.lastTick = lastTick;
+    this.refuseNoTickEntries = refuseNoTickEntries;
+    // Fail FAST rather than silently disarm. The convenience constructor above passes a null reader
+    // because a DISARMED gate never reads it; if anyone ever arms the flag through that path, this
+    // refuses at construction instead of letting an armed safety gate quietly do nothing -- which is
+    // the failure mode this whole item exists to prevent.
+    if (refuseNoTickEntries && lastTick == null) {
+      throw new IllegalArgumentException(
+          "refuse-no-tick-entries is armed but no LastTickReader was supplied");
+    }
+  }
+
+  /**
+   * Test-only convenience (pre-H44 signature): the closability gate defaults to DISARMED, which is
+   * its shipped default, so every existing direct-construction call site keeps compiling and keeps
+   * asserting exactly what it asserted before. Mirrors the same trick PaperService uses for its own
+   * @Value-injected flags.
+   */
+  public InstrumentTakeAdmission(
+      SignalRepository signals,
+      InstrumentMetaClient instruments,
+      MeterRegistry meters,
+      String executionMode) {
+    this(signals, instruments, meters, executionMode, null, false);
   }
 
   @Override
@@ -196,6 +239,40 @@ public class InstrumentTakeAdmission implements TakeAdmission {
               "tradingsymbol", intent.tradingsymbol(),
               "lotSize", meta.lotSize(),
               "qty", intent.qty()));
+    }
+    // H44, mirroring PaperService s closability gate so the take path cannot answer 200 for a
+    // fill that will be refused. Same three properties as the writer s copy, deliberately:
+    // OPTION-scoped (equities do not tick), armed by the same flag, and FAIL-CLOSED on a probe
+    // error -- an entry may always be declined.
+    if (refuseNoTickEntries && meta.instrumentClass() == InstrumentClass.OPTION) {
+      boolean everTicked;
+      try {
+        everTicked = lastTick.lastTick(intent.exchange(), intent.tradingsymbol()).isPresent();
+      } catch (RuntimeException probeFailed) {
+        return refuse(
+            signalId,
+            "closability_unknown",
+            ErrorCodes.DATA_GAP,
+            "cannot verify whether " + intent.exchange() + ":" + intent.tradingsymbol()
+                + " has ever ticked — refusing the take (H44, fail-closed)",
+            Map.of(
+                "signalId", signalId,
+                "exchange", intent.exchange(),
+                "tradingsymbol", intent.tradingsymbol()));
+      }
+      if (!everTicked) {
+        return refuse(
+            signalId,
+            "never_ticked",
+            ErrorCodes.DATA_GAP,
+            "no tick has ever been seen for " + intent.exchange() + ":"
+                + intent.tradingsymbol()
+                + " — refusing to take a signal no automatic exit could settle (H44)",
+            Map.of(
+                "signalId", signalId,
+                "exchange", intent.exchange(),
+                "tradingsymbol", intent.tradingsymbol()));
+      }
     }
     return Verdict.ADMITTED;
   }

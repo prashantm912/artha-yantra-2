@@ -114,8 +114,30 @@ public class PaperOrderRejectionRecorder {
       String exchange,
       String tradingsymbol,
       String side,
+      long qty,
       String detail) {
     repo.insert(
-        signalId, book, exchange, tradingsymbol, side, 0L, "DATA_GAP_NEVER_TICKED", detail, null);
+        signalId, book, exchange, tradingsymbol, side, qty, "DATA_GAP_NEVER_TICKED", detail,
+        null);
+  }
+
+  /**
+   * DATA_GAP_CLOSABILITY_UNKNOWN (H44, fail-closed): the tick store could not be reached, so
+   * closability could not be VERIFIED. Distinct from {@code DATA_GAP_NEVER_TICKED} on purpose --
+   * "we could not ask" and "we asked and the answer was no" are different operational facts, and
+   * conflating them would send an operator hunting a dead instrument during a Redis outage.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void recordClosabilityUnknown(
+      Long signalId,
+      String book,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      long qty,
+      String detail) {
+    repo.insert(
+        signalId, book, exchange, tradingsymbol, side, qty, "DATA_GAP_CLOSABILITY_UNKNOWN",
+        detail, null);
   }
 }

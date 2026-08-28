@@ -63,6 +63,8 @@ class PaperNoTickGuardIntegrationTest extends StrategySignalIntegrationTestBase 
   @Autowired private StringRedisTemplate redis;
   @Autowired private ObjectMapper objectMapper;
 
+  @Autowired private io.micrometer.core.instrument.MeterRegistry meters;
+
   /**
    * The measured incident, in a test: an option contract that has never ticked is refused rather than
    * opened. Live on 2026-08-28 two such legs sat through their TIME_STOPs, their signal-exit and the
@@ -115,6 +117,18 @@ class PaperNoTickGuardIntegrationTest extends StrategySignalIntegrationTestBase 
 
     assertThat(pos).isNotNull();
     assertThat(openPositionsFor(sym)).isEqualTo(1);
+    assertThat(noTickFills())
+        .as("the COUNTER must be OPTION-scoped too. Round 1 filtered the gate and forgot the"
+            + " listener, so equities -- which structurally never tick, and whose automatic exits"
+            + " settle at an explicit session price -- would have dominated the very rate the"
+            + " arming decision rests on (cross-vendor review round 2).")
+        .isZero();
+  }
+
+  private double noTickFills() {
+    return meters.find("ay_paper_fill_no_tick_total").counters().stream()
+        .mapToDouble(io.micrometer.core.instrument.Counter::count)
+        .sum();
   }
 
   /** The control: an option that HAS ticked is unaffected, so the gate is not simply refusing all. */

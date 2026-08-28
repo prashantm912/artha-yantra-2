@@ -20,7 +20,9 @@ import org.junit.jupiter.api.Test;
 class PaperMarginAnnotatorTest {
 
   private static PaperPositionOpened opened(long id) {
-    return new PaperPositionOpened(id, "scalper", "NFO", "NIFTY26JUL25000CE", "BUY", 100L);
+    return new PaperPositionOpened(
+        id, "scalper", "NFO", "NIFTY26JUL25000CE", "BUY", 100L,
+        in.arthayantra.strategyengine.fills.InstrumentClass.OPTION);
   }
 
   @Test

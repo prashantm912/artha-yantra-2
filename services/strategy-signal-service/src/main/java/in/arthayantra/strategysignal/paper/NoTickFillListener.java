@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.paper;
 
+import in.arthayantra.strategyengine.fills.InstrumentClass;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,7 +9,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 /**
- * H44: counts positions that opened on a contract with no usable last tick.
+ * H44: counts OPTION positions that opened on a contract with no usable last tick.
  *
  * <p><b>Why this matters.</b> Automatic exits refuse to settle without a REAL tick — the #694
  * doctrine: settles use the last real tick at any age and refuse only when none was ever seen, never
@@ -56,6 +57,17 @@ public class NoTickFillListener {
 
   @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
   public void onOpened(PaperPositionOpened e) {
+    // OPTION ONLY -- and this was MISSING in round 1, which repeated the exact defect the GATE
+    // was carefully written to avoid (cross-vendor review, round 2). EQUITIES DO NOT TICK, so an
+    // unfiltered counter is dominated by cash-equity swing opens that are in no danger at all:
+    // their automatic exits settle at an EXPLICIT session price (EngineExitListener), never off a
+    // tick. Two consequences, both bad: the counter saturates on a permanent structural
+    // condition exactly as the MTM-blind gauge once did, and it stops being the thing the yml
+    // says it is -- the measured rate at which the OPTION-scoped gate WOULD fire, which is the
+    // number the arming decision rests on.
+    if (e.instrumentClass() != InstrumentClass.OPTION) {
+      return;
+    }
     try {
       if (lastTick.lastTick(e.exchange(), e.tradingsymbol()).isPresent()) {
         return;

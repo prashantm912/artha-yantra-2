@@ -961,13 +961,28 @@ public class PaperService {
     if (refuseNoTickEntries
         && meta.instrumentClass() == InstrumentClass.OPTION
         && !"LIVE_TICK".equals(refSource)) {
-      boolean everTicked = true;
+      boolean everTicked;
       try {
         everTicked = lastTick.lastTick(exchange, tradingsymbol).isPresent();
       } catch (RuntimeException probeFailed) {
-        log.warn(
-            "H44 closability probe failed for {}:{} — ALLOWING the fill (fail-open): {}",
-            exchange, tradingsymbol, probeFailed.getMessage());
+        // FAIL CLOSED, and this REVERSED in review -- the earlier cut allowed the fill here.
+        // That was right while this was a DIAGNOSTIC (a probe must never break what it
+        // observes) and wrong the moment it became a SAFETY GATE: allowing a fill we could
+        // not verify recreates H44 while the flag claims protection, which is worse than not
+        // arming it. The repo doctrine settles the direction -- #694: entries need fresh
+        // truth (you can always NOT enter), exits need the best available truth (you cannot
+        // refuse to leave forever). This is an ENTRY.
+        // 503, not 422: the caller is fine and the instrument is fine, our tick store is
+        // unreachable -- a distinct code so an outage is never read as a never-ticked
+        // contract. NOTE the blast radius: while Redis is down and this flag is ARMED, every
+        // option entry is refused.
+        recordProbeFailedRejectQuietly(request, exchange, tradingsymbol, side);
+        throw new ApiException(
+            503,
+            ErrorCodes.DATA_GAP,
+            "cannot verify whether " + exchange + ":" + tradingsymbol + " has ever ticked"
+                + " — refusing to open a position whose closability is unknown (H44, fail-closed)",
+            Map.of("exchange", exchange, "tradingsymbol", tradingsymbol));
       }
       if (!everTicked) {
         recordNoTickRejectQuietly(request, exchange, tradingsymbol, side);
@@ -1125,7 +1140,9 @@ public class PaperService {
           row.id(), orderId, request.signalId(), book, exchange, tradingsymbol, side, request.qty(),
           fill.fillPrice());
       events.publishEvent(
-          new PaperPositionOpened(row.id(), book, exchange, tradingsymbol, side, row.qty()));
+          new PaperPositionOpened(
+              row.id(), book, exchange, tradingsymbol, side, row.qty(),
+              meta.instrumentClass()));
     }
     // Same projected usage the deployment/sub-account checks above already computed — reused rather
     // than recomputed, so the SPAN client is called once per fill instead of twice.
@@ -1382,10 +1399,30 @@ public class PaperService {
     try {
       rejections.recordNeverTicked(
           request.signalId(), bookFor(request), exchange, tradingsymbol, side,
+          request.qty(),
           "no tick ever seen — an opened position would have no automatic exit");
     } catch (RuntimeException e) {
       log.warn(
           "paper_order_rejections (never-ticked) not written for {}:{}: {}",
+          exchange, tradingsymbol, e.getMessage());
+    }
+  }
+
+  /**
+   * H44 fail-closed refusal. Its own reason code: "we could not ASK" is a different
+   * operational fact from "the contract has never ticked", and a forensic row that
+   * conflates them would send an operator hunting a dead instrument during a Redis outage.
+   */
+  private void recordProbeFailedRejectQuietly(
+      OrderRequest request, String exchange, String tradingsymbol, String side) {
+    try {
+      rejections.recordClosabilityUnknown(
+          request.signalId(), bookFor(request), exchange, tradingsymbol, side,
+          request.qty(),
+          "tick store unreachable — closability could not be verified");
+    } catch (RuntimeException e) {
+      log.warn(
+          "paper_order_rejections (closability-unknown) not written for {}:{}: {}",
           exchange, tradingsymbol, e.getMessage());
     }
   }

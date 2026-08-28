@@ -216,6 +216,22 @@ resilience4j:
         # every family. Ignore it: it says "we paced ourselves", never "the upstream is broken".
         ignore-exceptions:
           - io.github.resilience4j.ratelimiter.RequestNotPermitted
+          # A 403 is an AUTH condition, never an availability one, and this breaker exists to
+          # detect an UNAVAILABLE upstream. Measured 2026-08-28 08:39:58 IST: at boot, before
+          # the daily login, ten consecutive Kite calls returned 403 TokenException "Incorrect
+          # api_key or access_token" -- a 100% failure rate over the 10-call window -- and
+          # opened this SHARED breaker, browning out every other consumer until the owner
+          # logged in at 08:46. Kite was healthy and answering; we simply had no token yet.
+          # Same reasoning as RequestNotPermitted above: it says "we are not authenticated",
+          # never "the upstream is broken".
+          # ATTRIBUTION, kept honest: ~6 minutes of degradation on 2026-08-28 is attributable
+          # to this. The larger 08-27 episode (19 minutes of futures_oi, 564 cached-data
+          # lines) is BLAST-RADIUS CONTEXT for why a shared breaker matters, NOT proven
+          # causality -- those clusters began at 09:13 and are still unexplained.
+          # WARNING: the calls still FAIL. Ignoring only stops them counting toward the
+          # breaker, and CircuitBreakerDiagnostics counts ignored errors separately so this
+          # cannot become an invisible failure.
+          - org.springframework.web.client.HttpClientErrorException$Forbidden
       # OpenAlgo gets its OWN breaker so an OpenAlgo outage never trips Kite-direct calls (§4)
       openalgo-rest:
         sliding-window-type: COUNT_BASED

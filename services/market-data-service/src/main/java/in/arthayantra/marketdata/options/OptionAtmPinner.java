@@ -39,7 +39,10 @@ public class OptionAtmPinner {
       PinnedSubscriptionRegistrar registry,
       OptionsChainService chains,
       @Value("${artha.options.atm-pinner.underlyings:NIFTY 50,SENSEX}") List<String> underlyings,
-      @Value("${artha.options.atm-pinner.strike-width:5}") int strikeWidth,
+      // H44: 10. The LAST of four places this default lives (yml, compose, .env.example,
+      // here) -- review caught two of them still at 5, which would have made the change a
+      // no-op. See application.yml for the measurement.
+      @Value("${artha.options.atm-pinner.strike-width:10}") int strikeWidth,
       @Value("${artha.options.atm-pinner.expiry-horizon-days:7}") int expiryHorizonDays,
       MeterRegistry meterRegistry) {
     this.registry = registry;

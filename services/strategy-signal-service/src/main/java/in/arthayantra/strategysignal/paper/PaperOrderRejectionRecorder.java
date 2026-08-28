@@ -95,4 +95,27 @@ public class PaperOrderRejectionRecorder {
       String detail) {
     repo.insert(signalId, book, exchange, tradingsymbol, side, 0L, "ZERO_SIZE", detail, null);
   }
+
+  /**
+   * DATA_GAP_NEVER_TICKED (H44): the contract has never produced a tick, so an opened position
+   * could not be settled by any AUTOMATIC exit — every exit refuses without a real tick rather than
+   * fabricate a price (#694). Deliberately DISTINCT from {@code DATA_GAP_LOT_SIZE} (master data has
+   * no lot) and from a stale-tick refusal (a tick exists, it is merely old): conflating them makes
+   * the forensic row answer "why did this entry not happen?" with the wrong cause.
+   *
+   * <p>Only ever written while {@code artha.paper.refuse-no-tick-entries} is ARMED. With the flag
+   * off no row appears here and the condition surfaces as {@code ay_paper_fill_no_tick_total}
+   * instead — the counter says it HAPPENED, this row says it was REFUSED.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void recordNeverTicked(
+      Long signalId,
+      String book,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      String detail) {
+    repo.insert(
+        signalId, book, exchange, tradingsymbol, side, 0L, "DATA_GAP_NEVER_TICKED", detail, null);
+  }
 }

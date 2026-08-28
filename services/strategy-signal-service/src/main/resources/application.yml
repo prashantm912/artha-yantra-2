@@ -190,6 +190,21 @@ artha:
     # counted + alerted, never refused). Env-tunable via the matching compose passthroughs (.env override).
     tick-max-age-seconds: ${ARTHA_PAPER_TICK_MAX_AGE_SECONDS:15}
     bracket-starvation-alert-minutes: ${ARTHA_PAPER_BRACKET_STARVATION_ALERT_MINUTES:2}
+    # H44 CLOSABILITY GATE -- SHIPS DISARMED. When true, an OPTION entry whose contract has never
+    # produced a tick is refused 422 DATA_GAP instead of opening a position no AUTOMATIC exit could
+    # settle (entries fill without a tick; exits refuse without one -- both correct, and together
+    # they stranded two SENSEX legs for -Rs 8,892.79 on 2026-08-28).
+    #
+    # OPTION ONLY, and that is load-bearing: EQUITIES DO NOT TICK, so a class-blind form would
+    # refuse EVERY swing equity entry the moment it was armed. FUTURE is excluded too -- the
+    # mechanism is the pinned ATM strike band, which is options-specific.
+    #
+    # BEFORE ARMING, read ay_paper_fill_no_tick_total: it already counts how often this WOULD have
+    # fired, so the decision can rest on a measured rate. Arming changes which trades the book takes
+    # and is an owner call on live money. Env name MUST match the compose passthrough exactly
+    # (#653 placeholder trap) -- and note this knob does NOT appear in .env.example, matching every
+    # other artha.paper.* knob.
+    refuse-no-tick-entries: ${ARTHA_PAPER_REFUSE_NO_TICK_ENTRIES:false}
     # T10 (owner 2026-07-25): books whose bracket starvation is BY DESIGN (EOD-managed swing —
     # equities not on the live tick subscription; the 20:00/20:05 batch is the real exit path).
     # Metric still counts; WARN+page suppressed. Env name MUST match the compose passthrough

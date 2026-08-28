@@ -211,9 +211,15 @@ class PaperForensicsIntegrationTest extends StrategySignalIntegrationTestBase {
    * <p>⚠️ This asserts a LEADING indicator, not a verdict. A tick may still arrive and settle the
    * position normally — the counter says "currently unsettleable", never "doomed". Overstating it
    * would make the signal one an operator learns to ignore.
+   *
+   * <p>⚠️ The count is emitted AFTER_COMMIT by {@link NoTickFillListener}, not inline in the fill.
+   * Review caught the inline version counting REJECTED and ROLLED-BACK attempts as fills, and
+   * reading Redis on the money path where a blip could abort a trade. This test still asserts it
+   * synchronously because the caller is not inside a transaction, so the commit — and therefore the
+   * listener — completes before {@code openOrder} returns.
    */
   @Test
-  void aFillWithNoTickAtAllIsCountedAtTheMomentItHappens() {
+  void aFillWithNoTickAtAllIsCountedOnceTheFillIsDurable() {
     String sym = "H44OPT-" + UUID.randomUUID();
     double before = noTickFills();
 
@@ -257,7 +263,7 @@ class PaperForensicsIntegrationTest extends StrategySignalIntegrationTestBase {
   }
 
   private double noTickFills() {
-    return meters.find("ay_paper_fill_no_tick_total").counters().stream()
+    return meters.find(NoTickFillListener.NO_TICK_FILL_TOTAL).counters().stream()
         .mapToDouble(io.micrometer.core.instrument.Counter::count)
         .sum();
   }

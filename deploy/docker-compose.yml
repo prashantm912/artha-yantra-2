@@ -745,6 +745,8 @@ services:
       # arming a book CHANGES REALISED P&L on every co-fired trade (owner decision). No capital fork:
       # one book, one capital row, one kill switch; a sibling inherits the key's sub-account.
       ARTHA_PAPER_STRATEGY_SCOPED_BOOKS: ${ARTHA_PAPER_STRATEGY_SCOPED_BOOKS:-}
+      # H44 closability gate. DISARMED -- value matches the code default byte for byte (#653).
+      ARTHA_PAPER_REFUSE_NO_TICK_ENTRIES: ${ARTHA_PAPER_REFUSE_NO_TICK_ENTRIES:-false}
       # F7 auto-promotion: the daily 21:00-IST evaluator that marks a strategy GRADUATED (measurement +
       # ntfy only, never a live action). Default off; flip true to arm the marker pass.
       ARTHA_GRADUATION_PROMOTION_ENABLED: ${ARTHA_GRADUATION_PROMOTION_ENABLED:-false}

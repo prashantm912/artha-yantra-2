@@ -897,7 +897,35 @@ Run in order; each answers one question. Canned SQL in §6.
     WHERE r.generated_at >= :d0 AND c->>'rail'='confluence-composite'
       AND (c->>'pass')::boolean=false GROUP BY 1;
     ```
-40. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+40. **Every funded leg must have a live settlement reference — a leg outside the tick-subscription
+    band FILLS but can never SETTLE** (added 2026-08-28, first live occurrence) — three individually
+    correct mechanisms compose into an unclosable position: (1) the paper entry's documented no-tick
+    fallback fills at `SIGNAL_ENTRY` (the gate-captured chain premium — `PaperService` ≈`:813-845`);
+    (2) the #694 settle doctrine refuses to settle a reference that has NEVER ticked (never fabricate);
+    (3) the tick WS subscribes a **static ATM strike band fixed at the open** (measured 2026-08-28:
+    BFO = 11 strikes 76,700–77,700 off the 09:15 spot, unchanged all session) while the
+    `StrikePicker`'s static premium band (SENSEX 300–800) reaches **~800 pts ITM — outside it**.
+    Result on 2026-08-28: funded positions 99/100 (`SENSEX2690377900PE`/`77800PE`) stuck OPEN through
+    TIME_STOP, signal-exit AND the 15:44:58 INTRADAY_MTM square-off (`paper settle refused: … has
+    never ticked — left OPEN`), 1,973 bracket-starved WARNs, sub-accounts 2/3 allocation-dead
+    (governor refusals on live re-fires), and the risk gate's dayPnl blind to ≈ −₹8,751 of
+    chain-marked loss — the `daily_profit_target` tripped "in profit" on a truly negative day.
+    **Standing check on every session with a funded fire:**
+    ```sql
+    -- any funded leg with no 1m bars = no tick history = unclosable until a tick arrives
+    SELECT p.id, p.tradingsymbol, p.status FROM strategy.paper_positions p
+    WHERE p.opened_at >= :d0 AND NOT EXISTS (
+      SELECT 1 FROM marketdata.candles c WHERE c.tradingsymbol = p.tradingsymbol
+        AND c.interval='1m' AND c.bucket >= :d0915);
+    ```
+    ```bash
+    docker logs ay-strategy-signal-service --since <open-UTC> 2>&1 | grep -c "paper settle refused"
+    ```
+    The shadow book is exempt by design (it settles off chain LTPs); only FUNDED fills need a
+    closable reference. Fix options (owner, ledger NEW-12): entry-side guard / re-pick inward,
+    subscribe-on-fill, or both. The eventual backstop for a stuck position is the past-expiry recon.
+41. *(§3.41 is the BOOT WINDOW — see §4.1b; kept out of sequence so the template's §4b citation stays stable)*
+42. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

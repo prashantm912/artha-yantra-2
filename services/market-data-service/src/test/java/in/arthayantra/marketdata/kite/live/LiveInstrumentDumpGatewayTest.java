@@ -141,4 +141,37 @@ class LiveInstrumentDumpGatewayTest {
     }
     return bytes.toByteArray();
   }
+
+  /**
+   * ⚠️ A tokenless dump must not reach the executor at all.
+   *
+   * <p>Until 2026-08-28 the token was resolved INSIDE the supplier handed to
+   * {@code KiteCallExecutor}, so a boot with no session still acquired the limiter permit and
+   * recorded the local {@code KITE_TOKEN_EXPIRED} as a {@code kite-rest} failure — while making
+   * zero wire calls. The DUMP bucket refills ONE permit per ~30 minutes for the whole
+   * three-exchange sweep, so that is a real cost: the 08:30 sync and its catch-ups could spend the
+   * budget on a no-op.
+   *
+   * <p>Found by cross-vendor review. I had claimed a cleared token cost "zero wire calls, zero
+   * breaker pressure, zero rate budget" — true for the quote and historical gateways, which
+   * resolve first, and FALSE here. Generalising from two of three.
+   */
+  @Test
+  void aDumpWithNoSessionNeverEntersTheExecutor() {
+    in.arthayantra.marketdata.kite.KiteCallExecutor executor =
+        org.mockito.Mockito.mock(in.arthayantra.marketdata.kite.KiteCallExecutor.class);
+    LiveInstrumentDumpGateway gateway =
+        new LiveInstrumentDumpGateway(
+            org.springframework.web.client.RestClient.builder(),
+            "https://api.kite.trade",
+            "placeholder-api-key",
+            java.util.Optional::empty,
+            executor);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(gateway::fetchDump)
+        .isInstanceOf(in.arthayantra.common.web.error.ApiException.class)
+        .hasMessageContaining("no live Kite session for dump sync");
+
+    org.mockito.Mockito.verifyNoInteractions(executor);
+  }
 }

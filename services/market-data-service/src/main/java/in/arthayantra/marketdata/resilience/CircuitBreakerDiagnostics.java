@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.resilience;
 
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.util.ArrayDeque;
@@ -55,13 +56,27 @@ public class CircuitBreakerDiagnostics {
   /** How many recent failure causes to keep per breaker. The window that opens it is 10 calls. */
   private static final int CAUSES_KEPT = 10;
 
+  /**
+   * Ignored errors are counted, never silently dropped.
+   *
+   * <p>WARNING: resilience4j fires {@code onIgnoredError}, NOT {@code onError}, for an exception
+   * named in {@code ignore-exceptions}. So the moment 403 was added to that list, this class
+   * would have gone silent on the very failures it was written to expose -- the boot-time
+   * TokenException burst. A fix that hides its own evidence is worse than the defect.
+   */
+  private static final String IGNORED_TOTAL = "ay_circuit_breaker_ignored_total";
+
   private final Clock clock;
+
+  private final MeterRegistry meters;
 
   /** Per-breaker ring of recent failure causes. Guarded by its own monitor; writes are rare. */
   private final java.util.Map<String, Deque<String>> recentCauses = new java.util.concurrent.ConcurrentHashMap<>();
 
-  public CircuitBreakerDiagnostics(CircuitBreakerRegistry registry, Clock clock) {
+  public CircuitBreakerDiagnostics(
+      CircuitBreakerRegistry registry, Clock clock, MeterRegistry meters) {
     this.clock = clock;
+    this.meters = meters;
     registry.getAllCircuitBreakers().forEach(this::instrument);
     // Breakers are created lazily on first use, so instrumenting only what exists at startup would
     // miss any breaker whose first call happens later — which is most of them.
@@ -82,6 +97,22 @@ public class CircuitBreakerDiagnostics {
                       + cause.getClass().getSimpleName()
                       + ": "
                       + summarise(cause));
+            })
+        .onIgnoredError(
+            event -> {
+              Throwable cause = event.getThrowable();
+              meters
+                  .counter(
+                      IGNORED_TOTAL, "name", name, "exception", cause.getClass().getSimpleName())
+                  .increment();
+              // DEBUG, not WARN: a pre-login boot produces these in bursts by design, and a
+              // warning per call would train the reader to skip the log. The COUNTER is the
+              // signal; this line is for when someone is already looking.
+              log.debug(
+                  "circuit breaker {} ignored {}: {}",
+                  name,
+                  cause.getClass().getSimpleName(),
+                  summarise(cause));
             })
         .onStateTransition(
             event -> {

@@ -348,4 +348,120 @@ class LiveLoginWireClientTest {
 
     assertThat(wireMock.findAll(postRequestedFor(urlPathEqualTo(CREDENTIAL_PATH)))).isEmpty();
   }
+
+  /**
+   * THE regression this whole change exists for.
+   *
+   * <p>Measured live twice — 2026-08-27 21:25 and 2026-08-28 08:40 — both
+   * {@code redirect carried no request_token}. That message is the discriminating evidence:
+   * status WAS 3xx and Location WAS a valid URI, it simply held no token. Reading only the
+   * FIRST hop can never succeed against a chain.
+   *
+   * <p>WARNING: changing the authorize HOST (#1515) did not fix it, which is what rules the
+   * cookie-scope theory out. Two identical failures across a host change beat either theory.
+   */
+  @Test
+  void theTokenIsFoundOnALaterHopOfTheAuthorizeChain() {
+    stubCredentials();
+    stubTwofa();
+    wireMock.stubFor(
+        get(urlPathEqualTo(AUTHORIZE_PATH))
+            .willReturn(
+                aResponse()
+                    .withStatus(302)
+                    .withHeader("Location", wireMock.baseUrl() + "/connect/finish?v=3")));
+    wireMock.stubFor(
+        get(urlPathEqualTo("/connect/finish"))
+            .willReturn(
+                aResponse()
+                    .withStatus(302)
+                    .withHeader(
+                        "Location",
+                        "https://127.0.0.1/redirect?action=login&status=success"
+                            + "&request_token=token-from-hop-two")));
+
+    assertThat(client().fetchRequestToken()).isEqualTo("token-from-hop-two");
+  }
+
+  /**
+   * A token in the Location is read WITHOUT fetching the destination. The stub host is
+   * unreachable on purpose: if the client fetched it, this test would fail with a connection
+   * error instead of returning the token, so the unreachability IS the assertion.
+   */
+  @Test
+  void theFinalHopIsReadFromTheHeaderAndNeverFetched() {
+    stubCredentials();
+    stubTwofa();
+    wireMock.stubFor(
+        get(urlPathEqualTo(AUTHORIZE_PATH))
+            .willReturn(
+                aResponse()
+                    .withStatus(302)
+                    .withHeader(
+                        "Location",
+                        "https://example.invalid/redirect?request_token=token-off-origin")));
+
+    assertThat(client().fetchRequestToken()).isEqualTo("token-off-origin");
+  }
+
+  /**
+   * THE cross-origin guard, tested where it actually applies: a hop that leaves the login
+   * origin carrying NO token must STOP the chain rather than be followed.
+   *
+   * <p>WARNING: my first cut of this test put the token ON the cross-origin hop, so
+   * {@code tokenIfPresent} returned before the origin check ever ran and the test passed
+   * whatever the guard did. A tokenless hop is what forces the guard to decide.
+   *
+   * <p>example.invalid is unreachable, so following it would surface as a transport error;
+   * getting the precise no-token refusal instead is the proof it was not followed.
+   */
+  @Test
+  void aTokenlessCrossOriginHopStopsTheChainInsteadOfBeingFollowed() {
+    stubCredentials();
+    stubTwofa();
+    wireMock.stubFor(
+        get(urlPathEqualTo(AUTHORIZE_PATH))
+            .willReturn(
+                aResponse()
+                    .withStatus(302)
+                    .withHeader("Location", "https://example.invalid/somewhere?v=3")));
+
+    assertThatThrownBy(() -> client().fetchRequestToken())
+        .isInstanceOf(LoginRefused.class)
+        .hasMessageContaining("redirect carried no request_token");
+  }
+
+  /** A redirect loop must fail loudly and bounded, never spin. */
+  @Test
+  void aRedirectLoopIsRefusedAfterTheHopBudget() {
+    stubCredentials();
+    stubTwofa();
+    wireMock.stubFor(
+        get(urlPathEqualTo(AUTHORIZE_PATH))
+            .willReturn(
+                aResponse()
+                    .withStatus(302)
+                    .withHeader("Location", wireMock.baseUrl() + AUTHORIZE_PATH)));
+
+    assertThatThrownBy(() -> client().fetchRequestToken())
+        .isInstanceOf(LoginRefused.class)
+        .hasMessageContaining("within 5 redirects");
+  }
+
+  /**
+   * A hop that stops WITHOUT a token still produces the precise original refusal, rather than
+   * the generic budget message — the single-hop diagnosis must not regress into a vague one.
+   */
+  @Test
+  void aTerminalHopWithNoTokenStillNamesTheRealRefusal() {
+    stubCredentials();
+    stubTwofa();
+    wireMock.stubFor(
+        get(urlPathEqualTo(AUTHORIZE_PATH))
+            .willReturn(aResponse().withStatus(200)));
+
+    assertThatThrownBy(() -> client().fetchRequestToken())
+        .isInstanceOf(LoginRefused.class)
+        .hasMessageContaining("expected a redirect");
+  }
 }

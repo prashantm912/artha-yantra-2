@@ -29,32 +29,25 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *       this file used to assert on its own.
  * </ul>
  *
- * <p>⚠️ <b>CORRECTED 2026-08-28: the authorize default pointed at the wrong host, and that is
- * the cause of the live AUTHORIZE failure.</b> This javadoc used to say "the two hosts are
- * genuinely different and that is not a typo", and defaulted {@code authorizeBaseUrl} to
- * {@code https://kite.trade}. Measured live 2026-08-27: credential and 2FA both succeeded,
- * then AUTHORIZE returned {@code UNEXPECTED_RESPONSE (redirect carried no request_token)}.
- * Kite Connect documents the authorize endpoint as {@code https://kite.zerodha.com/connect/login},
- * and the official SDK pins that literal URL.
+ * <p>⚠️ <b>CORRECTED 2026-08-28: the authorize default pointed at the wrong host, which was worth
+ * fixing on its own — but it was NOT the cause of the live failure.</b> This javadoc used to say
+ * "the two hosts are genuinely different and that is not a typo", and defaulted {@code authorizeBaseUrl}
+ * to {@code https://kite.trade}. The corrected default matches what Kite Connect documents and
+ * what its official SDK pins, so it stands.
  *
- * <p>⚠️ <b>WHY it failed is NOT settled. The two candidates are different MECHANISMS, but they
- * share the same fix</b> — which is what lets this ship with the mechanism open.
- * Only the failing STEP was measured, never the mechanism. Both of these fit the evidence:
- *
- * <ul>
- *   <li><b>Intermediate redirect</b> — {@code kite.trade/connect/login} answers with a 302 to
- *       {@code kite.zerodha.com} carrying no token, and this client disables redirects and
- *       treats the FIRST 3xx as the token-bearing one. This is the more direct explanation and
- *       needs no cookie reasoning at all.
- *   <li><b>Cookie scope</b> — the 2FA session cookie is set on the login origin and
- *       {@link LoginCookieJar} correctly refuses to send it cross-origin.
- * </ul>
- *
- * <p><b>The fix is the same either way</b> (default to the documented endpoint), which is why it
- * ships without the mechanism settled — but do not repeat the earlier mistake of writing one
- * candidate down as measured fact. Only a successful live run, or captured redirect metadata,
- * distinguishes them. Cross-vendor review, 2026-08-28.
- *
+ * <p>⚠️ <b>The host change did NOT fix the login, and saying otherwise here was wrong for
+ * half a day.</b> Measured live TWICE — 2026-08-27 21:25 and again 2026-08-28 08:40 AFTER the host
+ * correction shipped and was armed — both with a byte-identical
+ * {@code UNEXPECTED_RESPONSE (redirect carried no request_token)}. Two identical failures across
+ * a host change is what settled the mechanism: the FIRST redirect is tokenless, and reading only
+ * that one can never succeed. The real fix is the bounded chain walk in
+ * {@code LiveLoginWireClient.authorizeFollowingRedirects}.
+
+ * <p>The mechanism is now SETTLED by the second failure, and the earlier cookie-scope theory is
+ * dead: same-origin authorize did not help. Cross-vendor review had flagged the intermediate-redirect
+ * explanation as the more direct one BEFORE the host fix shipped; it was right and the record
+ * says so rather than quietly reattributing.
+
  * <p>{@code LoginEndpoints.PINNED_ORIGINS} now holds ONE origin. An earlier draft of this
  * javadoc justified keeping {@code kite.trade} by claiming the token exchange needed it;
  * that was false — the exchange uses {@code KiteHttpProperties.baseUrl} — and the allowlist

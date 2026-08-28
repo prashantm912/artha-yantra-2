@@ -42,6 +42,19 @@ Arguments: `post [YYYY-MM-DD]` (default: the most recent completed session) · `
    but only +0.30% intraday). **If the label is `chop`, say so in the report and re-read ledger row
    G11** — that observation is the row's blocker, and this stamp is the only thing that will ever
    announce it.
+6b. ⚠️ **BOOT WINDOW (README §4.1b) — a required section, and a clean window must be written as an
+    explicit zero rather than omitted.** Report boot -> first CONNECTED separately from the session.
+    "Zero in-session outage lines" says NOTHING about this window: every in-session bound in the
+    README starts at 09:15, so a defect living entirely between boot and first login cannot appear
+    in any of them.
+
+    Measured cost of not having this: on 2026-08-26 a routine noted "kite-rest circuit open
+    pre-login ... healed by 08:35:53" in its working notes and the committed file said "zero
+    in-session outage lines". The finding was dropped as transient; two days later the same defect
+    was investigated from scratch as unknown and an instrumentation change was built to rediscover
+    it. **A benign boot-window event still gets a line saying what happened and why it was
+    harmless — "benign" and "absent" must not read the same.**
+
 7. If you found a NEW analysis dimension or data point, append it to README §3 (numbered,
    append-only) with its SQL in §6 — that is how the method is designed to grow.
 8. Ship as a docs-only PR (squash-merge normally — ⚠️ corrected 2026-08-04: docs PRs used to be

@@ -40,6 +40,7 @@ class CircuitBreakerDiagnosticsTest {
   private ListAppender<ILoggingEvent> logs;
   private Logger diagnosticsLogger;
   private CircuitBreakerRegistry registry;
+  private io.micrometer.core.instrument.simple.SimpleMeterRegistry meters;
 
   @BeforeEach
   void attachAppender() {
@@ -53,8 +54,9 @@ class CircuitBreakerDiagnosticsTest {
     // "created after startup" would pass for the same reason as its sibling and prove nothing --
     // which is exactly what the red-proof caught, by reddening both at once.
     registry.circuitBreaker("kite-rest");
+    meters = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
     new CircuitBreakerDiagnostics(
-        registry, Clock.fixed(Instant.parse("2026-08-27T03:43:00Z"), ZoneOffset.UTC));
+        registry, Clock.fixed(Instant.parse("2026-08-27T03:43:00Z"), ZoneOffset.UTC), meters);
   }
 
   @AfterEach
@@ -131,5 +133,58 @@ class CircuitBreakerDiagnosticsTest {
     }
 
     assertThat(logs.list).isEmpty();
+  }
+
+  /**
+   * ⚠️ The guard against this fix hiding its own evidence.
+   *
+   * <p>resilience4j fires {@code onIgnoredError}, NOT {@code onError}, for anything named in
+   * {@code ignore-exceptions}. So the moment 403 was added to that list for {@code kite-rest},
+   * this class went silent on the boot-time TokenException burst it was written to expose.
+   *
+   * <p>⚠️ An earlier version of this javadoc said "nothing would count them". That is FALSE and
+   * cross-vendor review corrected it: resilience4j already records ignored calls as
+   * {@code resilience4j_circuitbreaker_calls_seconds_count{kind="ignored"}} — verified live.
+   * What this handler actually adds is the EXCEPTION DIMENSION: the stock metric says a call was
+   * ignored, not WHICH exception, so a boot 403 burst and any other ignored class are
+   * indistinguishable in it. That distinction is the whole diagnostic value here.
+   *
+   * <p>They must stay countable, and they must NOT open the breaker. Both are asserted here.
+   */
+  @Test
+  void anIgnoredErrorIsCountedAndDoesNotOpenTheBreaker() {
+    CircuitBreakerRegistry ignoring =
+        CircuitBreakerRegistry.of(
+            CircuitBreakerConfig.from(CONFIG).ignoreExceptions(IllegalStateException.class).build());
+    ignoring.circuitBreaker("kite-rest");
+    new CircuitBreakerDiagnostics(
+        ignoring, Clock.fixed(Instant.parse("2026-08-28T03:09:50Z"), ZoneOffset.UTC), meters);
+    CircuitBreaker breaker = ignoring.circuitBreaker("kite-rest");
+
+    for (int i = 0; i < 8; i++) {
+      try {
+        breaker.executeCallable(
+            () -> {
+              throw new IllegalStateException("no token yet");
+            });
+      } catch (Exception expected) {
+        // throwing IS the point of the call
+      }
+    }
+
+    assertThat(breaker.getState())
+        .as("an ignored failure must never open the breaker")
+        .isEqualTo(CircuitBreaker.State.CLOSED);
+    assertThat(
+            meters
+                .find("ay_circuit_breaker_ignored_total")
+                .tag("name", "kite-rest")
+                .counter())
+        .as("ignored must stay ATTRIBUTABLE — the stock metric counts ignored calls but"
+            + " not which exception, and the exception is the diagnostic")
+        .isNotNull();
+    assertThat(
+            meters.find("ay_circuit_breaker_ignored_total").tag("name", "kite-rest").counter().count())
+        .isEqualTo(8.0);
   }
 }

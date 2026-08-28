@@ -47,6 +47,8 @@ class PaperForensicsIntegrationTest extends StrategySignalIntegrationTestBase {
   @Autowired private StringRedisTemplate redis;
   @Autowired private ObjectMapper objectMapper;
 
+  @Autowired private io.micrometer.core.instrument.MeterRegistry meters;
+
   @Test
   void anExplicitPriceFillStampsRefSourceCallerAndCapturesTheFlagSnapshot() {
     String sym = "TESTOPT-" + UUID.randomUUID();
@@ -195,5 +197,101 @@ class PaperForensicsIntegrationTest extends StrategySignalIntegrationTestBase {
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
+  }
+
+  /**
+   * H44: a fill struck with NO tick at all is the precursor to a position the exit path can never
+   * settle, and until 2026-08-28 it was silent at the moment it happened.
+   *
+   * <p><b>Measured that day:</b> two SENSEX PE legs filled this way at 11:37, and it was only
+   * NOTICED at the 15:44 square-off — hours later, via 1,973 starved-bracket WARNs, ~Rs 8,750
+   * unbooked and two sub-accounts allocation-dead. The information existed at fill time; nothing
+   * surfaced it.
+   *
+   * <p>⚠️ This asserts a LEADING indicator, not a verdict. A tick may still arrive and settle the
+   * position normally — the counter says "currently unsettleable", never "doomed". Overstating it
+   * would make the signal one an operator learns to ignore.
+   */
+  @Test
+  void aFillWithNoTickAtAllIsCountedAtTheMomentItHappens() {
+    String sym = "H44OPT-" + UUID.randomUUID();
+    double before = noTickFills();
+
+    // No seedTick(...) on purpose: "no tick was EVER seen", not a stale one.
+    //
+    // ⚠️ An EXPLICIT price, i.e. the CALLER branch — which is what production actually does. The
+    // scalper supplies the gate-captured chain premium, so both positions stranded on 2026-08-28
+    // filled CALLER. paper_orders all-time: 119 CALLER, 42 LIVE_TICK, 0 SIGNAL_ENTRY. An earlier
+    // cut of this test drove the SIGNAL_ENTRY fallback and passed while watching a branch that
+    // has never executed.
+    paper.openOrder(
+        new PaperService.OrderRequest(
+            null, "BFO", sym, "BUY", 50, new BigDecimal("779.55"), null, null));
+    Map<String, Object> order =
+        jdbc.queryForMap(
+            "SELECT ref_source FROM paper_orders WHERE tradingsymbol=? ORDER BY id DESC LIMIT 1",
+            sym);
+    assertThat(order.get("ref_source"))
+        .as("production prices these from the chain, so the fill is CALLER -- the tick is irrelevant"
+            + " to HOW it filled, which is exactly why the indicator must not key on the branch")
+        .isEqualTo("CALLER");
+    assertThat(noTickFills() - before)
+        .as("the unsettleable state must be visible AT FILL TIME, not hours later at square-off")
+        .isEqualTo(1.0);
+  }
+
+  /**
+   * The control, and the reason this counter is worth having: a normal tick-priced fill must NOT
+   * move it. A counter that fires on healthy fills is noise, and noise is how the real signal gets
+   * ignored.
+   */
+  @Test
+  void anOrdinaryTickPricedFillDoesNotMoveTheNoTickCounter() {
+    String sym = "H44OK-" + UUID.randomUUID();
+    seedTick(sym, "101.00", OffsetDateTime.now(ZoneOffset.UTC));
+    double before = noTickFills();
+
+    paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, null, null, null));
+
+    assertThat(noTickFills()).isEqualTo(before);
+  }
+
+  private double noTickFills() {
+    return meters.find("ay_paper_fill_no_tick_total").counters().stream()
+        .mapToDouble(io.micrometer.core.instrument.Counter::count)
+        .sum();
+  }
+
+  /** A published signal carrying an entry price, so the no-tick fallback has something to use. */
+  private long seedSignalWithEntry(String tradingsymbol, BigDecimal entry) {
+    String suffix = UUID.randomUUID().toString();
+    UUID strategyId =
+        jdbc.queryForObject(
+            "INSERT INTO strategies (slug, name, tags) VALUES (?, ?, ?::text[]) RETURNING id",
+            UUID.class,
+            "h44-" + suffix,
+            "H44 " + suffix,
+            "{scalper}");
+    UUID versionId =
+        jdbc.queryForObject(
+            """
+            INSERT INTO strategy_versions
+              (strategy_id, version, config_yaml, config, schema_version, checksum, status)
+            VALUES (?, '1', '', '{}'::jsonb, '1', ?, 'published') RETURNING id
+            """,
+            UUID.class,
+            strategyId,
+            "chk-" + suffix);
+    return jdbc.queryForObject(
+        """
+        INSERT INTO signals
+          (strategy_version_id, exchange, tradingsymbol, "interval", signal_type, side,
+           composite_score, score_breakdown, entry_price)
+        VALUES (?, 'BFO', ?, '3m', 'ENTRY', 'BUY', 0.7, '{}'::jsonb, ?) RETURNING id
+        """,
+        Long.class,
+        versionId,
+        tradingsymbol,
+        entry);
   }
 }

@@ -536,7 +536,10 @@ services:
       ARTHA_KITE_AUTO_LOGIN_WATCHDOG_CRON: "${ARTHA_KITE_AUTO_LOGIN_WATCHDOG_CRON:-0 15 8 * * MON-FRI}"
       # Live option-premium 1m capture: nearest-expiry ATM +/- width, both CE and PE.
       ARTHA_OPTIONS_ATM_PINNER_UNDERLYINGS: ${ARTHA_OPTIONS_ATM_PINNER_UNDERLYINGS:-NIFTY 50,SENSEX}
-      ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH: ${ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH:-5}
+      # H44: 10, not 5 -- at 5 the MEDIAN SENSEX pick (524 pts) fell outside the +/-500 band, so
+      # its contract never ticked and no exit could settle it. Measured 2026-08-28: BFO p50 524 /
+      # max 829, NFO p50 168 / max 267. VALUE MATCHES THE CODE DEFAULT, byte for byte (#653).
+      ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH: ${ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH:-10}
       ARTHA_OPTIONS_ATM_PINNER_EXPIRY_HORIZON_DAYS: ${ARTHA_OPTIONS_ATM_PINNER_EXPIRY_HORIZON_DAYS:-7}
     # kite_* + master key + the OpenAlgo API key mount into THIS service only (B-2: the token
     # and the credentials never reach any other container). The openalgo key is read only when

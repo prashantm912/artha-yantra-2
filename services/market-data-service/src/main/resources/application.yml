@@ -297,7 +297,21 @@ artha:
     # Live premium 1m capture: nearest expiry, ATM +/- configured width, both CE and PE.
     atm-pinner:
       underlyings: ${ARTHA_OPTIONS_ATM_PINNER_UNDERLYINGS:NIFTY 50,SENSEX}
-      strike-width: ${ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH:5}
+      # H44: 5 was NARROWER THAN THE PICKER REACHES, and that stranded funded capital. A leg
+      # whose contract is not in this band never ticks, and every exit refuses to settle without
+      # a real tick (#694 doctrine, never fabricate) -- so the position cannot be closed at all.
+      # Measured 2026-08-28 over every scalper option fill, |strike - spot| at fill time:
+      #   BFO (SENSEX, 100-pt strikes): n=60, p50 524, p90 715, max 829  -> up to 8.3 strikes
+      #   NFO (NIFTY,   50-pt strikes): n=47, p50 168, p90 254, max 267  -> up to 5.3 strikes
+      # At width 5 the SENSEX MEDIAN pick (524) already sat outside the +/-500 band. This was
+      # systemic, not an expiry-day accident: two legs stranded on 2026-08-28 for ~Rs 8,893.
+      # 10 covers the measured max on both roots with margin.
+      #
+      # WARNING: this widens the band, it does not RE-CENTRE it. The band is pinned on the
+      # morning spot and does not follow it intraday, so a large move still walks picks out of
+      # range. Width is the cheap half; a spot-following centre is the real fix and is unbuilt.
+      # Judge this by ay_paper_fill_no_tick_total, which counts fills on never-ticked contracts.
+      strike-width: ${ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH:10}
       expiry-horizon-days: ${ARTHA_OPTIONS_ATM_PINNER_EXPIRY_HORIZON_DAYS:7}
   data-quality:
     # FID P2-4: settled-day per-symbol completeness (chain capture, primary 1m, NSE EQ bhavcopy).

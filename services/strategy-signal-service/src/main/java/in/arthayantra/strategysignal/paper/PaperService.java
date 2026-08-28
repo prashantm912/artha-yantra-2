@@ -45,6 +45,12 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class PaperService {
 
   private static final Logger log = LoggerFactory.getLogger(PaperService.class);
+
+  /**
+   * Counts fills struck WITHOUT any tick. See {@link #NO_TICK_FILL_TOTAL} at the use site for why
+   * this is a leading indicator of an unclosable position rather than a curiosity.
+   */
+  private static final String NO_TICK_FILL_TOTAL = "ay_paper_fill_no_tick_total";
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
   /**
@@ -240,6 +246,8 @@ public class PaperService {
   private final PaperPositionLotRepository lots;
   private final PaperPositionRepository positions;
   private final PaperFillService fills;
+  private final MeterRegistry meterRegistry;
+
   private final LastTickReader lastTick;
   private final InstrumentMetaClient instruments;
   private final SignalRepository signals;
@@ -310,6 +318,7 @@ public class PaperService {
       @org.springframework.beans.factory.annotation.Value("${artha.paper.strategy-scoped-books:}")
           String strategyScopedBooks,
       MeterRegistry meterRegistry) {
+    this.meterRegistry = meterRegistry;
     this.orders = orders;
     this.lots = lots;
     this.positions = positions;
@@ -843,6 +852,27 @@ public class PaperService {
         reference = signalEntry;
         refSource = reference != null ? "SIGNAL_ENTRY" : null;
       }
+    }
+    // H44 LEADING INDICATOR. The precursor to an unclosable position is NOT how the entry was
+    // priced -- it is that NO tick has ever been seen for the instrument. Every exit refuses
+    // without a real tick (the #694 doctrine: settles use the last real tick at any age and refuse
+    // only when none was EVER seen, never fabricating). So a fill on a never-ticked instrument is
+    // funded capital the exit path cannot release.
+    //
+    // ⚠️ THIS PROBE IS DELIBERATELY OUTSIDE THE PRICING BRANCHES. An earlier cut counted only the
+    // SIGNAL_ENTRY fallback, and `paper_orders` says that branch has NEVER executed: 119 CALLER,
+    // 42 LIVE_TICK, 0 SIGNAL_ENTRY all-time. The two positions stranded on 2026-08-28 both filled
+    // CALLER -- the scalper supplies the gate-captured chain premium, so the fill never consults
+    // the tick feed at all. An indicator on the fallback would have been armed on an operand that
+    // is structurally zero, and would not have fired for the very case it was written for.
+    if (lastTick.lastTick(exchange, tradingsymbol).isEmpty()) {
+      meterRegistry.counter(NO_TICK_FILL_TOTAL, "exchange", exchange).increment();
+      log.warn(
+          "paper fill for {}:{} struck with NO tick ever seen (ref={}) — this position cannot be"
+              + " settled by any exit path until a tick arrives (H44)",
+          exchange,
+          tradingsymbol,
+          refSource);
     }
     if (reference == null) {
       recordNoPriceRejectQuietly(request, exchange, tradingsymbol, side);

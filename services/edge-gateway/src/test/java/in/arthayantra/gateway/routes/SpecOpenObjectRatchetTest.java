@@ -340,13 +340,18 @@ class SpecOpenObjectRatchetTest {
                   "#ErrorResponse.details"),
           "backtest-service",
               Set.of(
-                  // DELIBERATE STOP: genuinely polymorphic — the empty path emits 5 keys, the
-                  // populated path 16, so one record would add 11 null keys to the empty response.
-                  // That is a wire change, not a retyping.
-                  "GET /api/v1/backtests/{backtestId}/hero-zero-premium 200",
-                  // DELIBERATE STOP: conditional for the same reason — its empty path emits fewer
-                  // keys than its populated path.
-                  "GET /api/v1/backtests/{backtestId}/oi-attribution 200",
+                  // ⚠️ hero-zero-premium and oi-attribution WERE frozen here as "deliberate stops"
+                  // and are GONE as of 2026-08-29 — both converted to records on an owner shape
+                  // decision, so backtest now freezes NO open response OBJECT (the JsonNode
+                  // passthroughs below are a different, looser category and stay).
+                  //
+                  // ⚠️ THE LESSON, AND I LEARNED IT TWICE IN ONE DAY: this platform has TWO
+                  // ratchets on the same fact — MapReturnRatchetTest counts Map-returning HANDLERS,
+                  // this one checks the CAPTURED SPEC — and they must move TOGETHER. The
+                  // market-data conversion lowered one and left the other stale; CI caught it. I
+                  // then wrote exactly that warning into the market-data commit, converted
+                  // backtest, and made the SAME omission. Writing a lesson down is not the same as
+                  // applying it: when you lower one ratchet, grep for the other BEFORE pushing.
                   // springdoc renders a Jackson JsonNode as the EMPTY schema {} — "any JSON at
                   // all", strictly looser than additionalProperties:{}. These are the persisted
                   // JSONB passthroughs (curves, metrics, saved-view filters, trade contributions)

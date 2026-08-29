@@ -75,8 +75,7 @@ class HeroZeroPremiumServiceTest {
   }
 
   @Test
-  @SuppressWarnings("unchecked")
-  void classifiesHeroZeroFlatAndConfirmsThePerStrikeMove() {
+    void classifiesHeroZeroFlatAndConfirmsThePerStrikeMove() {
     UUID run = UUID.randomUUID();
 
     // HERO: entry 100, surges to a 250 peak (2.5×), exits 200; premium ran +66.7% in the 15m before entry.
@@ -106,31 +105,31 @@ class HeroZeroPremiumServiceTest {
                 trade(2, "ZERO", ts(14, 40), ts(14, 50), "100", "40", "50"),
                 trade(3, "NONE", ts(14, 40), ts(14, 50), "100", "0", "50")));
 
-    Map<String, Object> out = svc.diagnostics(run);
+    HeroZeroPremiumService.HeroZeroPremium out = svc.diagnostics(run);
 
-    assertThat(out.get("tradeCount")).isEqualTo(3);
-    assertThat(out.get("tradesPriced")).isEqualTo(2);
-    assertThat(out.get("tradesUnpriced")).isEqualTo(1);
-    assertThat(out.get("heroes")).isEqualTo(1);
-    assertThat(out.get("zeros")).isEqualTo(1);
-    assertThat(out.get("flats")).isEqualTo(0);
-    assertThat(out.get("confirmed")).isEqualTo(1); // only HERO ran >50% into entry
+    assertThat(out.tradeCount()).isEqualTo(3);
+    assertThat(out.tradesPriced()).isEqualTo(2);
+    assertThat(out.tradesUnpriced()).isEqualTo(1);
+    assertThat(out.heroes()).isEqualTo(1);
+    assertThat(out.zeros()).isEqualTo(1);
+    assertThat(out.flats()).isEqualTo(0);
+    assertThat(out.confirmed()).isEqualTo(1); // only HERO ran >50% into entry
 
-    List<Map<String, Object>> rows = (List<Map<String, Object>>) out.get("trades");
-    Map<String, Object> hero = rows.get(0);
-    assertThat(hero.get("class")).isEqualTo("HERO");
-    assertThat(((BigDecimal) hero.get("peakMultiple"))).isEqualByComparingTo("2.5");
-    assertThat((Boolean) hero.get("confirmed")).isTrue();
-    assertThat(((BigDecimal) hero.get("premiumChangePct"))).isGreaterThan(new BigDecimal("66"));
-    assertThat((Boolean) hero.get("slTouched")).isFalse();
-    assertThat(hero.get("mirrorSkewPct")).isNull(); // no paired contract row
+    List<HeroZeroPremiumService.HeroZeroTrade> rows = out.trades();
+    HeroZeroPremiumService.HeroZeroTrade hero = rows.get(0);
+    assertThat(hero.klass()).isEqualTo("HERO");
+    assertThat(hero.peakMultiple()).isEqualByComparingTo("2.5");
+    assertThat(hero.confirmed()).isTrue();
+    assertThat(hero.premiumChangePct()).isGreaterThan(new BigDecimal("66"));
+    assertThat(hero.slTouched()).isFalse();
+    assertThat(hero.mirrorSkewPct()).isNull(); // no paired contract row
 
-    Map<String, Object> zero = rows.get(1);
-    assertThat(zero.get("class")).isEqualTo("ZERO");
-    assertThat((Boolean) zero.get("confirmed")).isFalse();
+    HeroZeroPremiumService.HeroZeroTrade zero = rows.get(1);
+    assertThat(zero.klass()).isEqualTo("ZERO");
+    assertThat(zero.confirmed()).isFalse();
 
-    Map<String, Object> none = rows.get(2);
-    assertThat(none.get("priced")).isEqualTo(false);
+    HeroZeroPremiumService.HeroZeroTrade none = rows.get(2);
+    assertThat(none.priced()).isEqualTo(false);
   }
 
   @Test
@@ -147,13 +146,12 @@ class HeroZeroPremiumServiceTest {
     when(trades.findByRun(eq(run), anyInt(), anyInt(), any(), any(), any()))
         .thenReturn(List.of(trade(1, "SLHIT", ts(14, 40), ts(14, 50), "100", "60", "50")));
 
-    Map<String, Object> out = svc.diagnostics(run);
-    assertThat(out.get("slTouched")).isEqualTo(1);
+    HeroZeroPremiumService.HeroZeroPremium out = svc.diagnostics(run);
+    assertThat(out.slTouched()).isEqualTo(1);
   }
 
   @Test
-  @SuppressWarnings("unchecked")
-  void rejectsAStaleConfirmBaselineOnASparseSeries() {
+    void rejectsAStaleConfirmBaselineOnASparseSeries() {
     UUID run = UUID.randomUUID();
     // bars only at entry-30m and entry — NO bar near entry-15m, so the floor lookup would otherwise
     // grab the 30m-old bar and compute a wrong-window %-change. The window+grace guard must reject it.
@@ -162,20 +160,19 @@ class HeroZeroPremiumServiceTest {
     when(trades.findByRun(eq(run), anyInt(), anyInt(), any(), any(), any()))
         .thenReturn(List.of(trade(1, "SPARSE", ts(14, 40), ts(14, 50), "100", "120", "50")));
 
-    Map<String, Object> out = svc.diagnostics(run);
+    HeroZeroPremiumService.HeroZeroPremium out = svc.diagnostics(run);
 
-    assertThat(out.get("tradesPriced")).isEqualTo(1);
-    assertThat(out.get("premiumChangePctCount")).isEqualTo(0); // no valid baseline → excluded from the avg
-    assertThat(out.get("confirmed")).isEqualTo(0);
-    assertThat(out.get("avgPremiumChangePct")).isNull();
-    Map<String, Object> r = ((List<Map<String, Object>>) out.get("trades")).get(0);
-    assertThat(r.get("premiumChangePct")).isNull();
-    assertThat((Boolean) r.get("confirmed")).isFalse();
+    assertThat(out.tradesPriced()).isEqualTo(1);
+    assertThat(out.premiumChangePctCount()).isEqualTo(0); // no valid baseline → excluded from the avg
+    assertThat(out.confirmed()).isEqualTo(0);
+    assertThat(out.avgPremiumChangePct()).isNull();
+    HeroZeroPremiumService.HeroZeroTrade r = out.trades().get(0);
+    assertThat(r.premiumChangePct()).isNull();
+    assertThat(r.confirmed()).isFalse();
   }
 
   @Test
-  @SuppressWarnings("unchecked")
-  void computesMirrorSkewFromThePairedContract() {
+    void computesMirrorSkewFromThePairedContract() {
     UUID run = UUID.randomUUID();
     // PE leg @100; the mirror CE @80 at entry → the traded (PE) side is the richer leg, skew +25%.
     when(candles.read(eq("NFO"), eq("PE22500"), eq("1m"), any(), any()))
@@ -193,22 +190,22 @@ class HeroZeroPremiumServiceTest {
     when(trades.findByRun(eq(run), anyInt(), anyInt(), any(), any(), any()))
         .thenReturn(List.of(trade(1, "PE22500", ts(14, 40), ts(14, 50), "100", "110", "50")));
 
-    Map<String, Object> out = svc.diagnostics(run);
+    HeroZeroPremiumService.HeroZeroPremium out = svc.diagnostics(run);
 
-    assertThat(out.get("tradedSideRicherCount")).isEqualTo(1);
-    Map<String, Object> r = ((List<Map<String, Object>>) out.get("trades")).get(0);
-    assertThat((BigDecimal) r.get("mirrorPremium")).isEqualByComparingTo("80");
-    assertThat((BigDecimal) r.get("mirrorSkewPct")).isEqualByComparingTo("25.00");
-    assertThat((Boolean) r.get("tradedSideRicher")).isTrue();
-    assertThat(r.get("optionType")).isEqualTo("PE");
+    assertThat(out.tradedSideRicherCount()).isEqualTo(1);
+    HeroZeroPremiumService.HeroZeroTrade r = out.trades().get(0);
+    assertThat(r.mirrorPremium()).isEqualByComparingTo("80");
+    assertThat(r.mirrorSkewPct()).isEqualByComparingTo("25.00");
+    assertThat(r.tradedSideRicher()).isTrue();
+    assertThat(r.optionType()).isEqualTo("PE");
   }
 
   @Test
   void emptyWhenRunHasNoTrades() {
     UUID run = UUID.randomUUID();
     when(trades.findByRun(eq(run), anyInt(), anyInt(), any(), any(), any())).thenReturn(List.of());
-    Map<String, Object> out = svc.diagnostics(run);
-    assertThat(out.get("tradeCount")).isEqualTo(0);
-    assertThat(out.get("trades")).isEqualTo(List.of());
+    HeroZeroPremiumService.HeroZeroPremium out = svc.diagnostics(run);
+    assertThat(out.tradeCount()).isEqualTo(0);
+    assertThat(out.trades()).isEqualTo(List.of());
   }
 }

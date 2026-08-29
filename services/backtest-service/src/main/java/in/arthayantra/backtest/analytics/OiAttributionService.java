@@ -4,6 +4,7 @@ import in.arthayantra.backtest.client.MarketDataClient;
 import in.arthayantra.backtest.client.MarketDataClient;
 import in.arthayantra.backtest.client.MarketDataClient.CdRow;
 import in.arthayantra.backtest.replay.TradeRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -84,7 +85,67 @@ public class OiAttributionService {
    * Builds the attribution for {@code runId} at the given OI {@code intervalToken} ({@code 5m}). The
    * index is derived from the traded option symbols unless {@code underlyingOverride} is given.
    */
-  public Map<String, Object> attribution(UUID runId, String intervalToken, String underlyingOverride) {
+  /**
+   * One trade, bucketed onto the OI-confluence trend that was live at its entry.
+   *
+   * <p>⚠️ Decimals are STRINGS on our wire: {@code ArthaJacksonAutoConfiguration} registers
+   * {@code ToStringSerializer} for {@code BigDecimal} platform-wide, while bare springdoc infers
+   * {@code number}. And {@code types} UNIONS with the inferred type rather than replacing it, so
+   * {@code types = {"string","null"}} ALONE would capture {@code ["number","string","null"]} —
+   * still advertising an impossible type. Both attributes are required. This is the scalar-type
+   * trap the earlier D3 slice was caught on in review; verify by reading the CAPTURED SPEC, never
+   * the annotation.
+   */
+  public record TradeAttribution(
+      int seq,
+      @Schema(types = {"string", "null"}) String tradingsymbol,
+      @Schema(types = {"string", "null"}) String entryTs,
+      String bucket,
+      int trend,
+      String trendLabel,
+      /** The confluence net score at entry; null when the session had no stored OI. */
+      @Schema(types = {"integer", "null"}) Integer net,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pnl,
+      boolean win) {}
+
+  /** One trend bucket of the ladder. {@code winRate}/{@code avgPnl} are null at count 0. */
+  public record TrendBucket(
+      int trend,
+      String label,
+      int count,
+      int wins,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal winRate,
+      @Schema(type = "string") BigDecimal totalPnl,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal avgPnl) {}
+
+  /**
+   * The OI-confluence attribution response. D3 — converted 2026-08-29 on an owner shape decision.
+   *
+   * <p><b>This ADDS keys to the EMPTY response, which is why it needed a decision rather than a
+   * refactor.</b> The empty path emitted 10 keys and the populated path 12; a record emits all
+   * twelve always, so an empty response now carries {@code runId: null} and {@code oiDerived:
+   * null}. Verified before converting: the only consumer is
+   * {@code BacktestResultsPage.tsx}, which reads neither.
+   *
+   * <p>Component order mirrors the {@code LinkedHashMap} this replaced on BOTH paths, so the wire
+   * is unchanged apart from those two added keys.
+   */
+  public record OiAttribution(
+      @Schema(types = {"string", "null"}) String runId,
+      @Schema(types = {"string", "null"}) String underlying,
+      @Schema(types = {"string", "null"}) String interval,
+      int tradeCount,
+      int tradesAttributed,
+      int tradesNoData,
+      int sessionsCovered,
+      int sessionsUncovered,
+      /** Null on the empty path; true when any joined session came from derived (not captured) OI. */
+      @Schema(types = {"boolean", "null"}) Boolean oiDerived,
+      String caveat,
+      List<TrendBucket> buckets,
+      List<TradeAttribution> trades) {}
+
+  public OiAttribution attribution(UUID runId, String intervalToken, String underlyingOverride) {
     String interval = intervalToken == null || intervalToken.isBlank() ? "5m" : intervalToken;
     int intervalMin = parseMinutes(interval);
 
@@ -107,7 +168,7 @@ public class OiAttributionService {
     java.util.Set<LocalDate> uncovered = new java.util.LinkedHashSet<>();
     boolean[] anyDerived = {false}; // any covered session's OI was candle-derived (not captured)
 
-    List<Map<String, Object>> perTrade = new ArrayList<>();
+    List<TradeAttribution> perTrade = new ArrayList<>();
     Map<Integer, int[]> tally = new LinkedHashMap<>(); // trend(0..4 or -1 NO_DATA) -> [count, wins]
     Map<Integer, BigDecimal> pnlByTrend = new LinkedHashMap<>();
 
@@ -148,20 +209,20 @@ public class OiAttributionService {
       }
       pnlByTrend.merge(trend, pnl == null ? BigDecimal.ZERO : pnl, BigDecimal::add);
 
-      Map<String, Object> pt = new LinkedHashMap<>();
-      pt.put("seq", t.get("seq"));
-      pt.put("tradingsymbol", t.get("tradingsymbol"));
-      pt.put("entryTs", t.get("entryTs"));
-      pt.put("bucket", label);
-      pt.put("trend", trend);
-      pt.put("trendLabel", labelFor(trend));
-      pt.put("net", net);
-      pt.put("pnl", pnl);
-      pt.put("win", win);
-      perTrade.add(pt);
+      perTrade.add(
+          new TradeAttribution(
+              ((Number) t.get("seq")).intValue(),
+              (String) t.get("tradingsymbol"),
+              (String) t.get("entryTs"),
+              label,
+              trend,
+              labelFor(trend),
+              net,
+              pnl,
+              win));
     }
 
-    List<Map<String, Object>> buckets = new ArrayList<>();
+    List<TrendBucket> buckets = new ArrayList<>();
     // bullish-first ladder (1 Ext.Bullish … 4 Ext.Bearish), then NO_DATA — a stable, sorted display.
     for (int trend = 1; trend <= 4; trend++) {
       buckets.add(bucket(trend, labelFor(trend), tally.get(trend), pnlByTrend.get(trend)));
@@ -172,60 +233,43 @@ public class OiAttributionService {
 
     int attributed = perTrade.size() - tally.getOrDefault(-1, new int[2])[0];
 
-    Map<String, Object> out = new LinkedHashMap<>();
-    out.put("runId", runId.toString());
-    out.put("underlying", underlying);
-    out.put("interval", interval);
-    out.put("tradeCount", perTrade.size());
-    out.put("tradesAttributed", attributed);
-    out.put("tradesNoData", tally.getOrDefault(-1, new int[2])[0]);
-    out.put("sessionsCovered", covered.size());
-    out.put("sessionsUncovered", uncovered.size());
-    out.put("oiDerived", anyDerived[0]);
-    out.put(
-        "caveat",
+    return new OiAttribution(
+        runId.toString(),
+        underlying,
+        interval,
+        perTrade.size(),
+        attributed,
+        tally.getOrDefault(-1, new int[2])[0],
+        covered.size(),
+        uncovered.size(),
+        anyDerived[0],
         "Historical OI-confluence join over captured/backfilled snapshots; the Dow factor is "
             + "NEUTRAL for past sessions (1 of 11 factors degraded). NO_DATA = the entry's session "
-            + "had no stored OI to score against.");
-    out.put("buckets", buckets);
-    out.put("trades", perTrade);
-    return out;
+            + "had no stored OI to score against.",
+        buckets,
+        perTrade);
   }
 
-  private static Map<String, Object> bucket(int trend, String label, int[] agg, BigDecimal pnl) {
+  private static TrendBucket bucket(int trend, String label, int[] agg, BigDecimal pnl) {
     int count = agg == null ? 0 : agg[0];
     int wins = agg == null ? 0 : agg[1];
     BigDecimal total = pnl == null ? BigDecimal.ZERO : pnl;
-    Map<String, Object> b = new LinkedHashMap<>();
-    b.put("trend", trend);
-    b.put("label", label);
-    b.put("count", count);
-    b.put("wins", wins);
-    b.put(
-        "winRate",
+    return new TrendBucket(
+        trend,
+        label,
+        count,
+        wins,
         count == 0
             ? null
-            : new BigDecimal(wins).divide(new BigDecimal(count), 4, RoundingMode.HALF_UP));
-    b.put("totalPnl", total.setScale(2, RoundingMode.HALF_UP));
-    b.put(
-        "avgPnl",
+            : new BigDecimal(wins).divide(new BigDecimal(count), 4, RoundingMode.HALF_UP),
+        total.setScale(2, RoundingMode.HALF_UP),
         count == 0 ? null : total.divide(new BigDecimal(count), 2, RoundingMode.HALF_UP));
-    return b;
   }
 
-  private static Map<String, Object> empty(String interval, String underlying, String note) {
-    Map<String, Object> out = new LinkedHashMap<>();
-    out.put("underlying", underlying);
-    out.put("interval", interval);
-    out.put("tradeCount", 0);
-    out.put("tradesAttributed", 0);
-    out.put("tradesNoData", 0);
-    out.put("sessionsCovered", 0);
-    out.put("sessionsUncovered", 0);
-    out.put("caveat", note);
-    out.put("buckets", List.of());
-    out.put("trades", List.of());
-    return out;
+  /** runId and oiDerived are NULL here: the empty path never resolved either. */
+  private static OiAttribution empty(String interval, String underlying, String note) {
+    return new OiAttribution(
+        null, underlying, interval, 0, 0, 0, 0, 0, null, note, List.of(), List.of());
   }
 
   /** Parses an entry timestamp tolerant of both ISO-8601 and Postgres timestamptz text. */

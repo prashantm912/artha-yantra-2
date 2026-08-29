@@ -97,6 +97,44 @@ class SubscriptionRegistryFailureRollbackTest {
     assertThat(registry.view()).isEmpty();
   }
 
+  /**
+   * MAJOR, review round 2 — and the half the first fix missed. Rolling the in-memory hold back
+   * was not enough: {@code persist()} ran BEFORE the wire call, so a refused mode raise still
+   * left the FAILED mode in the durable store. Memory and the store then disagreed, and
+   * {@code SubscriptionReplayer} resurrects the store verbatim on the next restart — installing a
+   * mode nothing in memory ever agreed to, at the moment least likely to be watched.
+   *
+   * <p>⚠️ The assertion is on the STORE, not on the holds map. The round-1 test asserted only
+   * memory and passed against this defect, which is precisely how it survived a review round.
+   */
+  @Test
+  void aRefusedModeRaiseWritesNothingDurable() {
+    // ⚠️ SPECULATIVE, not PINNED_INDEX: persist() SKIPS PINNED_INDEX entirely
+    // (SubscriptionRegistry:361), so the first version of this test wrote nothing durable and
+    // passed against the very defect it exists to catch. It failed for a FIXTURE reason that
+    // looks exactly like a passing gate.
+    RecordingStore store = new RecordingStore();
+    RecordingTicker ticker = new RecordingTicker();
+    SubscriptionRegistry registry = registry(store);
+    registry.attachTicker(ticker);
+
+    // An existing LTP hold, persisted normally.
+    registry.subscribe("holder-a", KEY, SubscriptionMode.LTP, SubscriptionPriority.SPECULATIVE);
+    store.writes.clear();
+
+    // A second subscriber RAISES the effective mode, and the wire refuses the raise.
+    ticker.failNext.set(true);
+    assertThatThrownBy(
+            () ->
+                registry.subscribe(
+                    "holder-b", KEY, SubscriptionMode.FULL, SubscriptionPriority.SPECULATIVE))
+        .isInstanceOf(IllegalStateException.class);
+
+    assertThat(store.writes)
+        .as("a mode the wire refused must not survive a restart via the durable store")
+        .isEmpty();
+  }
+
   // ---------------------------------------------------------------- harness
 
   private static SubscriptionRegistry registry() {
@@ -128,6 +166,26 @@ class SubscriptionRegistryFailureRollbackTest {
     @Override
     public void unsubscribe(List<Long> tokens) {
       subscribed.removeAll(tokens);
+    }
+  }
+
+  /** Records durable writes so a test can assert on what a restart would replay. */
+  private static final class RecordingStore implements SubscriptionStore {
+    private final List<String> writes = new ArrayList<>();
+
+    @Override
+    public void put(String s, InstrumentKey k, SubscriptionMode m, SubscriptionPriority p) {
+      writes.add(s + "|" + k.canonical() + "|" + m);
+    }
+
+    @Override
+    public void remove(String s, InstrumentKey k) {
+      writes.removeIf(w -> w.startsWith(s + "|" + k.canonical() + "|"));
+    }
+
+    @Override
+    public List<PersistedHold> all() {
+      return List.of();
     }
   }
 

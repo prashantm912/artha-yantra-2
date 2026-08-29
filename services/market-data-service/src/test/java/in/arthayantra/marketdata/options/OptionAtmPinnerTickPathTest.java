@@ -3,7 +3,9 @@ package in.arthayantra.marketdata.options;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -19,7 +21,9 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -104,6 +108,67 @@ class OptionAtmPinnerTickPathTest {
     verify(h.chains()).chain(UNDERLYING, NEAR);
   }
 
+  /**
+   * Review round 2, Minor: the cron test only PARSED the annotation, so nothing pinned the gate
+   * that actually decides. The expression cannot express a holiday at all — only
+   * {@code MarketCalendar.isOpen} can — so a parse-only test leaves the entire reason the gate
+   * moved into code unverified.
+   *
+   * <p>Invoking {@code repinDuringSession()} directly is the point: it is the production entry
+   * point, and the annotation is not.
+   */
+  @Test
+  void theSessionGateRefusesAHolidayAndAdmitsAnOpenSession() {
+    // ⚠️ VERIFIED ON THE EXECUTOR'S WORK, NOT ON pinnedContracts(). repinDuringSession()
+    // dispatches OFF-THREAD, so reading the pin set straight after the call races the pass:
+    // the first version of this test asserted exactly that and its open-session control failed
+    // for the RACE, not for the gate. Worse, the two refusal cases would have passed under the
+    // same race — an unfinished pass and a refused one look identical from the pin set. A
+    // Mockito timeout()/after() pair is what separates "refused" from "not finished yet".
+
+    // 2026-01-26 is Republic Day, a Monday — a weekday the CRON happily admits and the CALENDAR
+    // does not. That gap is the whole reason the gate moved into code.
+    Harness holiday = harnessAt("2026-01-26T04:00:00Z"); // 09:30 IST
+    holiday.pinner().repinDuringSession();
+    verify(holiday.instruments(), after(300).never()).optionChain(anyString(), any());
+
+    Harness preOpen = harnessAt("2026-08-31T03:00:00Z"); // 08:30 IST, a Monday
+    preOpen.pinner().repinDuringSession();
+    verify(preOpen.instruments(), after(300).never()).optionChain(anyString(), any());
+
+    // The control, and the half that matters most: a gate that refuses EVERYTHING would satisfy
+    // both cases above and reinstate the frozen band this change exists to fix.
+    Harness open = harnessAt("2026-08-31T05:00:00Z"); // 10:30 IST, a Monday
+    open.pinner().repinDuringSession();
+    verify(open.instruments(), timeout(3_000)).optionChain(UNDERLYING, NEAR);
+  }
+
+  /**
+   * ⚠️ A DELIBERATE DIVERGENCE from the chain path, found by re-deriving the equivalence claim
+   * rather than accepting it.
+   *
+   * <p>{@code OptionsChainService.computeLeg} returns {@code null} when the strike has no quote,
+   * and {@code addLeg} skips a null leg — so the chain path silently REFUSED TO PIN any contract
+   * that was not already quoted. For an illiquid strike that is circular: an unpinned contract
+   * never ticks, so it never gets quoted, so it never gets pinned. It is precisely the strikes
+   * H44 is about.
+   *
+   * <p>The tick path pins from the instrument master and does not consult quotes at all, so it
+   * pins strictly MORE. That is the intended direction and the cap pressure is nil (tens of
+   * contracts against a 3000 cap) — but it is a behaviour change, not a pure optimisation, and it
+   * is recorded here so it is not rediscovered as a surprise.
+   */
+  @Test
+  void theTickPathPinsAnUnquotedStrikeThatTheChainPathWouldHaveSkipped() {
+    Harness h = harness(new BigDecimal("25000"));
+
+    h.pinner().repin();
+
+    assertThat(symbols(h))
+        .as("no quote exists for ANY strike here — the chain path would have pinned nothing")
+        .contains("NFO:NIFTY25000CE", "NFO:NIFTY25000PE");
+  }
+
   // ---------------------------------------------------------------- harness
 
   private record Harness(
@@ -121,8 +186,17 @@ class OptionAtmPinnerTickPathTest {
         "NSE", UNDERLYING, price, 0L, null, OffsetDateTime.now(), 1L);
   }
 
+  /** The tick-path harness with the clock pinned to an instant, for the session gate. */
+  private static Harness harnessAt(String instant) {
+    return harness(new BigDecimal("25000"), Clock.fixed(Instant.parse(instant), ZoneOffset.UTC));
+  }
+
   /** @param spot the underlying's last tick, or null for "nothing has ticked yet" */
   private static Harness harness(BigDecimal spot) {
+    return harness(spot, Clock.systemUTC());
+  }
+
+  private static Harness harness(BigDecimal spot, Clock clock) {
     OptionsChainService chains = mock(OptionsChainService.class);
     when(chains.expiriesWithin(UNDERLYING, 7)).thenReturn(List.of(NEAR));
     when(chains.chain(anyString(), any()))
@@ -161,7 +235,7 @@ class OptionAtmPinnerTickPathTest {
             instruments,
             ticks,
             meters,
-            Clock.systemUTC());
+            clock);
     return new Harness(pinner, chains, instruments, ticks);
   }
 

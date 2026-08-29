@@ -79,9 +79,13 @@ class OptionAtmPinnerCoalesceTest {
     }
     Thread.sleep(200);
 
+    // EXACTLY two, not "at most two" (review round 2). An upper bound alone is also satisfied
+    // by an implementation that drops every mid-pass fire and runs ONE pass -- which would
+    // lose the drift the recurring repin exists to follow. The count pins both directions:
+    // the queue does not grow, and the pending pass is not swallowed.
     assertThat(passes.get())
-        .as("21 fires must collapse to the running pass plus at most one pending one")
-        .isLessThanOrEqualTo(2);
+        .as("21 fires collapse to the running pass plus exactly one pending one")
+        .isEqualTo(2);
   }
 
   // ---------------------------------------------------------------- harness

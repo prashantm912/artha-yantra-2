@@ -149,7 +149,6 @@ public class SubscriptionRegistry implements PinnedSubscriptionRegistrar {
     refuseCashEquity(key, existing.index());
     // Kept so a failed wire raise can restore the caller PREVIOUS hold rather than guessing.
     Hold previous = existing.holds().put(subscriber, new Hold(mode, priority));
-    persist(subscriber, key, mode, priority);
     SubscriptionMode newEffective = effectiveModeOf(existing.holds());
     if (newEffective != existing.effectiveMode()) {
       // Same rollback rule as the first-hold branch: if the wire refuses the raised mode, the hold
@@ -168,6 +167,13 @@ public class SubscriptionRegistry implements PinnedSubscriptionRegistrar {
           key,
           new Instrument(existing.token(), existing.index(), existing.holds(), newEffective));
     }
+    // AFTER the wire, never before -- the same order the first-hold branch above uses, and
+    // round 2 of the review is what found it. Rolling the in-memory hold back was only half
+    // the fix: persist() ran BEFORE the wire call, so a refused raise still left the FAILED
+    // mode in the durable store, and SubscriptionReplayer resurrects it verbatim on the next
+    // restart -- a hold nothing in memory ever agreed to. Persisting last needs no
+    // compensating write at all: if the wire refuses, nothing was written to undo.
+    persist(subscriber, key, mode, priority);
     return newEffective;
   }
 

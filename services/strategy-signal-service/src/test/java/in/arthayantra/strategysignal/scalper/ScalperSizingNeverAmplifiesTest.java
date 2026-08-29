@@ -21,6 +21,15 @@ import org.junit.jupiter.api.Test;
  * <p>Deliberately a property sweep, not three hand-picked points. The three factors compose
  * multiplicatively and the aggregate one is a LINEAR TAPER, so the risk is an interior value, not an
  * endpoint — checking only the documented band edges would miss a taper that overshoots between them.
+ *
+ * <p>⚠️ <b>Two corrections from cross-vendor review, and both matter for how much this test is
+ * worth.</b> (1) It exercises <b>76,356</b> triples (101 x 21 x 36), not the "~370k" first claimed —
+ * an arithmetic error of ~5x that appeared in the PR body and the ledger before it was caught.
+ * (2) More importantly, <b>the sweep is a SAMPLING check, not the guarantee</b>: aggregates are
+ * stepped every 0.01, so it cannot prove the property. The exhaustive guarantee is the terminal
+ * hard clamp to <= 1 inside {@code sizeMultiplier} itself. This test earns its place by failing
+ * loudly IN THE FILE THAT CAUSED IT if that clamp is ever removed or a factor becomes amplifying —
+ * not by exhausting the input space.
  */
 class ScalperSizingNeverAmplifiesTest {
 

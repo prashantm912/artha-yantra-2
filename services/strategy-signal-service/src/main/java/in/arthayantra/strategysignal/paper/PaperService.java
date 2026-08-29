@@ -954,10 +954,15 @@ public class PaperService {
     // ⚠️ LIVE_TICK is skipped because that branch ALREADY read a tick -- re-probing could only
     // disagree with the price we just struck the fill against.
     //
-    // ⚠️ AND IT FAILS OPEN. The probe reads Redis, and LastTickReader s HGET sits OUTSIDE its own
-    // catch, so a Redis blip throws. A diagnostic that aborts a trade is worse than the hole it
-    // watches -- an earlier cut of the H44 work was rejected in review for exactly that. A probe
-    // that cannot answer must not be read as a NO.
+    // ⚠️ AND IT FAILS CLOSED. This paragraph said "FAILS OPEN" for one revision, sitting
+    // directly above code that already failed closed -- a comment contradicting the line under it,
+    // which is the worst kind because it is the part a reader trusts. Round 2 reversed the
+    // behaviour and round 3 caught the leftover text.
+    // The reasoning, kept because the REVERSAL is the interesting part: failing open is correct
+    // for a DIAGNOSTIC (a probe must never break what it observes -- an earlier inline cut was
+    // rejected for exactly that) and WRONG for a SAFETY GATE, because allowing a fill we could not
+    // verify recreates H44 while the flag advertises protection. #694 settles the direction: an
+    // entry may always be declined.
     if (refuseNoTickEntries
         && meta.instrumentClass() == InstrumentClass.OPTION
         && !"LIVE_TICK".equals(refSource)) {

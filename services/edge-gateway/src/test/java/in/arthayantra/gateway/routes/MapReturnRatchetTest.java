@@ -272,10 +272,36 @@ class MapReturnRatchetTest {
    * {@code OptionsAnalyticsWireShapeIntegrationTest}). {@code Long}/{@code long} columns are
    * genuinely JSON numbers and correctly stay {@code integer}.
    */
+  /**
+   * <b>market-data-service 2 -> 0 (2026-08-28, owner shape decision).</b> The two the paragraph above
+   * assessed as DELIBERATE STOPS -- {@code oiExpiry} and {@code openHighStrategy} -- are converted.
+   * They were never a refactor: each ADDS a key to its EMPTY response ({@code asOf}, and
+   * {@code spot} too for openHighStrategy), which is a wire change on a live OI page. The owner made
+   * that call; the FE tolerance was VERIFIED first rather than assumed, per endpoint:
+   * {@code OiExpiryStrategyPage.tsx} is the only consumer of /oi-expiry and never reads
+   * {@code asOf}, and no frontend file reads {@code .spot} or {@code .asOf} for
+   * /open-high-strategy.
+   *
+   * <p><b>market-data is now at ZERO, which is the strongest floor there is</b> -- no shape decision
+   * remains open in this service. backtest stays at 2: {@code OiAttributionController.attribution}
+   * (empty path 10 keys, populated 12 -- adds {@code runId} and {@code oiDerived}) and
+   * {@code HeroZeroPremiumController.heroZeroPremium} (5 vs 16). Those are the same class of
+   * decision and are NOT covered by this change.
+   *
+   * <p>Key ORDER: {@code openHighStrategy}'s populated path used a {@code LinkedHashMap}, so its
+   * insertion order was the emitted order and the record mirrors it exactly. Everything else here
+   * came from {@code Map.of}, whose iteration order is JVM-salted -- those are NORMALISED, not
+   * preserved, and must not be described as byte-identical.
+   *
+   * <p>The scalar-type trap was re-checked rather than trusted: {@code spot} is a {@code BigDecimal}
+   * and therefore a STRING on our wire, so it carries BOTH {@code type = "string"} and
+   * {@code types = {"string","null"}} -- {@code types} UNIONS with the inferred type instead of
+   * replacing it, so the bare form would have captured {@code ["number","string","null"]}.
+   */
   private static final Map<String, Integer> FROZEN =
       Map.of(
           "edge-gateway", 0,
-          "market-data-service", 2,
+          "market-data-service", 0,
           "strategy-signal-service", 0,
           "backtest-service", 2);
 

@@ -3382,8 +3382,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/OpenHighStrategy"
                 }
               }
             }
@@ -3575,8 +3574,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/OiExpiry"
                 }
               }
             }
@@ -10492,6 +10490,111 @@
         },
         "required" : [ "asOf", "ce", "ceTradingsymbol", "expiry", "interval", "pe", "peTradingsymbol", "strike", "underlying", "underlyingDayOpen", "underlyingLtp" ]
       },
+      "OpenHighLeg" : {
+        "type" : "object",
+        "properties" : {
+          "optionType" : {
+            "type" : "string"
+          },
+          "latestDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "latestOpen" : {
+            "type" : "string"
+          },
+          "latestHigh" : {
+            "type" : "string"
+          },
+          "latestLow" : {
+            "type" : "string"
+          },
+          "latestClose" : {
+            "type" : "string"
+          },
+          "latestOi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "ohMark" : {
+            "type" : "boolean"
+          },
+          "olMark" : {
+            "type" : "boolean"
+          },
+          "triggered" : {
+            "type" : "boolean"
+          },
+          "fallPctFromHigh" : {
+            "type" : "string"
+          },
+          "sessions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "hits" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "probability" : {
+            "type" : "string"
+          },
+          "newDayHigh" : {
+            "type" : "string"
+          },
+          "newDayLow" : {
+            "type" : "string"
+          },
+          "liveLtp" : {
+            "type" : "string"
+          },
+          "triggeredTime" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "fallPctFromHigh", "hits", "latestClose", "latestDate", "latestHigh", "latestLow", "latestOi", "latestOpen", "liveLtp", "newDayHigh", "newDayLow", "ohMark", "olMark", "optionType", "probability", "sessions", "triggered", "triggeredTime" ]
+      },
+      "OpenHighStrategy" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikeOpenHigh"
+            }
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "spot" : {
+            "type" : [ "string", "null" ]
+          },
+          "asOf" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "expiry", "items", "spot", "underlying" ]
+      },
+      "StrikeOpenHigh" : {
+        "type" : "object",
+        "properties" : {
+          "strike" : {
+            "type" : "string"
+          },
+          "ce" : {
+            "$ref" : "#/components/schemas/OpenHighLeg"
+          },
+          "pe" : {
+            "$ref" : "#/components/schemas/OpenHighLeg"
+          }
+        },
+        "required" : [ "ce", "pe", "strike" ]
+      },
       "OiStats" : {
         "type" : "object",
         "properties" : {
@@ -10577,6 +10680,96 @@
           }
         },
         "required" : [ "asOf", "buckets", "ce", "maxAbs", "pe", "strikes" ]
+      },
+      "EodDay" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "open" : {
+            "type" : "string"
+          },
+          "high" : {
+            "type" : "string"
+          },
+          "low" : {
+            "type" : "string"
+          },
+          "close" : {
+            "type" : "string"
+          },
+          "oi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "changeInClosePct" : {
+            "type" : "string"
+          },
+          "changeInOiPct" : {
+            "type" : "string"
+          },
+          "interpretation" : {
+            "type" : "string",
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+          },
+          "allDayHigh" : {
+            "type" : "boolean"
+          },
+          "allDayLow" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "allDayHigh", "allDayLow", "changeInClosePct", "changeInOiPct", "close", "date", "high", "interpretation", "low", "oi", "open", "volume" ]
+      },
+      "OiExpiry" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikeExpiry"
+            }
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "asOf" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "expiry", "items", "underlying" ]
+      },
+      "StrikeExpiry" : {
+        "type" : "object",
+        "properties" : {
+          "strike" : {
+            "type" : "string"
+          },
+          "ce" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/EodDay"
+            }
+          },
+          "pe" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/EodDay"
+            }
+          }
+        },
+        "required" : [ "ce", "pe", "strike" ]
       },
       "OiAnalysis" : {
         "type" : "object",

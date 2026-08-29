@@ -304,6 +304,56 @@ public class OptionsAnalyticsController {
    * these components mirror it exactly ({@code items}, {@code spot}, then the query echo). All are
    * non-null; the nullability lives one level down, in {@code OiLinePoint.oi}/{@code SpotPoint.spot}.
    */
+  /**
+   * {@code /oi-expiry}: the folded per-strike expiry heatmap. D3 — the LAST two Map-returning
+   * handlers in this service, converted 2026-08-28 on an owner shape decision.
+   *
+   * <p><b>This ADDS a key to the empty response, which is why it needed a decision rather than a
+   * refactor.</b> The empty path emitted 3 keys and the populated path 4; a record emits all four
+   * always, so an empty response now carries {@code asOf: null}. Verified FE-safe before the
+   * change: {@code OiExpiryStrategyPage.tsx} — the only consumer of this endpoint — never reads
+   * {@code asOf} at all.
+   *
+   * <p><b>Key order is NORMALISED here, not preserved, and that is honest rather than a
+   * regression:</b> BOTH paths built their response with {@code Map.of}, whose iteration order is
+   * JVM-salted. There was no stable order to preserve. (Contrast {@link OpenHighStrategy}, whose
+   * populated path used a {@code LinkedHashMap} and IS mirrored exactly.)
+   */
+  public record OiExpiry(
+      List<OiExpiryService.StrikeExpiry> items,
+      String underlying,
+      LocalDate expiry,
+      // Null on the empty path. Spelled as a 3.1 type ARRAY because @Schema(nullable = true) is a
+      // SILENT NO-OP at 3.1 -- swagger-core drops it. The base matches what springdoc already
+      // infers for an OffsetDateTime (string/date-time), so this UNIONS cleanly; a BigDecimal
+      // would additionally need type = "string" (see spot below).
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
+
+  /**
+   * {@code /open-high-strategy}: the per-strike Open=High / Open=Low scan.
+   *
+   * <p>Empty path emitted 3 keys, populated 5, so an empty response now carries {@code spot: null}
+   * and {@code asOf: null}. Verified FE-safe: no frontend file reads {@code .spot} or {@code .asOf}
+   * for this endpoint. The populated path used a {@code LinkedHashMap}, so its insertion order WAS
+   * the emitted order and these components mirror it exactly.
+   *
+   * <p>⚠️ <b>{@code spot} carries BOTH {@code type} and {@code types} deliberately.</b>
+   * {@code ArthaJacksonAutoConfiguration} registers {@code ToStringSerializer} for
+   * {@code BigDecimal} platform-wide, so every decimal is a JSON STRING on the wire while bare
+   * springdoc infers {@code number}. {@code types} UNIONS with the inferred type rather than
+   * replacing it, so {@code types = {"string","null"}} alone would capture as
+   * {@code ["number","string","null"]} — still advertising the impossible type. This is the
+   * scalar-type trap the previous D3 slice was caught on in review: converting an opaque Map has
+   * to make the spec TRUE, not merely PRESENT, or it replaces a schema that claimed nothing with
+   * one that claims something false.
+   */
+  public record OpenHighStrategy(
+      List<OpenHighStrategyService.StrikeOpenHigh> items,
+      String underlying,
+      LocalDate expiry,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
+
   public record MultipleOi(
       List<OiLeg> items,
       List<SpotPoint> spot,
@@ -1096,7 +1146,7 @@ public class OptionsAnalyticsController {
    * strikes nearest the ATM. {@code items} envelope; empty list (not a 422) when no snapshot accrued.
    */
   @GetMapping("/oi-expiry")
-  public Map<String, Object> oiExpiry(
+  public OiExpiry oiExpiry(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
@@ -1107,7 +1157,7 @@ public class OptionsAnalyticsController {
     List<OptionsSnapshotReader.StrikePoint> latest =
         reader.latest(q.name(), exp, q.interval(), q.date());
     if (latest.isEmpty()) {
-      return Map.of("items", List.of(), "underlying", q.name(), "expiry", exp);
+      return new OiExpiry(List.of(), q.name(), exp, null);
     }
     LocalDate lastDay = latest.get(0).bucket().atZoneSameInstant(Ist.ZONE).toLocalDate();
     OffsetDateTime from =
@@ -1117,11 +1167,7 @@ public class OptionsAnalyticsController {
     List<OiExpiryService.StrikeExpiry> all = expiryService.fold(eod);
     BigDecimal spot = latestSpot(latest);
     List<OiExpiryService.StrikeExpiry> windowed = nearestExpiryStrikes(all, spot, heatmapWindow);
-    return Map.of(
-        "items", windowed,
-        "underlying", q.name(),
-        "expiry", exp,
-        "asOf", latest.get(0).bucket());
+    return new OiExpiry(windowed, q.name(), exp, latest.get(0).bucket());
   }
 
   /**
@@ -1157,7 +1203,7 @@ public class OptionsAnalyticsController {
    * {@code items} envelope; empty list (not a 422) when no snapshot accrued.
    */
   @GetMapping("/open-high-strategy")
-  public Map<String, Object> openHighStrategy(
+  public OpenHighStrategy openHighStrategy(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
@@ -1168,7 +1214,7 @@ public class OptionsAnalyticsController {
     List<OptionsSnapshotReader.StrikePoint> latest =
         reader.latest(q.name(), exp, q.interval(), q.date());
     if (latest.isEmpty()) {
-      return Map.of("items", List.of(), "underlying", q.name(), "expiry", exp);
+      return new OpenHighStrategy(List.of(), q.name(), exp, null, null);
     }
     LocalDate lastDay = latest.get(0).bucket().atZoneSameInstant(Ist.ZONE).toLocalDate();
     OffsetDateTime from =
@@ -1189,13 +1235,10 @@ public class OptionsAnalyticsController {
     BigDecimal spot = latestSpot(latest);
     List<OpenHighStrategyService.StrikeOpenHigh> windowed =
         nearestOpenHighStrikes(all, spot, heatmapWindow);
-    Map<String, Object> out = new LinkedHashMap<>();
-    out.put("items", windowed);
-    out.put("underlying", q.name());
-    out.put("expiry", exp);
-    out.put("spot", spot); // nullable off-hours (LinkedHashMap permits null; Map.of would not)
-    out.put("asOf", latest.get(0).bucket());
-    return out;
+    // Component order mirrors the LinkedHashMap this replaced, so the wire is unchanged on
+    // the populated path. spot stays nullable off-hours -- a record permits null just as the
+    // LinkedHashMap did (Map.of would not, which is why the empty path used a different shape).
+    return new OpenHighStrategy(windowed, q.name(), exp, spot, latest.get(0).bucket());
   }
 
   /**

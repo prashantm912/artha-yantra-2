@@ -135,6 +135,47 @@ class SubscriptionRegistryFailureRollbackTest {
         .isEmpty();
   }
 
+  /**
+   * Review round 3, Suggestion: the OTHER arm of the rollback.
+   *
+   * <p>Every failure test above raises through a NEW subscriber, so {@code previous} is null and
+   * the restore path taken is always {@code holds().remove(...)}. The
+   * {@code holds().put(subscriber, previous)} arm — a subscriber that already held the instrument
+   * at a LOWER mode and fails to raise it — was never executed. It is the arm where a wrong
+   * rollback is silent rather than loud: dropping the hold entirely would release a subscription
+   * the caller still legitimately holds at LTP, and nothing would report it.
+   */
+  @Test
+  void aRefusedRaiseRestoresTheSubscriberOwnEarlierModeRatherThanDroppingIt() {
+    RecordingStore store = new RecordingStore();
+    RecordingTicker ticker = new RecordingTicker();
+    SubscriptionRegistry registry = registry(store);
+    registry.attachTicker(ticker);
+
+    // A second holder keeps the instrument alive so the raise goes through the existing branch.
+    registry.subscribe("holder-a", KEY, SubscriptionMode.LTP, SubscriptionPriority.SPECULATIVE);
+    registry.subscribe("holder-b", KEY, SubscriptionMode.LTP, SubscriptionPriority.SPECULATIVE);
+    store.writes.clear();
+
+    // holder-b, which ALREADY holds at LTP, tries to raise itself to FULL and the wire refuses.
+    ticker.failNext.set(true);
+    assertThatThrownBy(
+            () ->
+                registry.subscribe(
+                    "holder-b", KEY, SubscriptionMode.FULL, SubscriptionPriority.SPECULATIVE))
+        .isInstanceOf(IllegalStateException.class);
+
+    assertThat(registry.heldBy("holder-b"))
+        .as("the refused RAISE must not cost the subscriber the hold it already had")
+        .containsExactly(KEY);
+    assertThat(registry.view())
+        .as("and the instrument stays subscribed for both holders")
+        .hasSize(1);
+    assertThat(store.writes)
+        .as("nothing durable was written for a mode the wire refused")
+        .isEmpty();
+  }
+
   // ---------------------------------------------------------------- harness
 
   private static SubscriptionRegistry registry() {

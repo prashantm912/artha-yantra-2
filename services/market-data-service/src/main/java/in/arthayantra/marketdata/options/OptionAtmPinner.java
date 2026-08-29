@@ -251,9 +251,7 @@ public class OptionAtmPinner {
         if (!belongsTo(stale, entry.getKey())) {
           continue;
         }
-        registry.unsubscribe(SUBSCRIBER, stale);
-        currentPins.remove(stale);
-        log.info("option ATM pin rolled off: {}", stale.canonical());
+        releaseOne(stale);
       }
     }
     // Cap refusals get ONE retry AFTER the stale sweep. On an expiry rollover against a full
@@ -280,6 +278,39 @@ public class OptionAtmPinner {
   private static String registryRoot(String underlying) {
     int space = underlying.indexOf(' ');
     return space < 0 ? underlying : underlying.substring(0, space);
+  }
+
+  /**
+   * Releases one stale pin, and drops it from {@code currentPins} EVEN IF the wire call throws.
+   *
+   * <p><b>Architect audit, on top of an APPROVED review.</b> This call used to be bare, while the
+   * subscribe directly above it was wrapped — and the asymmetry mattered, because
+   * {@code SubscriptionRegistry.unsubscribe} completes the durable AND in-memory release BEFORE
+   * its wire call. So a throw there means the hold is genuinely GONE while
+   * {@code currentPins.remove} never ran: the pinner then believes it holds a contract the
+   * registry has released, that contract is dark, and no later pass retries it because the pinner
+   * still counts it as pinned. H44 stranding by a third route, reached from the fix for the first
+   * two.
+   *
+   * <p>It also aborted the whole sweep — every remaining stale pin for that underlying, plus the
+   * cap-refused retry below it. At the old two passes a day this healed at the next restart; at 84
+   * it accumulates, which is what makes the recurring schedule the thing that promoted it.
+   *
+   * <p>⚠️ {@code currentPins.remove} is OUTSIDE the try on purpose. The release already happened;
+   * continuing to claim the pin would be the actual defect, and a failed WIRE notification is the
+   * ticker's to recover, not ours to model.
+   */
+  private void releaseOne(InstrumentKey stale) {
+    try {
+      registry.unsubscribe(SUBSCRIBER, stale);
+      log.info("option ATM pin rolled off: {}", stale.canonical());
+    } catch (RuntimeException failure) {
+      log.warn(
+          "option ATM pin {} released but the wire notification failed: {}",
+          stale.canonical(), failure.toString());
+    } finally {
+      currentPins.remove(stale);
+    }
   }
 
   /** Subscribes one leg; collects cap refusals when {@code capRefused} is non-null. */

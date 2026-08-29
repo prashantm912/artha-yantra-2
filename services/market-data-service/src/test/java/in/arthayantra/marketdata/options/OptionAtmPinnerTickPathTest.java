@@ -17,6 +17,7 @@ import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.InstrumentTokenResolver;
 import in.arthayantra.marketdata.kite.ticker.SubscriptionRegistry;
+import in.arthayantra.marketdata.kite.ticker.SubscriptionMode;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
@@ -169,13 +170,99 @@ class OptionAtmPinnerTickPathTest {
         .contains("NFO:NIFTY25000CE", "NFO:NIFTY25000PE");
   }
 
+  /**
+   * ARCHITECT AUDIT, found on top of an APPROVED review — and reachable only because the repin
+   * now recurs.
+   *
+   * <p>{@code SubscriptionRegistry.unsubscribe} completes the durable and in-memory release
+   * BEFORE its wire notification, so a throw there leaves the hold genuinely GONE. The pinner's
+   * stale sweep called it bare, so {@code currentPins.remove} never ran: the pinner kept claiming
+   * a contract the registry had released, that contract was dark, and no later pass retried it —
+   * because the pinner still counted it as pinned. The sweep also aborted, stranding every
+   * remaining stale pin and the cap-refused retry after it.
+   *
+   * <p>⚠️ The decisive assertion is the SECOND one. A test that only checked the sweep continued
+   * would pass while the pinner still lied about the released contract, which is the half that
+   * stays dark.
+   */
+  @Test
+  void aThrowingWireOnReleaseNeitherStrandsThePinNorAbortsTheSweep() {
+    Harness h = harness(new BigDecimal("25000"));
+    h.pinner().repin();
+    assertThat(symbols(h)).contains("NFO:NIFTY25000CE", "NFO:NIFTY24900CE");
+
+    // Spot jumps far enough that the whole previous band is stale, then EVERY release throws --
+    // the reconnect-blip shape, applied to the release side.
+    h.ticks().update(tick(new BigDecimal("26000")));
+    h.ticker().failEveryUnsubscribe.set(true);
+
+    // Swallowed exactly as production does: repinAsync() wraps repin() in a catch, so a throw
+    // here does NOT crash anything -- it silently abandons the pass, which is the defect. Calling
+    // repin() bare would let the exception escape and the assertions below would never run, and a
+    // red-proof that dies on an uncaught throw proves the sweep aborted while leaving the SECOND
+    // property -- that a released pin is not still claimed -- completely unexercised.
+    try {
+      h.pinner().repin();
+    } catch (RuntimeException swallowedLikeRepinAsyncDoes) {
+      // fall through to the assertions
+    }
+
+    assertThat(symbols(h))
+        .as("the sweep must not abort on the first throw — later stale pins are rolled off too")
+        .doesNotContain("NFO:NIFTY24900CE");
+  }
+
+  /**
+   * The SECOND property, split into its own test on purpose. AssertJ stops at the first failing
+   * assertion, so while both lived in one method only the sweep-abort one was ever demonstrated by
+   * the red-proof and this one rode along on inference. It is the half that leaves a contract dark,
+   * so it gets its own proof rather than an argument.
+   */
+  @Test
+  void aReleasedContractIsNotStillClaimedWhenTheWireNotificationFails() {
+    Harness h = harness(new BigDecimal("25000"));
+    h.pinner().repin();
+    assertThat(symbols(h)).contains("NFO:NIFTY25000CE");
+
+    h.ticks().update(tick(new BigDecimal("26000")));
+    h.ticker().failEveryUnsubscribe.set(true);
+    try {
+      h.pinner().repin();
+    } catch (RuntimeException swallowedLikeRepinAsyncDoes) {
+      // fall through
+    }
+
+    assertThat(symbols(h))
+        .as("the registry let it go, so the pinner must too — else it never retries and stays dark")
+        .doesNotContain("NFO:NIFTY25000CE");
+  }
+
   // ---------------------------------------------------------------- harness
 
   private record Harness(
       OptionAtmPinner pinner,
       OptionsChainService chains,
       InstrumentRepository instruments,
-      LastTickStore ticks) {}
+      LastTickStore ticks,
+      FlakyTicker ticker) {}
+
+  /** A ticker whose UNSUBSCRIBE-side notification can be made to fail, like a reconnect blip. */
+  private static final class FlakyTicker implements SubscriptionRegistry.TickerCommands {
+    private final java.util.concurrent.atomic.AtomicBoolean failEveryUnsubscribe =
+        new java.util.concurrent.atomic.AtomicBoolean();
+
+    @Override
+    public void subscribe(java.util.List<Long> tokens, SubscriptionMode mode) {
+      // the subscribe side is not what this case exercises
+    }
+
+    @Override
+    public void unsubscribe(java.util.List<Long> tokens) {
+      if (failEveryUnsubscribe.get()) {
+        throw new IllegalStateException("websocket not connected");
+      }
+    }
+  }
 
   private static List<String> symbols(Harness h) {
     return h.pinner().pinnedContracts().stream().map(InstrumentKey::canonical).sorted().toList();
@@ -236,7 +323,9 @@ class OptionAtmPinnerTickPathTest {
             ticks,
             meters,
             clock);
-    return new Harness(pinner, chains, instruments, ticks);
+    FlakyTicker ticker = new FlakyTicker();
+    registry.attachTicker(ticker);
+    return new Harness(pinner, chains, instruments, ticks, ticker);
   }
 
   /** A realistic ladder: 100-point strikes either side of 25000, CE and PE per strike. */

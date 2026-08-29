@@ -3578,6 +3578,44 @@ export interface components {
             /** Format: date-time */
             asOf: string;
         };
+        OpenHighLeg: {
+            optionType: string;
+            /** Format: date */
+            latestDate: string;
+            latestOpen: string;
+            latestHigh: string;
+            latestLow: string;
+            latestClose: string;
+            /** Format: int64 */
+            latestOi: number;
+            ohMark: boolean;
+            olMark: boolean;
+            triggered: boolean;
+            fallPctFromHigh: string;
+            /** Format: int32 */
+            sessions: number;
+            /** Format: int32 */
+            hits: number;
+            probability: string;
+            newDayHigh: string;
+            newDayLow: string;
+            liveLtp: string;
+            triggeredTime: string;
+        };
+        OpenHighStrategy: {
+            items: components["schemas"]["StrikeOpenHigh"][];
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            spot: string | null;
+            /** Format: date-time */
+            asOf: string | null;
+        };
+        StrikeOpenHigh: {
+            strike: string;
+            ce: components["schemas"]["OpenHighLeg"];
+            pe: components["schemas"]["OpenHighLeg"];
+        };
         OiStats: {
             pcr: string | null;
             maxPain: string | null;
@@ -3607,6 +3645,37 @@ export interface components {
             /** Format: date-time */
             asOf: string | null;
             freshness?: components["schemas"]["DataFreshness"];
+        };
+        EodDay: {
+            /** Format: date */
+            date: string;
+            open: string;
+            high: string;
+            low: string;
+            close: string;
+            /** Format: int64 */
+            oi: number;
+            /** Format: int64 */
+            volume: number;
+            changeInClosePct: string;
+            changeInOiPct: string;
+            /** @enum {string} */
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            allDayHigh: boolean;
+            allDayLow: boolean;
+        };
+        OiExpiry: {
+            items: components["schemas"]["StrikeExpiry"][];
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            /** Format: date-time */
+            asOf: string | null;
+        };
+        StrikeExpiry: {
+            strike: string;
+            ce: components["schemas"]["EodDay"][];
+            pe: components["schemas"]["EodDay"][];
         };
         OiAnalysis: {
             items: components["schemas"]["StrikePoint"][];
@@ -7796,9 +7865,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["OpenHighStrategy"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7903,9 +7970,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["OiExpiry"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

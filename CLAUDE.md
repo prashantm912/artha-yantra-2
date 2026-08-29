@@ -37,8 +37,20 @@ always **PRE-merge** (a slot on merged code buys an audit, not a gate). Everythi
 `claude-review` — Opus subagent, FRESH thread, DISTINCT lens — which is **weaker than what it
 replaced**, so buy back what diversity you can and **write the loss into the verdict line** rather
 than letting "reviewed" imply what it used to. Never spend a slot on builds, docs, an advisory ask,
-or anything already merged. ⚠️ The budget is an ASSUMPTION until measured — record the first
-post-2026-08-20 run's cost. Local models do NOT restore cross-vendor review (seven scored 0/2); see
+or anything already merged.
+⚠️ **THE BUDGET IS NOW MEASURED (2026-08-28) AND IT IS A PACING LIMIT, NOT A SCARCITY ONE.**
+Three `xhigh` review rounds in one evening tripped the quota; the message named its own reset
+— *"try again at ... 1:15 AM"* — and it had cleared by the next morning. **A ~3-HOUR ROLLING
+WINDOW, not a month.** Practical rule: **burst 2–3 rounds, then wait a few hours.** A money-path
+item does NOT queue for weeks, and the "two missed slots → ship same-vendor" escape is for a
+genuine outage, not for ordinary pacing.
+⚠️ **This paragraph said "exhausted the MONTH" for one day and that was WRONG** — induced from a
+single limit message whose own text named a 3-hour reset. It reached memory, a PR body and a
+ledger row before being caught, and it overrode a correct owner instinct ("spend freely") with
+false authority. **A measurement reported WRONG is worse than no measurement.** Exact semantics
+(5-hour bucket? a weekly cap underneath?) stay UNMEASURED — do not induce them from one more
+data point either.
+Local models do NOT restore cross-vendor review (seven scored 0/2); see
 `.claude/skills/local-model/` for what they ARE measured to do.
 
 | Stage | Model | Note |

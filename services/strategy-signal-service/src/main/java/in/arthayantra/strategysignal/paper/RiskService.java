@@ -496,6 +496,9 @@ public class RiskService {
           recordHeatTrip(book, heatPct, capPct);
           return Optional.of(HEAT_CAP_PCT);
         }
+        // N23-A: shadow the SAME cap against PREMIUM OUTLAY. Observation only -- it never returns
+        // a veto, so enforcement stays exactly where it was.
+        shadowPremiumHeat(book, capPct, heatPct);
       }
     }
     return Optional.empty();
@@ -535,6 +538,59 @@ public class RiskService {
       return null;
     }
     return q.spanMargin().multiply(BigDecimal.valueOf(100)).divide(equity, 2, RoundingMode.HALF_UP);
+  }
+
+  /**
+   * Ledger N23-A, owner-chosen option: MEASURE FIRST, DO NOT ENFORCE.
+   *
+   * <p><b>The defect this measures.</b> The heat cap is computed from SPAN margin
+   * ({@link #currentHeatPct}), and SPAN is structurally {@code 0.00} on a LONG-ONLY options book --
+   * you pay premium, you do not post margin. So the gate cannot fire, and a "60% heat cap" that
+   * never fires reads on the settings panel exactly like a cap that is never breached. Confirmed
+   * twice, once on a SUCCESSFUL margin call, so it is not an outage.
+   *
+   * <p><b>Why this LOGS and never blocks.</b> Re-basing the cap on premium outlay changes live
+   * behaviour: on a Rs 1.5 L book a real 60% cap WILL start refusing entries. The owner chose to
+   * learn the true refusal rate over ~10 sessions BEFORE it can cost a trade. Enforcement therefore
+   * stays on the (structurally-zero) SPAN number and this method returns nothing -- it is reversible
+   * by deletion, with no live behaviour change.
+   *
+   * <p><b>No new arithmetic.</b> {@code capitalUsed} already prices a LONG option at the premium
+   * paid ({@code usageFor}: {@code notional} for BUY, a margin approximation for a short), so the
+   * premium-outlay ratio is the existing capital-usage primitive over equity. Inventing a second
+   * definition of "outlay" here would be the thing that later disagrees with the account panel.
+   *
+   * <p>Deduped per (book, day) on its OWN key so it can never suppress -- or be suppressed by -- a
+   * real {@link #recordHeatTrip}. The two are different facts and must stay separately countable.
+   */
+  private void shadowPremiumHeat(String book, BigDecimal capPct, BigDecimal spanHeatPct) {
+    try {
+      BigDecimal equity = account.equity(book);
+      if (equity.signum() <= 0) {
+        return;
+      }
+      BigDecimal premiumHeatPct =
+          account.capitalUsed(book).multiply(BigDecimal.valueOf(100))
+              .divide(equity, 2, RoundingMode.HALF_UP);
+      if (premiumHeatPct.compareTo(capPct) < 0) {
+        return;
+      }
+      LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
+      String dedupKey = tripKey(book, HEAT_CAP_PCT + ":shadow");
+      if (today.equals(trippedOn.get(dedupKey))) {
+        return;
+      }
+      trippedOn.put(dedupKey, today);
+      String detail =
+          "premium-outlay heat " + premiumHeatPct.toPlainString() + "% >= cap "
+              + capPct.toPlainString() + "% (SPAN heat reads " + spanHeatPct.toPlainString()
+              + "%) — WOULD have blocked this entry; enforcement unchanged";
+      settings.audit(book, HEAT_CAP_PCT, "SHADOW", detail);
+      log.info("heat cap SHADOW {}/{} — {}", book, HEAT_CAP_PCT, detail);
+    } catch (RuntimeException e) {
+      // Fail-soft, and loudly: a measurement must never be able to change an entry decision.
+      log.warn("premium-heat shadow failed for {}: {}", book, e.getMessage());
+    }
   }
 
   /** Audits + ntfy-alerts a heat-cap breach (deduped per IST day, like {@link #recordTrip}). */

@@ -18,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -83,6 +84,59 @@ public class OptionAtmPinner {
   @EventListener(InstrumentMasterUpdated.class)
   @Order(org.springframework.core.Ordered.LOWEST_PRECEDENCE)
   public void onMasterUpdated() {
+    repinAsync();
+  }
+
+  /**
+   * H44: RE-CENTRE THE BAND ON SPOT DURING THE SESSION.
+   *
+   * <p><b>The band already follows spot; nothing else did.</b> {@link #atmWindow} centres on the
+   * chain's CURRENT spot every time it runs, and {@link #repin()} is a full reconcile that
+   * subscribes what is newly desired and releases what is stale. The defect was purely its
+   * TRIGGERS: {@code ApplicationReadyEvent} and {@code InstrumentMasterUpdated} only, so the band
+   * was fixed at whatever spot was around the 08:30 master sync and never moved again all session.
+   *
+   * <p><b>Why that stranded money.</b> A contract outside the pinned band never ticks, and every
+   * AUTOMATIC exit refuses without a real tick (#694, never fabricate a price) — so a leg filled on
+   * an out-of-band strike cannot be settled by any automatic path. Measured 2026-08-28: two SENSEX
+   * PE legs sat through their TIME_STOPs, their signal-exit and the 15:44 square-off, and were
+   * released only by a manual explicit-price close at -Rs 8,892.79.
+   *
+   * <p><b>Why widening was not enough.</b> Width went 5 → 10 (±1000 pts on BFO), but the CENTRE
+   * stayed fixed, and BFO picks reach 829 points from spot — so roughly 171 points of one-way drift
+   * exhausts even the wider band. Width buys margin; only re-centring removes the failure mode.
+   *
+   * <p>⚠️ <b>This does NOT forfeit entries, which is the whole point.</b> The H44 closability gate
+   * ({@code artha.paper.refuse-no-tick-entries}) refuses such trades; this stops them arising. The
+   * two are complementary and the gate stays disarmed.
+   *
+   * <p>⚠️ <b>ON THE SHARED DEFAULT POOL, DELIBERATELY — and the census test is what forced the
+   * question.</b> {@code ScheduledPoolCensusTest} failed on this change because a new
+   * {@code @Scheduled} lands somewhere, and that pool has ONE thread shared by ~30 jobs. Two
+   * properties make it safe here rather than another dedicated bean:
+   *
+   * <ul>
+   *   <li><b>It cannot block a neighbour.</b> The method only hands work to {@code repinExecutor}
+   *       and returns, so it holds the pool thread for microseconds. All the real work — chain
+   *       reads, subscribe/release — runs off-pool, exactly as the boot and master-refresh
+   *       triggers already do.
+   *   <li><b>Being DELAYED by a neighbour is immaterial at this cadence.</b> The worst observed
+   *       hold on that pool is the ~70 s options pass (the S1 shape); a repin arriving a minute
+   *       late on a FIVE-MINUTE schedule still re-centres the band long before drift matters.
+   * </ul>
+   *
+   * <p>A dedicated single-thread scheduler for a microsecond dispatch would be cost without a
+   * property to show for it. If this ever grows real work, it needs its own bean — that is the
+   * moment to revisit, not now.
+   *
+   * <p>Every 5 minutes across 09:00–15:35 IST — deliberately bounded rather than {@code *}: outside
+   * the session spot does not move, so a repin would be pure churn against the subscription cap, and
+   * the boot/master-refresh triggers already cover the pre-open pin. The reconcile is idempotent, so
+   * a pass with no drift subscribes nothing and releases nothing.
+   */
+  @Scheduled(cron = "${artha.options.atm-pinner.repin-cron:0 */5 9-15 * * MON-FRI}",
+      zone = "Asia/Kolkata")
+  public void repinDuringSession() {
     repinAsync();
   }
 

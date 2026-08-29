@@ -80,7 +80,7 @@ class ScheduledPoolCensusTest {
    * it onto a dedicated bean", and those two have opposite meanings for the single-thread argument
    * in {@code MonitorSchedulingConfig}.
    */
-  private static final int EXPECTED_SCHEDULED_ANNOTATIONS = 40;
+  private static final int EXPECTED_SCHEDULED_ANNOTATIONS = 41;
 
   /**
    * How many of those name a {@code scheduler} bean, i.e. sit on a dedicated single-thread pool.

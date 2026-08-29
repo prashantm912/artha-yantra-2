@@ -8,7 +8,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 /**
  * Scheduler isolation for the pure liveness DETECTORS (audit BEJ-01). Boot gives {@code @Scheduled}
  * a single default {@code ThreadPoolTaskScheduler} (pool size 1) shared by most scheduled methods
- * here (**29 of 40 as of 2026-08-26 — the exact figure is machine-checked by {@code
+ * here (**30 of 41 as of 2026-08-29 — the exact figure is machine-checked by {@code
  * ScheduledPoolCensusTest}, which is the only thing that can re-derive it; this sentence said
  * "~32" for months with nothing able to confirm or refute it**), so a blocked sibling job (an EOD/backfill/snapshot job that hangs on I/O) silently freezes
  * every watchdog/canary sweep on the same thread — detection is starvable exactly when the stack is
@@ -232,7 +232,7 @@ public class MonitorSchedulingConfig {
    *
    * <p><b>Why it cannot sit on the default pool — it would defeat the fix it is part of.</b> That
    * pool is ONE thread ({@link #taskScheduler} is {@code builder.build()}, pool size 1) shared by
-   * <b>29 scheduled methods on the shared default pool (of 40 {@code @Scheduled} annotations in
+   * <b>30 scheduled methods on the shared default pool (of 41 {@code @Scheduled} annotations in
    * this service's main sources; 11 name a scheduler)</b> — figures RE-DERIVED, not asserted from
    * memory: {@code ScheduledPoolCensusTest} walks the main sources and reddens when any of the
    * three moves, printing the per-class, per-pool breakdown. The number here was once <b>55</b>,

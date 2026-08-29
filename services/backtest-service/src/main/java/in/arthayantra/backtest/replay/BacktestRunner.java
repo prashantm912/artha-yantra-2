@@ -387,6 +387,35 @@ public class BacktestRunner {
             config, result.equityCurve(), from, to, result.initialEquity(), cagrFraction(m));
     mergeBenchmark(m.full(), benchmark);
 
+    // H20(2): REPLAY SIZES UNGRADED WHILE LIVE DOES NOT, and that gap must not stay silent.
+    //
+    // Live applies an E8 confluence-graded size multiplier before lot-rounding
+    // (SignalEngine -> ScalperSizing.sizeMultiplier -> PaperEmissionGuard). ReplayEngine.size()
+    // calls PositionSizer directly with NO multiplier -- `sizeMultiplier` appears ZERO times in
+    // this service. A backtest therefore sizes UP TO 2x what live would have taken on the same
+    // signal, which flatters every absolute P&L number it reports.
+    //
+    // ⚠️ WHY THIS IS A CAVEAT AND NOT A FIX (owner ruling 2026-08-29). Porting the multiplier
+    // needs its INPUTS, and replay does not have them: `oiImbalance` and `vixLevel` appear zero
+    // times here, and the confluence aggregate comes from the OI gate, which is systematically
+    // MUTED on derived history (Dow + IV degrade to NEUTRAL). Applying it would size every
+    // historical backtest near the 0.50 floor for a DATA-FIDELITY reason rather than a market one
+    // -- not "matching live", just differently wrong, and the contaminated-comparison shape
+    // CLAUDE.md warns about. An honest caveat beats a number history cannot support.
+    //
+    // Scope is APPROXIMATE and deliberately over-inclusive rather than silent: live gates grading
+    // on a scalper confluence decision being present, while this keys on the option-premium sizing
+    // method, which is the population that carries one. A premium_budget strategy that never forms
+    // a confluence decision is ungraded live too, so this may caveat a run that needed none.
+    if (definition.sizing() != null
+        && "premium_budget".equals(definition.sizing().method())) {
+      appendCaveat(
+          m.full(),
+          "Sizing is UNGRADED here: live applies an E8 confluence-graded size multiplier (<= 1.0)"
+              + " that this replay does not, so position sizes — and every absolute P&L number"
+              + " derived from them — may overstate what live would have taken. Ledger H20.");
+    }
+
     // §D.15 premium provenance: resolved BEFORE results persist, never defaulted/null.
     PremiumSource premiumSource = premiumProvenance.forCandleReplay(config);
 

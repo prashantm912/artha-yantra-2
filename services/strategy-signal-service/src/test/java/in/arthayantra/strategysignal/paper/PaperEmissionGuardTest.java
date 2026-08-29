@@ -340,4 +340,58 @@ class PaperEmissionGuardTest {
         .contains("computed_lots=0");
   }
 
+
+  /**
+   * ⚠️ H20: the graded taper must be PROPORTIONAL, not a 50% cliff. Owner ruling 2026-08-28.
+   *
+   * <p>The old rule floored base x multiplier to a whole lot, so at base = 2 lots you kept both ONLY
+   * when the multiplier was EXACTLY 1.0 -- a 1% trim and a 49% trim cost the SAME half position. That
+   * is not a rounding nit on this book: 22 of 32 sized scalper entries since 2026-07-01 carried
+   * aggregate < 0.75, so the trimmed branch is the MAJORITY regime, and with max_lots 5 plus a
+   * near-floor multiplier live could never exceed 2 lots however cheap the option. The
+   * Rs 15,000 -> Rs 25,000 budget increase was therefore erased by the ROUNDING rather than by the
+   * grading it was meant to express.
+   *
+   * <p>Base here is 15000 / (100 x 75) = 2 lots = 150 units, the same shape as the live case.
+   */
+  @Test
+  void aSmallGradedTrimCostsASmallSliceRatherThanHalfThePosition() {
+    PaperAccountService account = mock(PaperAccountService.class);
+    InstrumentMetaClient instruments = mock(InstrumentMetaClient.class);
+    when(instruments.meta(any(), any()))
+        .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
+    PaperEmissionGuard guard =
+        new PaperEmissionGuard(
+            mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
+            mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class),
+            new ManasGoverningStopCache(),
+            new EquityMarkCache(java.time.Clock.systemUTC(), 5));
+    StrategyDefinition.SizingSpec sizing =
+        new StrategyDefinition.SizingSpec("premium_budget", Map.of("budget_inr", bd("15000")));
+
+    assertThat(
+            guard.suggestedQty(
+                sizing, "NFO", "NIFTY26MAY24000CE", bd("100"), null, bd("1.0"), "scalper"))
+        .as("ungraded: the full 2 lots")
+        .isEqualByComparingTo(bd("150"));
+
+    assertThat(
+            guard.suggestedQty(
+                sizing, "NFO", "NIFTY26MAY24000CE", bd("100"), null, bd("0.99"), "scalper"))
+        .as("THE CLIFF: 150 x 0.99 = 148.5 -> 1.98 lots. Flooring gave 1 lot (75 units) -- half the"
+            + " position for a 1% trim. HALF_UP keeps both.")
+        .isEqualByComparingTo(bd("150"));
+
+    assertThat(
+            guard.suggestedQty(
+                sizing, "NFO", "NIFTY26MAY24000CE", bd("100"), null, bd("0.51"), "scalper"))
+        .as("a GENUINELY large trim still halves -- this is a cliff repair, not a size increase")
+        .isEqualByComparingTo(bd("75"));
+
+    assertThat(
+            guard.suggestedQty(
+                sizing, "NFO", "NIFTY26MAY24000CE", bd("100"), null, bd("0.10"), "scalper"))
+        .as("never below one lot for a fired entry, unchanged")
+        .isEqualByComparingTo(bd("75"));
+  }
 }

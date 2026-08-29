@@ -55,7 +55,16 @@ public interface EmissionGuard {
    * The {@link #suggestedQty} variant that also applies an E8 §3.2 probability-graded size
    * {@code multiplier} (in {@code (0, 1]}) before lot-rounding. The default IGNORES the multiplier
    * (back-compat for impls that do not grade); the paper adapter overrides it to scale + re-lot-round
-   * DOWN (never up, never below one lot for a fired entry). A null multiplier == the ungraded sizing.
+   * to the NEAREST lot (HALF_UP), bounded above by the ungraded base and never below one lot for a
+   * fired entry. A null multiplier == the ungraded sizing.
+   *
+   * <p>⚠️ This said "DOWN (never up)" until 2026-08-28 and the SPI contract genuinely changed
+   * (H20, owner ruling): flooring made the taper a 50% CLIFF at small lot counts, where at base = 2
+   * lots you kept both ONLY at a multiplier of exactly 1.0. Rounding UP is safe here for one reason
+   * and only that reason — the multiplier is hard-clamped to <= 1 at its single production source
+   * ({@code ScalperSizing.sizeMultiplier}), so HALF_UP can REACH the ungraded base and never pass
+   * it. An implementation whose multiplier could exceed 1 would size ABOVE the strategy budget
+   * under this contract.
    */
   default BigDecimal suggestedQty(
       StrategyDefinition.SizingSpec sizing,

@@ -176,14 +176,35 @@ public class PaperEmissionGuard implements EmissionGuard {
     if (multiplier == null) {
       return BigDecimal.valueOf(base);
     }
-    // E8 §3.2: scale the advisory qty by the graded multiplier, then floor to a WHOLE lot (never round
-    // UP, never below one lot for a fired entry). PaperEmissionGuard is the one rounding authority.
+    // E8 §3.2: scale the advisory qty by the graded multiplier, then round to a WHOLE lot, never
+    // below one lot for a fired entry. PaperEmissionGuard is the one rounding authority.
+    //
+    // ⚠️ HALF_UP, not floor -- CHANGED 2026-08-28 (H20, owner ruling). The floor form made the
+    // documented "gentle taper" a 50% CLIFF at small lot counts, which is where this book actually
+    // lives: at base=2 lots you kept both ONLY when the multiplier was EXACTLY 1.0, so a 1% trim and
+    // a 49% trim cost the SAME half position. Measured live: 22 of 32 sized scalper entries since
+    // 2026-07-01 carried aggregate < 0.75, i.e. the trimmed branch is the MAJORITY regime, and with
+    // max_lots 5 plus a near-floor multiplier live could never exceed 2 lots however cheap the
+    // option -- so the ₹15,000 -> ₹25,000 budget increase was largely erased by the rounding rather
+    // than by the grading it was supposed to express.
+    //
+    // Worked: base 130 units (2 lots of 65), m = 0.99 -> 128.7/65 = 1.98 -> floor 1 (HALF the
+    // position for a 1% trim), HALF_UP 2. At m = 0.51 -> 1.02 -> 1 either way, so a genuinely large
+    // trim still halves. The taper becomes proportional instead of all-or-nothing.
+    //
+    // ⚠️ SAFE ONLY BECAUSE THE MULTIPLIER CANNOT EXCEED 1.0, so HALF_UP can reach `base` and never
+    // pass it -- this is a CLIFF repair, not a size increase. All three ScalperSizing factors are
+    // capped at ONE (aggregateFactor returns ONE at/above SIZE_FULL_AGGREGATE, oiGapFactor and the
+    // VIX factor likewise), so their product is too. That invariant is now PINNED by a test rather
+    // than left as a reading of the code: if any factor ever becomes amplifying, rounding up here
+    // would silently size ABOVE the strategy budget, and the test is what makes that impossible to
+    // land quietly.
     long lots =
         Math.max(
             1L,
             BigDecimal.valueOf(base)
                 .multiply(multiplier)
-                .divideToIntegralValue(BigDecimal.valueOf(lot))
+                .divide(BigDecimal.valueOf(lot), 0, java.math.RoundingMode.HALF_UP)
                 .longValueExact());
     return BigDecimal.valueOf(lots * lot);
   }

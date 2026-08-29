@@ -131,19 +131,42 @@ public class SubscriptionRegistry implements PinnedSubscriptionRegistrar {
       Map<String, Hold> holds = new LinkedHashMap<>();
       holds.put(subscriber, new Hold(mode, priority));
       instruments.put(key, new Instrument(info.instrumentToken(), info.isIndex(), holds, mode));
-      notifySubscribe(List.of(info.instrumentToken()), mode);
+      // ⚠️ ROLL BACK IF THE WIRE SUBSCRIBE FAILS. The hold is inserted first (the map is what
+      // effectiveModeOf and the cap read), so a throwing ticker used to leave a hold that LOOKS
+      // successful: counted against the cap, reported as pinned, and never ticking. The next
+      // reconcile then sees it already held, takes the unchanged-mode path and NEVER retries the
+      // wire, so the contract stays dark. That is H44 recreated by the mechanism meant to prevent
+      // it -- tolerable once a day, permanent at 84 reconciles a day.
+      try {
+        notifySubscribe(List.of(info.instrumentToken()), mode);
+      } catch (RuntimeException wireFailed) {
+        instruments.remove(key);
+        throw wireFailed;
+      }
       persist(subscriber, key, mode, priority);
       return mode;
     }
     refuseCashEquity(key, existing.index());
-    existing.holds().put(subscriber, new Hold(mode, priority));
+    // Kept so a failed wire raise can restore the caller PREVIOUS hold rather than guessing.
+    Hold previous = existing.holds().put(subscriber, new Hold(mode, priority));
     persist(subscriber, key, mode, priority);
     SubscriptionMode newEffective = effectiveModeOf(existing.holds());
     if (newEffective != existing.effectiveMode()) {
+      // Same rollback rule as the first-hold branch: if the wire refuses the raised mode, the hold
+      // must not survive having claimed it.
+      try {
+        notifySubscribe(List.of(existing.token()), newEffective);
+      } catch (RuntimeException wireFailed) {
+        if (previous == null) {
+          existing.holds().remove(subscriber);
+        } else {
+          existing.holds().put(subscriber, previous);
+        }
+        throw wireFailed;
+      }
       instruments.put(
           key,
           new Instrument(existing.token(), existing.index(), existing.holds(), newEffective));
-      notifySubscribe(List.of(existing.token()), newEffective);
     }
     return newEffective;
   }
@@ -204,10 +227,17 @@ public class SubscriptionRegistry implements PinnedSubscriptionRegistrar {
   @Override
   public synchronized void unsubscribe(String subscriber, InstrumentKey key) {
     Instrument existing = instruments.get(key);
-    if (existing == null || existing.holds().remove(subscriber) == null) {
+    if (existing == null || !existing.holds().containsKey(subscriber)) {
       return;
     }
+    // ⚠️ DURABLE REMOVAL FIRST, then the in-memory hold. The order used to be reversed: the hold
+    // was dropped inside the guard above, so a throwing Redis left the instrument with an EMPTY
+    // holds map still present in `instruments` -- counted against the cap and still wire-subscribed,
+    // while every later unsubscribe returned early because the hold was already gone. Each repin
+    // could then leak another cap slot, and nothing surfaced it. Doing the durable write first means
+    // a Redis failure aborts the release with the hold INTACT: the next reconcile simply retries.
     store.remove(subscriber, key);
+    existing.holds().remove(subscriber);
     if (existing.holds().isEmpty()) {
       instruments.remove(key);
       notifyUnsubscribe(List.of(existing.token()));

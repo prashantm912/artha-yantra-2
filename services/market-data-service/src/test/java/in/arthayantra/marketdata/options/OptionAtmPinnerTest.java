@@ -1,11 +1,14 @@
 package in.arthayantra.marketdata.options;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import in.arthayantra.marketdata.feed.LastTickStore;
+import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.InstrumentMasterUpdated;
 import in.arthayantra.marketdata.kite.InstrumentTokenResolver;
@@ -50,7 +53,7 @@ class OptionAtmPinnerTest {
     seedExistingPins(registry);
     int before = registry.view().size();
 
-    OptionAtmPinner pinner = new OptionAtmPinner(registry, chains, List.of("NIFTY 50", "SENSEX"), 5, 7, new SimpleMeterRegistry());
+    OptionAtmPinner pinner = pinnerWithNoTicks(registry, chains, List.of("NIFTY 50", "SENSEX"), 5, 7, new SimpleMeterRegistry());
     pinner.repin();
 
     assertThat(pinner.pinnedContracts()).hasSize(44);
@@ -82,7 +85,7 @@ class OptionAtmPinnerTest {
     addOptionKeys(master, "NFO", "NIFTY 50", 100);
     addOptionKeys(master, "NFO", "NIFTY 50", 300);
     SubscriptionRegistry registry = registry(master, 3_000);
-    OptionAtmPinner pinner = new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 1, 1, new SimpleMeterRegistry());
+    OptionAtmPinner pinner = pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 1, 1, new SimpleMeterRegistry());
 
     pinner.repin();
     pinner.repin();
@@ -103,7 +106,7 @@ class OptionAtmPinnerTest {
     addOptionKeys(master, "NFO", "NIFTY 50", 100);
     SubscriptionRegistry registry = registry(master, 14);
     seedExistingPins(registry);
-    OptionAtmPinner pinner = new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 1, 1, new SimpleMeterRegistry());
+    OptionAtmPinner pinner = pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 1, 1, new SimpleMeterRegistry());
 
     pinner.repin();
 
@@ -122,7 +125,7 @@ class OptionAtmPinnerTest {
     addOptionKeys(master, "NFO", "NIFTY 50", 100);
     master.remove("NFO:NIFTY100CE");
     SubscriptionRegistry registry = registry(master, 3_000);
-    OptionAtmPinner pinner = new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 1, 1, new SimpleMeterRegistry());
+    OptionAtmPinner pinner = pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 1, 1, new SimpleMeterRegistry());
 
     pinner.repin();
 
@@ -152,7 +155,7 @@ class OptionAtmPinnerTest {
     SubscriptionRegistry registry = registry(master, 3_000);
 
     OptionAtmPinner pinner =
-        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+        pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
     pinner.repin();
 
     assertThat(pinner.pinnedContracts())
@@ -175,7 +178,7 @@ class OptionAtmPinnerTest {
     SubscriptionRegistry registry = registry(master, 3_000);
 
     OptionAtmPinner pinner =
-        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+        pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
     pinner.repin();
 
     assertThat(pinner.pinnedContracts())
@@ -266,7 +269,7 @@ class OptionAtmPinnerTest {
         new SubscriptionRegistry(
             key -> Optional.ofNullable(master.get(key.canonical())), 3_000, new SimpleMeterRegistry());
     OptionAtmPinner pinner =
-        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+        pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
 
     pinner.repin();
     assertThat(pinner.pinnedContracts()).hasSize(22);
@@ -297,7 +300,7 @@ class OptionAtmPinnerTest {
         new SubscriptionRegistry(
             key -> Optional.ofNullable(master.get(key.canonical())), 3_000, new SimpleMeterRegistry());
     OptionAtmPinner pinner =
-        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+        pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
     pinner.repin();
     assertThat(pinner.pinnedContracts()).hasSize(22);
 
@@ -335,7 +338,7 @@ class OptionAtmPinnerTest {
     assertThat(restored).isEqualTo(22);
 
     OptionAtmPinner fresh =
-        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+        pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
     fresh.repin();
 
     assertThat(fresh.pinnedContracts())
@@ -343,6 +346,34 @@ class OptionAtmPinnerTest {
         .containsExactlyInAnyOrderElementsOf(
             expectedSymbols("NFO", "NIFTY", 100).stream().map(OptionAtmPinnerTest::key).toList());
     assertThat(registry.view()).hasSize(22);
+  }
+
+  /**
+   * The CHAIN-path pinner: an instrument master that knows no option rows and a tick store with
+   * nothing in it, so {@code pinsFromTick} returns null and every pass falls through to
+   * {@code chains.chain(...)}. That is deliberate — these cases were written against the chain
+   * path, it is still live as the no-tick fallback, and rewriting them onto the fast path would
+   * have silently stopped testing it.
+   */
+  private static OptionAtmPinner pinnerWithNoTicks(
+      SubscriptionRegistry registry,
+      OptionsChainService chains,
+      List<String> underlyings,
+      int width,
+      int horizonDays,
+      io.micrometer.core.instrument.MeterRegistry meters) {
+    InstrumentRepository instruments = mock(InstrumentRepository.class);
+    when(instruments.optionChain(anyString(), any())).thenReturn(List.of());
+    return new OptionAtmPinner(
+        registry,
+        chains,
+        underlyings,
+        width,
+        horizonDays,
+        instruments,
+        new LastTickStore(),
+        meters,
+        java.time.Clock.systemUTC());
   }
 
   private static InstrumentKey key(String canonical) {
@@ -371,7 +402,7 @@ class OptionAtmPinnerTest {
         new SubscriptionRegistry(
             key -> Optional.ofNullable(master.get(key.canonical())), 22, new SimpleMeterRegistry());
     OptionAtmPinner pinner =
-        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+        pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
 
     pinner.repin();
     assertThat(pinner.pinnedContracts()).hasSize(22);
@@ -467,8 +498,7 @@ class OptionAtmPinnerTest {
             key -> Optional.ofNullable(master.get(key.canonical())), 3_000, new SimpleMeterRegistry());
 
     OptionAtmPinner pinner =
-        new OptionAtmPinner(
-            registry, chains, List.of("NIFTY 50"), 2, 7, new SimpleMeterRegistry());
+        pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 2, 7, new SimpleMeterRegistry());
     pinner.repin();
     List<String> atSpot100 =
         pinner.pinnedContracts().stream().map(InstrumentKey::canonical).sorted().toList();

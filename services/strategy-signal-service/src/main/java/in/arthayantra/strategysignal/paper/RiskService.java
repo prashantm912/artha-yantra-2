@@ -423,17 +423,23 @@ public class RiskService {
    * the per-book gate: {@link #entryAllowed(String)} is a thin {@code isEmpty()} view, so both callers
    * apply IDENTICAL semantics AND identical audit side-effects (a daily-loss/profit/deployment/heat trip
    * writes its {@code risk_audit} row + ntfy here regardless of which caller triggered it; the kill-switch
-   * and max-open rails write no audit, matching the emission path). Used by the manual paper-order path
+   * and max-open rails now write an audit row too, but deliberately do NOT page — see
+   * {@link #recordCapacityVeto}). Used by the manual paper-order path
    * ({@code PaperService.openManualOrder}) to surface the blocking rail in a 422 body.
    */
   public Optional<String> entryVeto(String book) {
     if (boolFlag(book, KILL_SWITCH)) {
+      recordCapacityVeto(book, KILL_SWITCH, "kill switch is ON — all entries paused");
       return Optional.of(KILL_SWITCH);
     }
     Optional<Setting> maxOpen = settings.get(book, MAX_OPEN);
-    if (enabled(maxOpen)
-        && positions.openCount(book) >= maxOpen.get().value().path("value").asInt(Integer.MAX_VALUE)) {
-      return Optional.of(MAX_OPEN);
+    if (enabled(maxOpen)) {
+      int cap = maxOpen.get().value().path("value").asInt(Integer.MAX_VALUE);
+      int open = positions.openCount(book);
+      if (open >= cap) {
+        recordCapacityVeto(book, MAX_OPEN, "book is at capacity: " + open + " open / cap " + cap);
+        return Optional.of(MAX_OPEN);
+      }
     }
     Optional<Setting> dailyLoss = settings.get(book, DAILY_LOSS);
     if (enabled(dailyLoss)) {
@@ -657,6 +663,42 @@ public class RiskService {
       log.warn("risk cap {}/{} tripped — ENTRY emission paused for {}", book, key, today);
       pushAlert("ArthaYantra Risk — " + key + " (" + book + ")", detail);
     }
+  }
+
+  /**
+   * Ledger N26 step 1: make the SILENT entry vetoes auditable.
+   *
+   * <p>{@code KILL_SWITCH} and {@code MAX_OPEN} returned a verdict and wrote nothing, so a book that
+   * had quietly stopped taking entries could only be diagnosed by an investigation rather than a
+   * query. Both books were found capacity-bound this way — minervini at 12/12, manas-arora at 6/6 —
+   * and each needed exactly one close to admit one entry. The owner chose "make it auditable FIRST",
+   * before raising any cap, so the NEXT starvation is one query.
+   *
+   * <p>⚠️ <b>Audits but deliberately does NOT page, unlike {@link #recordTrip}.</b> A daily-loss
+   * trip is an INCIDENT: something changed and someone should look. A capacity cap is a STEADY
+   * STATE — a full book stays full until something closes, so paging every day on "the book is full"
+   * trains the reader to ignore the channel, and the alerts that matter are the exits. The row is the
+   * deliverable; the alert would be the regression.
+   *
+   * <p>Dedup is {@link #recordTrip}'s own per-(book, rail, day) key, so a book sitting at cap writes
+   * ONE row per day rather than one per refused candidate — which matters, because at cap EVERY
+   * candidate is refused, all session.
+   */
+  private void recordCapacityVeto(String book, String key, String detail) {
+    LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
+    String dedupKey = tripKey(book, key);
+    if (today.equals(trippedOn.get(dedupKey))) {
+      return;
+    }
+    trippedOn.put(dedupKey, today);
+    try {
+      settings.audit(book, key, "TRIP", detail);
+    } catch (RuntimeException e) {
+      // Fail-soft: an audit row must never be the reason an entry decision changes.
+      log.warn("risk_audit not written for {}/{}: {}", book, key, e.getMessage());
+    }
+    log.info("entry veto {}/{} — {} (audited, not paged: a capacity cap is a steady state)",
+        book, key, detail);
   }
 
   /** All limit rows for a book's settings panel. */

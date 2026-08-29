@@ -65,33 +65,34 @@ class OiAttributionServiceTest {
                     row("09:45-09:50", 1, 1, 1, 0))));
 
     OiAttributionService svc = new OiAttributionService(trades, md);
-    Map<String, Object> out = svc.attribution(RUN, "5m", null);
-    assertThat(out.get("oiDerived")).isEqualTo(true);
+    OiAttributionService.OiAttribution out = svc.attribution(RUN, "5m", null);
+    assertThat(out.oiDerived()).isEqualTo(true);
 
-    assertThat(out.get("underlying")).isEqualTo("NIFTY 50");
-    assertThat(out.get("tradeCount")).isEqualTo(2);
-    assertThat(out.get("tradesAttributed")).isEqualTo(2);
-    assertThat(out.get("tradesNoData")).isEqualTo(0);
-    assertThat(out.get("sessionsCovered")).isEqualTo(1);
+    assertThat(out.underlying()).isEqualTo("NIFTY 50");
+    assertThat(out.tradeCount()).isEqualTo(2);
+    assertThat(out.tradesAttributed()).isEqualTo(2);
+    assertThat(out.tradesNoData()).isEqualTo(0);
+    assertThat(out.sessionsCovered()).isEqualTo(1);
 
     @SuppressWarnings("unchecked")
-    List<Map<String, Object>> buckets = (List<Map<String, Object>>) out.get("buckets");
-    Map<String, Object> extBull =
-        buckets.stream().filter(b -> Integer.valueOf(1).equals(b.get("trend"))).findFirst().orElseThrow();
-    assertThat(extBull.get("label")).isEqualTo("Ext.Bullish"); // trend 1 → Ext.Bullish (not Ext.Bearish)
-    assertThat(extBull.get("count")).isEqualTo(2);
-    assertThat(extBull.get("wins")).isEqualTo(1);
-    assertThat(extBull.get("winRate")).isEqualTo(new BigDecimal("0.5000"));
-    assertThat(extBull.get("totalPnl")).isEqualTo(new BigDecimal("700.00"));
+    List<OiAttributionService.TrendBucket> buckets = out.buckets();
+    OiAttributionService.TrendBucket extBull =
+        
+buckets.stream().filter(b -> Integer.valueOf(1).equals(b.trend())).findFirst().orElseThrow();
+    assertThat(extBull.label()).isEqualTo("Ext.Bullish"); // trend 1 → Ext.Bullish (not Ext.Bearish)
+    assertThat(extBull.count()).isEqualTo(2);
+    assertThat(extBull.wins()).isEqualTo(1);
+    assertThat(extBull.winRate()).isEqualTo(new BigDecimal("0.5000"));
+    assertThat(extBull.totalPnl()).isEqualTo(new BigDecimal("700.00"));
 
     // per-trade attribution carries the bucket label + net vote.
     @SuppressWarnings("unchecked")
-    List<Map<String, Object>> perTrade = (List<Map<String, Object>>) out.get("trades");
+    List<OiAttributionService.TradeAttribution> perTrade = out.trades();
     assertThat(perTrade).hasSize(2);
-    assertThat(perTrade.get(0).get("bucket")).isEqualTo("09:30-09:35");
-    assertThat(perTrade.get(0).get("trendLabel")).isEqualTo("Ext.Bullish");
-    assertThat(perTrade.get(0).get("net")).isEqualTo(3);
-    assertThat(perTrade.get(0).get("win")).isEqualTo(true);
+    assertThat(perTrade.get(0).bucket()).isEqualTo("09:30-09:35");
+    assertThat(perTrade.get(0).trendLabel()).isEqualTo("Ext.Bullish");
+    assertThat(perTrade.get(0).net()).isEqualTo(3);
+    assertThat(perTrade.get(0).win()).isEqualTo(true);
   }
 
   @Test
@@ -104,14 +105,14 @@ class OiAttributionServiceTest {
     when(md.connectingDots(any(), any(), any()))
         .thenReturn(MarketDataClient.CdResponse.EMPTY); // no OI for April
 
-    Map<String, Object> out = new OiAttributionService(trades, md).attribution(RUN, "5m", null);
-    assertThat(out.get("tradesNoData")).isEqualTo(1);
-    assertThat(out.get("tradesAttributed")).isEqualTo(0);
-    assertThat(out.get("sessionsUncovered")).isEqualTo(1);
+    OiAttributionService.OiAttribution out = new OiAttributionService(trades, md).attribution(RUN, "5m", null);
+    assertThat(out.tradesNoData()).isEqualTo(1);
+    assertThat(out.tradesAttributed()).isEqualTo(0);
+    assertThat(out.sessionsUncovered()).isEqualTo(1);
     @SuppressWarnings("unchecked")
-    List<Map<String, Object>> perTrade = (List<Map<String, Object>>) out.get("trades");
-    assertThat(perTrade.get(0).get("trendLabel")).isEqualTo("NO_DATA");
-    assertThat(perTrade.get(0).get("net")).isNull();
+    List<OiAttributionService.TradeAttribution> perTrade = out.trades();
+    assertThat(perTrade.get(0).trendLabel()).isEqualTo("NO_DATA");
+    assertThat(perTrade.get(0).net()).isNull();
   }
 
   @Test

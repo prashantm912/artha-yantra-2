@@ -711,6 +711,104 @@ export interface components {
             meetsReliabilityBar: boolean;
             grade: string;
         };
+        OiAttribution: {
+            runId: string | null;
+            underlying: string | null;
+            interval: string | null;
+            /** Format: int32 */
+            tradeCount: number;
+            /** Format: int32 */
+            tradesAttributed: number;
+            /** Format: int32 */
+            tradesNoData: number;
+            /** Format: int32 */
+            sessionsCovered: number;
+            /** Format: int32 */
+            sessionsUncovered: number;
+            oiDerived: boolean | null;
+            caveat: string;
+            buckets: components["schemas"]["TrendBucket"][];
+            trades: components["schemas"]["TradeAttribution"][];
+        };
+        TradeAttribution: {
+            /** Format: int32 */
+            seq: number;
+            tradingsymbol: string | null;
+            entryTs: string | null;
+            bucket: string;
+            /** Format: int32 */
+            trend: number;
+            trendLabel: string;
+            /** Format: int32 */
+            net: number | null;
+            pnl: string | null;
+            win: boolean;
+        };
+        TrendBucket: {
+            /** Format: int32 */
+            trend: number;
+            label: string;
+            /** Format: int32 */
+            count: number;
+            /** Format: int32 */
+            wins: number;
+            winRate: string | null;
+            totalPnl: string;
+            avgPnl: string | null;
+        };
+        HeroZeroPremium: {
+            runId: string | null;
+            /** Format: int32 */
+            tradeCount: number;
+            /** Format: int32 */
+            tradesPriced: number;
+            /** Format: int32 */
+            tradesUnpriced: number | null;
+            /** Format: int32 */
+            heroes: number | null;
+            /** Format: int32 */
+            zeros: number | null;
+            /** Format: int32 */
+            flats: number | null;
+            /** Format: int32 */
+            confirmed: number | null;
+            confirmedRate: string | null;
+            /** Format: int32 */
+            premiumChangePctCount: number | null;
+            /** Format: int32 */
+            slTouched: number | null;
+            /** Format: int32 */
+            tradedSideRicherCount: number | null;
+            avgPeakMultiple: string | null;
+            avgPremiumChangePct: string | null;
+            caveat: string;
+            trades: components["schemas"]["HeroZeroTrade"][];
+        };
+        HeroZeroTrade: {
+            /** Format: int32 */
+            seq: number;
+            tradingsymbol: string | null;
+            entryTs: string | null;
+            exitTs: string | null;
+            entryPremium: string | null;
+            exitPremium: string | null;
+            pnl: string | null;
+            priced: boolean;
+            peakPremium: string | null;
+            peakTs: string | null;
+            troughPremium: string | null;
+            peakMultiple: string | null;
+            exitMultiple: string | null;
+            class: string | null;
+            slTouched: boolean | null;
+            premiumChangePct: string | null;
+            confirmed: boolean | null;
+            optionType: string | null;
+            strike: string | null;
+            mirrorPremium: string | null;
+            mirrorSkewPct: string | null;
+            tradedSideRicher: boolean | null;
+        };
         DecisionTraceResponse: {
             items: components["schemas"]["Trace"][];
         };
@@ -1502,9 +1600,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["OiAttribution"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1569,9 +1665,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["HeroZeroPremium"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

@@ -298,12 +298,35 @@ class MapReturnRatchetTest {
    * {@code types = {"string","null"}} -- {@code types} UNIONS with the inferred type instead of
    * replacing it, so the bare form would have captured {@code ["number","string","null"]}.
    */
+  /**
+   * <b>backtest-service 2 -> 0 (2026-08-29). THE PLATFORM FLOOR IS NOW ZERO EVERYWHERE.</b>
+   * {@code OiAttributionController.attribution} and {@code HeroZeroPremiumController.heroZeroPremium}
+   * -- the last two "deliberate stops" -- are converted on an owner shape decision.
+   *
+   * <p>⚠️ <b>heroZeroPremium was BIGGER than this javadoc had recorded, and the extra part is the
+   * dangerous one.</b> The row above described a 5-vs-16 ENVELOPE. The PER-TRADE ITEM is conditional
+   * too, across THREE tiers: an unpriced trade emitted 8 keys, a priced one ~22, and the mirror-leg
+   * block only ran when the contract resolved. So an UNPRICED trade row now carries ~14 explicit
+   * nulls it did not before -- a larger wire change than the envelope that got documented. Judged
+   * acceptable only because the endpoint has ZERO frontend consumers.
+   *
+   * <p>⚠️ <b>And one of its JSON keys is {@code "class"} -- a Java RESERVED WORD.</b> A record
+   * component cannot be named it, so the component is {@code klass} and the key survives ONLY via
+   * {@code @JsonProperty("class")}. Remove that annotation and the wire silently renames to
+   * {@code klass}: no compile error, no other failing test. {@code HeroZeroWireShapeTest} exists for
+   * that one line, and asserts BOTH trade tiers plus {@code isTextual()} on the decimals.
+   *
+   * <p>⚠️ That wire test first failed on ITS OWN FIXTURE: a bare {@code new ObjectMapper()}
+   * serialises {@code BigDecimal} as a NUMBER, so it was measuring a mapper the application never
+   * uses. The platform registers {@code ToStringSerializer} for {@code BigDecimal}, which is exactly
+   * why the spec must say {@code string}. If you write a wire-shape test, configure the WIRE mapper.
+   */
   private static final Map<String, Integer> FROZEN =
       Map.of(
           "edge-gateway", 0,
           "market-data-service", 0,
           "strategy-signal-service", 0,
-          "backtest-service", 2);
+          "backtest-service", 0);
 
   /**
    * ⚠️ The optional {@code java\.util\.} is load-bearing, not tidiness. Without it a handler declared

@@ -164,7 +164,12 @@ public class SignalsController {
         throw e;
       }
       if (!verdict.admitted() && !takenConcurrently(id)) {
-        throw new ApiException(422, verdict.code(), verdict.reason(), verdict.details());
+        // The verdict carries its OWN status: 422 for a refusal the caller could have avoided,
+        // 503 when a dependency could not answer. Hardcoding 422 here made a retryable outage
+        // look permanent, and disagreed with the writer, which already threw 503 for the same
+        // fact (H44 round 3).
+        throw new ApiException(
+            verdict.httpStatus(), verdict.code(), verdict.reason(), verdict.details());
       }
     }
     // Guarded CAS ACTIVE→TAKEN: publish (and thus open a paper position) only if THIS call won the

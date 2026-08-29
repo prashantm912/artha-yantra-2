@@ -5,6 +5,7 @@ import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
 import in.arthayantra.strategyengine.fills.FillSimulator.Fill;
+import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategyengine.fills.Side;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
@@ -45,6 +46,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class PaperService {
 
   private static final Logger log = LoggerFactory.getLogger(PaperService.class);
+
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
   /**
@@ -240,6 +242,8 @@ public class PaperService {
   private final PaperPositionLotRepository lots;
   private final PaperPositionRepository positions;
   private final PaperFillService fills;
+  private final MeterRegistry meterRegistry;
+
   private final LastTickReader lastTick;
   private final InstrumentMetaClient instruments;
   private final SignalRepository signals;
@@ -258,6 +262,31 @@ public class PaperService {
   private final Counter lotTagFailures;
   /** V057 attribution read: rows + coverage in ONE REPEATABLE_READ snapshot, never two. */
   private final TransactionTemplate attributionTemplate;
+  /**
+   * H44: refuse an OPTION entry whose contract has NEVER ticked. DEFAULT OFF.
+   *
+   * <p><b>Why an entry gate at all.</b> Entry fills without a tick (documented, correct) while every
+   * automatic exit REFUSES without a real tick (the #694 doctrine — settles use the last real tick at
+   * any age and refuse only when none was ever seen, never fabricating a price). Both halves are
+   * right; together they can open a position no automatic path can ever close. Measured 2026-08-28:
+   * two SENSEX PE legs sat through their TIME_STOPs, their signal-exit and the 15:44 square-off,
+   * accrued 1,973 starved-bracket WARNs and held two sub-accounts allocation-dead until a manual
+   * explicit-price close released them at -Rs 8,892.79.
+   *
+   * <p><b>OPTION only, and that is load-bearing rather than conservative.</b> EQUITIES DO NOT TICK —
+   * {@code countMtmBlindPositions} records that all 18 cash-equity swing positions once counted as
+   * mark-blind for exactly that structural reason. Applied to every class this flag would refuse
+   * EVERY swing equity entry the moment it was armed. FUTURE is excluded too: the H44 mechanism is
+   * the pinned ATM STRIKE BAND, which is options-specific, and a dated future resolves through a
+   * different subscription path.
+   *
+   * <p><b>Ships DISARMED on purpose.</b> Arming changes which trades the book takes, which is an
+   * owner decision on live money. While it is off, {@code ay_paper_fill_no_tick_total}
+   * ({@link NoTickFillListener}) already counts how often it WOULD have fired, so the arming
+   * decision can be taken on a measured rate instead of on this javadoc.
+   */
+  private final boolean refuseNoTickEntries;
+
   /** Audit V3: a fill priced off a last tick older than this is fiction — rejected DATA_STALE. */
   private final Duration tickMaxAge;
   /**
@@ -309,7 +338,11 @@ public class PaperService {
           long signalTakeMaxAgeMinutes,
       @org.springframework.beans.factory.annotation.Value("${artha.paper.strategy-scoped-books:}")
           String strategyScopedBooks,
+      @org.springframework.beans.factory.annotation.Value("${artha.paper.refuse-no-tick-entries:false}")
+          boolean refuseNoTickEntries,
       MeterRegistry meterRegistry) {
+    this.refuseNoTickEntries = refuseNoTickEntries;
+    this.meterRegistry = meterRegistry;
     this.orders = orders;
     this.lots = lots;
     this.positions = positions;
@@ -393,7 +426,8 @@ public class PaperService {
     this(
         orders, lots, positions, fills, lastTick, instruments, signals, accountService, books, risk,
         accounts, events, staleTicks, rejections, governingStopCache, transactionManager,
-        perTradeRiskPct, tickMaxAgeSeconds, signalTakeMaxAgeMinutes, "", meterRegistry);
+        perTradeRiskPct, tickMaxAgeSeconds, signalTakeMaxAgeMinutes, "", false,
+        meterRegistry);
   }
 
   /**
@@ -424,7 +458,8 @@ public class PaperService {
     this(
         orders, lots, positions, fills, lastTick, instruments, signals, accountService, books, risk,
         accounts, events, staleTicks, rejections, governingStopCache, transactionManager,
-        perTradeRiskPct, tickMaxAgeSeconds, signalTakeMaxAgeMinutes, "", new SimpleMeterRegistry());
+        perTradeRiskPct, tickMaxAgeSeconds, signalTakeMaxAgeMinutes, "", false,
+        new SimpleMeterRegistry());
   }
 
   /**
@@ -907,6 +942,63 @@ public class PaperService {
               + exchange + ":" + tradingsymbol,
           Map.of("lotSize", meta.lotSize(), "qty", request.qty()));
     }
+    // H44 CLOSABILITY GATE. Refuse to OPEN an option position that no automatic exit could ever
+    // settle. See the refuseNoTickEntries field javadoc for the measured incident and for why this
+    // is OPTION-scoped -- equities do not tick, so a class-blind form would refuse every swing entry.
+    //
+    // Placed HERE, at the sole writer, for the same reason the lot-size and deployment-cap checks
+    // above are: openManualOrder, openPair and the taken path all funnel through this method, so one
+    // check closes all four doors. It gates NEW EXPOSURE ONLY -- the exit path is a different method
+    // and is never gated, because you can always decline to enter but must never be unable to leave.
+    //
+    // ⚠️ LIVE_TICK is skipped because that branch ALREADY read a tick -- re-probing could only
+    // disagree with the price we just struck the fill against.
+    //
+    // ⚠️ AND IT FAILS CLOSED. This paragraph said "FAILS OPEN" for one revision, sitting
+    // directly above code that already failed closed -- a comment contradicting the line under it,
+    // which is the worst kind because it is the part a reader trusts. Round 2 reversed the
+    // behaviour and round 3 caught the leftover text.
+    // The reasoning, kept because the REVERSAL is the interesting part: failing open is correct
+    // for a DIAGNOSTIC (a probe must never break what it observes -- an earlier inline cut was
+    // rejected for exactly that) and WRONG for a SAFETY GATE, because allowing a fill we could not
+    // verify recreates H44 while the flag advertises protection. #694 settles the direction: an
+    // entry may always be declined.
+    if (refuseNoTickEntries
+        && meta.instrumentClass() == InstrumentClass.OPTION
+        && !"LIVE_TICK".equals(refSource)) {
+      boolean everTicked;
+      try {
+        everTicked = lastTick.lastTick(exchange, tradingsymbol).isPresent();
+      } catch (RuntimeException probeFailed) {
+        // FAIL CLOSED, and this REVERSED in review -- the earlier cut allowed the fill here.
+        // That was right while this was a DIAGNOSTIC (a probe must never break what it
+        // observes) and wrong the moment it became a SAFETY GATE: allowing a fill we could
+        // not verify recreates H44 while the flag claims protection, which is worse than not
+        // arming it. The repo doctrine settles the direction -- #694: entries need fresh
+        // truth (you can always NOT enter), exits need the best available truth (you cannot
+        // refuse to leave forever). This is an ENTRY.
+        // 503, not 422: the caller is fine and the instrument is fine, our tick store is
+        // unreachable -- a distinct code so an outage is never read as a never-ticked
+        // contract. NOTE the blast radius: while Redis is down and this flag is ARMED, every
+        // option entry is refused.
+        recordProbeFailedRejectQuietly(request, exchange, tradingsymbol, side);
+        throw new ApiException(
+            503,
+            ErrorCodes.DATA_GAP,
+            "cannot verify whether " + exchange + ":" + tradingsymbol + " has ever ticked"
+                + " — refusing to open a position whose closability is unknown (H44, fail-closed)",
+            Map.of("exchange", exchange, "tradingsymbol", tradingsymbol));
+      }
+      if (!everTicked) {
+        recordNoTickRejectQuietly(request, exchange, tradingsymbol, side);
+        throw new ApiException(
+            422,
+            ErrorCodes.DATA_GAP,
+            "no tick has ever been seen for " + exchange + ":" + tradingsymbol
+                + " — refusing to open a position no automatic exit could settle (H44)",
+            Map.of("exchange", exchange, "tradingsymbol", tradingsymbol));
+      }
+    }
     Fill fill = fills.fill(Side.valueOf(side), request.qty(), reference, meta);
     // The deployment cap, projected against what this fill ACTUALLY costs. Placed here — at the sole
     // writer, after the fill is struck — because this is the first and only point where all three
@@ -1053,7 +1145,9 @@ public class PaperService {
           row.id(), orderId, request.signalId(), book, exchange, tradingsymbol, side, request.qty(),
           fill.fillPrice());
       events.publishEvent(
-          new PaperPositionOpened(row.id(), book, exchange, tradingsymbol, side, row.qty()));
+          new PaperPositionOpened(
+              row.id(), book, exchange, tradingsymbol, side, row.qty(),
+              meta.instrumentClass()));
     }
     // Same projected usage the deployment/sub-account checks above already computed — reused rather
     // than recomputed, so the SPAN client is called once per fill instead of twice.
@@ -1298,6 +1392,43 @@ public class PaperService {
           request.signalId(), bookFor(request), exchange, tradingsymbol, side, request.qty());
     } catch (RuntimeException e) {
       log.warn("paper_order_rejections (no-price) not written for {}:{}: {}", exchange, tradingsymbol, e.getMessage());
+    }
+  }
+
+  /**
+   * H44 refusal, durably recorded. Fail-soft for the same reason its siblings are: the forensic row
+   * must never be the thing that changes the outcome — the caller is already throwing.
+   */
+  private void recordNoTickRejectQuietly(
+      OrderRequest request, String exchange, String tradingsymbol, String side) {
+    try {
+      rejections.recordNeverTicked(
+          request.signalId(), bookFor(request), exchange, tradingsymbol, side,
+          request.qty(),
+          "no tick ever seen — an opened position would have no automatic exit");
+    } catch (RuntimeException e) {
+      log.warn(
+          "paper_order_rejections (never-ticked) not written for {}:{}: {}",
+          exchange, tradingsymbol, e.getMessage());
+    }
+  }
+
+  /**
+   * H44 fail-closed refusal. Its own reason code: "we could not ASK" is a different
+   * operational fact from "the contract has never ticked", and a forensic row that
+   * conflates them would send an operator hunting a dead instrument during a Redis outage.
+   */
+  private void recordProbeFailedRejectQuietly(
+      OrderRequest request, String exchange, String tradingsymbol, String side) {
+    try {
+      rejections.recordClosabilityUnknown(
+          request.signalId(), bookFor(request), exchange, tradingsymbol, side,
+          request.qty(),
+          "tick store unreachable — closability could not be verified");
+    } catch (RuntimeException e) {
+      log.warn(
+          "paper_order_rejections (closability-unknown) not written for {}:{}: {}",
+          exchange, tradingsymbol, e.getMessage());
     }
   }
 

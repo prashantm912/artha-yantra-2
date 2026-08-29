@@ -799,8 +799,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/OiAttribution"
                 }
               }
             }
@@ -890,8 +889,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/HeroZeroPremium"
                 }
               }
             }
@@ -2149,6 +2147,265 @@
           }
         },
         "required" : [ "avgBarsHeld", "avgLossPct", "avgWinPct", "battingAvgPct", "expectancyPct", "grade", "losses", "meetsReliabilityBar", "payoffRatio", "trades", "wins" ]
+      },
+      "OiAttribution" : {
+        "type" : "object",
+        "properties" : {
+          "runId" : {
+            "type" : [ "string", "null" ]
+          },
+          "underlying" : {
+            "type" : [ "string", "null" ]
+          },
+          "interval" : {
+            "type" : [ "string", "null" ]
+          },
+          "tradeCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tradesAttributed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tradesNoData" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "sessionsCovered" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "sessionsUncovered" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "oiDerived" : {
+            "type" : [ "boolean", "null" ]
+          },
+          "caveat" : {
+            "type" : "string"
+          },
+          "buckets" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TrendBucket"
+            }
+          },
+          "trades" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TradeAttribution"
+            }
+          }
+        },
+        "required" : [ "buckets", "caveat", "interval", "oiDerived", "runId", "sessionsCovered", "sessionsUncovered", "tradeCount", "trades", "tradesAttributed", "tradesNoData", "underlying" ]
+      },
+      "TradeAttribution" : {
+        "type" : "object",
+        "properties" : {
+          "seq" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tradingsymbol" : {
+            "type" : [ "string", "null" ]
+          },
+          "entryTs" : {
+            "type" : [ "string", "null" ]
+          },
+          "bucket" : {
+            "type" : "string"
+          },
+          "trend" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "trendLabel" : {
+            "type" : "string"
+          },
+          "net" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "pnl" : {
+            "type" : [ "string", "null" ]
+          },
+          "win" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "bucket", "entryTs", "net", "pnl", "seq", "tradingsymbol", "trend", "trendLabel", "win" ]
+      },
+      "TrendBucket" : {
+        "type" : "object",
+        "properties" : {
+          "trend" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "count" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "wins" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "winRate" : {
+            "type" : [ "string", "null" ]
+          },
+          "totalPnl" : {
+            "type" : "string"
+          },
+          "avgPnl" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "avgPnl", "count", "label", "totalPnl", "trend", "winRate", "wins" ]
+      },
+      "HeroZeroPremium" : {
+        "type" : "object",
+        "properties" : {
+          "runId" : {
+            "type" : [ "string", "null" ]
+          },
+          "tradeCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tradesPriced" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tradesUnpriced" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "heroes" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "zeros" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "flats" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "confirmed" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "confirmedRate" : {
+            "type" : [ "string", "null" ]
+          },
+          "premiumChangePctCount" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "slTouched" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "tradedSideRicherCount" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "avgPeakMultiple" : {
+            "type" : [ "string", "null" ]
+          },
+          "avgPremiumChangePct" : {
+            "type" : [ "string", "null" ]
+          },
+          "caveat" : {
+            "type" : "string"
+          },
+          "trades" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/HeroZeroTrade"
+            }
+          }
+        },
+        "required" : [ "avgPeakMultiple", "avgPremiumChangePct", "caveat", "confirmed", "confirmedRate", "flats", "heroes", "premiumChangePctCount", "runId", "slTouched", "tradeCount", "tradedSideRicherCount", "trades", "tradesPriced", "tradesUnpriced", "zeros" ]
+      },
+      "HeroZeroTrade" : {
+        "type" : "object",
+        "properties" : {
+          "seq" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tradingsymbol" : {
+            "type" : [ "string", "null" ]
+          },
+          "entryTs" : {
+            "type" : [ "string", "null" ]
+          },
+          "exitTs" : {
+            "type" : [ "string", "null" ]
+          },
+          "entryPremium" : {
+            "type" : [ "string", "null" ]
+          },
+          "exitPremium" : {
+            "type" : [ "string", "null" ]
+          },
+          "pnl" : {
+            "type" : [ "string", "null" ]
+          },
+          "priced" : {
+            "type" : "boolean"
+          },
+          "peakPremium" : {
+            "type" : [ "string", "null" ]
+          },
+          "peakTs" : {
+            "type" : [ "string", "null" ]
+          },
+          "troughPremium" : {
+            "type" : [ "string", "null" ]
+          },
+          "peakMultiple" : {
+            "type" : [ "string", "null" ]
+          },
+          "exitMultiple" : {
+            "type" : [ "string", "null" ]
+          },
+          "class" : {
+            "type" : [ "string", "null" ]
+          },
+          "slTouched" : {
+            "type" : [ "boolean", "null" ]
+          },
+          "premiumChangePct" : {
+            "type" : [ "string", "null" ]
+          },
+          "confirmed" : {
+            "type" : [ "boolean", "null" ]
+          },
+          "optionType" : {
+            "type" : [ "string", "null" ]
+          },
+          "strike" : {
+            "type" : [ "string", "null" ]
+          },
+          "mirrorPremium" : {
+            "type" : [ "string", "null" ]
+          },
+          "mirrorSkewPct" : {
+            "type" : [ "string", "null" ]
+          },
+          "tradedSideRicher" : {
+            "type" : [ "boolean", "null" ]
+          }
+        },
+        "required" : [ "class", "confirmed", "entryPremium", "entryTs", "exitMultiple", "exitPremium", "exitTs", "mirrorPremium", "mirrorSkewPct", "optionType", "peakMultiple", "peakPremium", "peakTs", "pnl", "premiumChangePct", "priced", "seq", "slTouched", "strike", "tradedSideRicher", "tradingsymbol", "troughPremium" ]
       },
       "DecisionTraceResponse" : {
         "type" : "object",

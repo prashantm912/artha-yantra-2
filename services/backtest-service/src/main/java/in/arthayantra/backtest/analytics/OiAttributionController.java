@@ -30,7 +30,7 @@ public class OiAttributionController {
    * default); {@code underlying} optionally overrides the index derived from the traded symbols.
    */
   @GetMapping("/{backtestId}/oi-attribution")
-  public Map<String, Object> attribution(
+  public OiAttributionService.OiAttribution attribution(
       @PathVariable UUID backtestId,
       @RequestParam(required = false) String interval,
       @RequestParam(required = false) String underlying) {

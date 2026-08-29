@@ -27,7 +27,7 @@ public class HeroZeroPremiumController {
 
   /** Hero-Zero per-strike premium diagnostics for {@code backtestId} (the run id / resultRef). */
   @GetMapping("/{backtestId}/hero-zero-premium")
-  public Map<String, Object> heroZeroPremium(@PathVariable UUID backtestId) {
+  public HeroZeroPremiumService.HeroZeroPremium heroZeroPremium(@PathVariable UUID backtestId) {
     return service.diagnostics(backtestId);
   }
 }

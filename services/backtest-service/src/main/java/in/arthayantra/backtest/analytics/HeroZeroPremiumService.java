@@ -3,6 +3,8 @@ package in.arthayantra.backtest.analytics;
 import in.arthayantra.backtest.replay.CandleReader;
 import in.arthayantra.backtest.replay.TradeRepository;
 import in.arthayantra.strategyengine.series.EngineCandle;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -72,13 +74,13 @@ public class HeroZeroPremiumService {
   }
 
   /** Builds the per-strike premium diagnostics for {@code runId}. */
-  public Map<String, Object> diagnostics(UUID runId) {
+  public HeroZeroPremium diagnostics(UUID runId) {
     List<Map<String, Object>> rows = trades.findByRun(runId, PAGE, 0, null, null, null);
     if (rows.isEmpty()) {
       return empty(runId, "run has no trades");
     }
 
-    List<Map<String, Object>> perTrade = new ArrayList<>();
+    List<HeroZeroTrade> perTrade = new ArrayList<>();
     int priced = 0;
     int heroes = 0;
     int zeros = 0;
@@ -98,18 +100,17 @@ public class HeroZeroPremiumService {
       BigDecimal exitPrice = (BigDecimal) t.get("exitPrice");
       BigDecimal stopLoss = (BigDecimal) t.get("stopLoss");
 
-      Map<String, Object> pt = new LinkedHashMap<>();
-      pt.put("seq", t.get("seq"));
-      pt.put("tradingsymbol", tradingsymbol);
-      pt.put("entryTs", t.get("entryTs"));
-      pt.put("exitTs", t.get("exitTs"));
-      pt.put("entryPremium", entryPrice);
-      pt.put("exitPremium", exitPrice);
-      pt.put("pnl", t.get("pnl"));
+      // The seven fields every row carries, priced or not. Held as locals now rather than being
+      // accumulated into a map, because the record is constructed at whichever exit is reached.
+      int seq = ((Number) t.get("seq")).intValue();
+      String entryTsText = (String) t.get("entryTs");
+      String exitTsText = (String) t.get("exitTs");
+      BigDecimal pnlValue = (BigDecimal) t.get("pnl");
 
       if (exchange == null || tradingsymbol == null || entryTs == null || exitTs == null) {
-        pt.put("priced", false);
-        perTrade.add(pt);
+        perTrade.add(
+            HeroZeroTrade.unpriced(
+                seq, tradingsymbol, entryTsText, exitTsText, entryPrice, exitPrice, pnlValue));
         continue;
       }
 
@@ -119,12 +120,12 @@ public class HeroZeroPremiumService {
       // The diagnostic IS the intra-hold premium path — with no backfilled bars there is nothing to
       // diagnose (the trade row's entry/exit alone are already on the run), so mark it unpriced.
       if (series.isEmpty() || entryPrem == null || entryPrem.signum() <= 0) {
-        pt.put("priced", false);
-        perTrade.add(pt);
+        perTrade.add(
+            HeroZeroTrade.unpriced(
+                seq, tradingsymbol, entryTsText, exitTsText, entryPrice, exitPrice, pnlValue));
         continue;
       }
       priced++;
-      pt.put("priced", true);
 
       // --- excursion (hero / zero) over the hold ---
       BigDecimal peak = entryPrem;
@@ -156,13 +157,9 @@ public class HeroZeroPremiumService {
         slTouched++;
       }
       peakMultSum = peakMultSum.add(peakMult);
-      pt.put("peakPremium", peak.setScale(4, RoundingMode.HALF_UP));
-      pt.put("peakTs", peakTs.toString());
-      pt.put("troughPremium", trough.setScale(4, RoundingMode.HALF_UP));
-      pt.put("peakMultiple", peakMult);
-      pt.put("exitMultiple", exitMult);
-      pt.put("class", klass);
-      pt.put("slTouched", sl);
+      BigDecimal peakPremium = peak.setScale(4, RoundingMode.HALF_UP);
+      String peakTsText = peakTs.toString();
+      BigDecimal troughPremium = trough.setScale(4, RoundingMode.HALF_UP);
 
       // --- S24d-PROXY per-strike premium %-change leading into entry ---
       // The chosen leg's own premium %-change over the ~CONFIRM_WINDOW before entry. NOTE this is a
@@ -189,8 +186,7 @@ public class HeroZeroPremiumService {
         changePctSum = changePctSum.add(changePct);
         changePctCount++;
       }
-      pt.put("premiumChangePct", changePct == null ? null : changePct.setScale(2, RoundingMode.HALF_UP));
-      pt.put("confirmed", conf);
+      BigDecimal changePctScaled = changePct == null ? null : changePct.setScale(2, RoundingMode.HALF_UP);
 
       // --- S21b / Bearish-7 mirror-side premium (raw DATA for value-verify, NOT a derived verdict) ---
       // The disposition wants the side-by-premium (S21b) + "calls at a discount" (Bearish-7) reads
@@ -201,11 +197,13 @@ public class HeroZeroPremiumService {
       // strike-position-dependent, so a boolean here would mislead.) Degrades to null without a pair.
       ContractMeta meta = meta(exchange, tradingsymbol);
       BigDecimal mirrorPrem = null;
+      String optionType = null;
+      BigDecimal strike = null;
       BigDecimal skewPct = null;
       Boolean tradedSideRicher = null;
       if (meta != null) {
-        pt.put("optionType", meta.type());
-        pt.put("strike", meta.strike());
+        optionType = meta.type();
+        strike = meta.strike();
         String mirror = mirrorSymbol(meta, exchange);
         if (mirror != null) {
           mirrorPrem =
@@ -226,44 +224,58 @@ public class HeroZeroPremiumService {
           }
         }
       }
-      pt.put("mirrorPremium", mirrorPrem == null ? null : mirrorPrem.setScale(4, RoundingMode.HALF_UP));
-      pt.put("mirrorSkewPct", skewPct);
-      pt.put("tradedSideRicher", tradedSideRicher);
+      BigDecimal mirrorPremiumScaled = mirrorPrem == null ? null : mirrorPrem.setScale(4, RoundingMode.HALF_UP);
 
-      perTrade.add(pt);
+      perTrade.add(
+          new HeroZeroTrade(
+              seq,
+              tradingsymbol,
+              entryTsText,
+              exitTsText,
+              entryPrice,
+              exitPrice,
+              pnlValue,
+              true,
+              peakPremium,
+              peakTsText,
+              troughPremium,
+              peakMult,
+              exitMult,
+              klass,
+              sl,
+              changePctScaled,
+              conf,
+              optionType,
+              strike,
+              mirrorPremiumScaled,
+              skewPct,
+              tradedSideRicher));
     }
 
-    Map<String, Object> out = new LinkedHashMap<>();
-    out.put("runId", runId.toString());
-    out.put("tradeCount", rows.size());
-    out.put("tradesPriced", priced);
-    out.put("tradesUnpriced", rows.size() - priced);
-    out.put("heroes", heroes);
-    out.put("zeros", zeros);
-    out.put("flats", priced - heroes - zeros);
-    out.put("confirmed", confirmed);
-    out.put("confirmedRate", priced == 0 ? null : rate(confirmed, priced));
-    out.put("premiumChangePctCount", changePctCount); // the avg's denominator (priced trades may lack a baseline)
-    out.put("slTouched", slTouched);
-    out.put("tradedSideRicherCount", richerSideCount);
-    out.put(
-        "avgPeakMultiple",
-        priced == 0 ? null : peakMultSum.divide(new BigDecimal(priced), 4, RoundingMode.HALF_UP));
-    out.put(
-        "avgPremiumChangePct",
+    return new HeroZeroPremium(
+        runId.toString(),
+        rows.size(),
+        priced,
+        rows.size() - priced,
+        heroes,
+        zeros,
+        priced - heroes - zeros,
+        confirmed,
+        priced == 0 ? null : rate(confirmed, priced),
+        changePctCount, // the avg's denominator (priced trades may lack a baseline)
+        slTouched,
+        richerSideCount,
+        priced == 0 ? null : peakMultSum.divide(new BigDecimal(priced), 4, RoundingMode.HALF_UP),
         changePctCount == 0
             ? null
-            : changePctSum.divide(new BigDecimal(changePctCount), 2, RoundingMode.HALF_UP));
-    out.put(
-        "caveat",
+            : changePctSum.divide(new BigDecimal(changePctCount), 2, RoundingMode.HALF_UP),
         "Read-only per-strike premium diagnostics on each trade's chosen leg (S21b/S24d/Bearish-7); "
             + "the live side decision stays the VWAP+extreme proxy, NOT these reads. 'confirmed' is a "
             + "flat-50% PREMIUM proxy for S24d (the disposition's price+OI confirmation lives elsewhere); "
             + "'class' picks HERO (peak ≥ 2x) before ZERO, so a spike-then-collapse round-trip reads HERO "
             + "(see peakMultiple vs exitMultiple). On derived history OI/Dow factors are muted — judge a "
-            + "hero-zero leg on real captured premium, not a weak historical backtest.");
-    out.put("trades", perTrade);
-    return out;
+            + "hero-zero leg on real captured premium, not a weak historical backtest.",
+        perTrade);
   }
 
   private NavigableMap<OffsetDateTime, BigDecimal> premiumSeries(
@@ -333,14 +345,88 @@ public class HeroZeroPremiumService {
     return OiAttributionService.parseEntry(raw);
   }
 
-  private static Map<String, Object> empty(UUID runId, String note) {
-    Map<String, Object> out = new LinkedHashMap<>();
-    out.put("runId", runId.toString());
-    out.put("tradeCount", 0);
-    out.put("tradesPriced", 0);
-    out.put("caveat", note);
-    out.put("trades", List.of());
-    return out;
+  /**
+   * One trade's per-strike premium diagnostics. D3 — converted 2026-08-29 on an owner shape
+   * decision.
+   *
+   * <p>⚠️ <b>THE ITEM IS WHERE THE REAL WIRE CHANGE IS, not the envelope.</b> The map this
+   * replaces was built across THREE conditional tiers: an unpriced trade emitted 8 keys, a priced
+   * one ~22, and the mirror-leg block only ran when the contract resolved. A record emits all 22
+   * always, so an UNPRICED trade row now carries ~14 explicit nulls it did not before. That is a
+   * bigger change than the 5-vs-16 envelope the ratchet documented, and it is why this handler sat
+   * frozen as a "deliberate stop". Judged acceptable because the endpoint has ZERO frontend
+   * consumers (`grep -rl "hero-zero" frontend-react/src` is empty).
+   *
+   * <p>⚠️ <b>{@code klass} carries the JSON key {@code "class"} via {@link JsonProperty}</b>,
+   * because {@code class} is a Java reserved word and a record component cannot be named it. The
+   * annotation is the ONLY thing keeping that key on the wire — remove it and the key silently
+   * becomes {@code klass}. {@code HeroZeroWireShapeTest} pins it for exactly that reason.
+   *
+   * <p>⚠️ Decimals are STRINGS on our wire ({@code ToStringSerializer} is registered
+   * platform-wide) while bare springdoc infers {@code number}, and {@code types} UNIONS with the
+   * inferred type instead of replacing it — so each carries BOTH {@code type} and {@code types}.
+   */
+  public record HeroZeroTrade(
+      int seq,
+      @Schema(types = {"string", "null"}) String tradingsymbol,
+      @Schema(types = {"string", "null"}) String entryTs,
+      @Schema(types = {"string", "null"}) String exitTs,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal entryPremium,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal exitPremium,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pnl,
+      boolean priced,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal peakPremium,
+      @Schema(types = {"string", "null"}) String peakTs,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal troughPremium,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal peakMultiple,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal exitMultiple,
+      @JsonProperty("class") @Schema(types = {"string", "null"}) String klass,
+      @Schema(types = {"boolean", "null"}) Boolean slTouched,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal premiumChangePct,
+      @Schema(types = {"boolean", "null"}) Boolean confirmed,
+      @Schema(types = {"string", "null"}) String optionType,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal strike,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal mirrorPremium,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal mirrorSkewPct,
+      @Schema(types = {"boolean", "null"}) Boolean tradedSideRicher) {
+
+    /** The unpriced exit: the first seven fields are known, everything downstream is not. */
+    static HeroZeroTrade unpriced(
+        int seq, String tradingsymbol, String entryTs, String exitTs,
+        BigDecimal entryPremium, BigDecimal exitPremium, BigDecimal pnl) {
+      return new HeroZeroTrade(
+          seq, tradingsymbol, entryTs, exitTs, entryPremium, exitPremium, pnl, false,
+          null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+  }
+
+  /**
+   * The hero-zero premium response. Empty path emitted 5 keys, populated 16; a record emits all
+   * sixteen always, so an empty response now carries eleven explicit nulls.
+   */
+  public record HeroZeroPremium(
+      @Schema(types = {"string", "null"}) String runId,
+      int tradeCount,
+      int tradesPriced,
+      @Schema(types = {"integer", "null"}) Integer tradesUnpriced,
+      @Schema(types = {"integer", "null"}) Integer heroes,
+      @Schema(types = {"integer", "null"}) Integer zeros,
+      @Schema(types = {"integer", "null"}) Integer flats,
+      @Schema(types = {"integer", "null"}) Integer confirmed,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal confirmedRate,
+      @Schema(types = {"integer", "null"}) Integer premiumChangePctCount,
+      @Schema(types = {"integer", "null"}) Integer slTouched,
+      @Schema(types = {"integer", "null"}) Integer tradedSideRicherCount,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal avgPeakMultiple,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal avgPremiumChangePct,
+      String caveat,
+      List<HeroZeroTrade> trades) {}
+
+  /** Every aggregate is NULL here: the empty path computed none of them. */
+  private static HeroZeroPremium empty(UUID runId, String note) {
+    return new HeroZeroPremium(
+        runId.toString(), 0, 0, null, null, null, null, null, null, null, null, null, null,
+        null, note, List.of());
   }
 
   /** A traded contract's registry coordinates, for mirror-leg resolution. */

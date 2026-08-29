@@ -300,4 +300,41 @@ class PaperForensicsIntegrationTest extends StrategySignalIntegrationTestBase {
         tradingsymbol,
         entry);
   }
+
+  /**
+   * ⚠️ H44 DURABILITY: the no-tick fill must leave a row, not only a counter.
+   *
+   * <p>The owner's arming decision rests on a WEEKLY rate. That was being read from
+   * {@code ay_paper_fill_no_tick_total}, a Micrometer counter -- process-lifetime, reset on every
+   * restart. Measured 2026-08-29 on the weekly report's FIRST run: the container had restarted 11
+   * minutes earlier, so the "weekly" figure covered 11 minutes of a Saturday, and this stack
+   * restarted three times in 24 h. A rate keyed on that counter can only ever mean "since the last
+   * restart" -- indistinguishable from a genuinely quiet week, and failing in the REASSURING
+   * direction, which is exactly the class of defect H44 exists because of.
+   *
+   * <p>This asserts the row survives independently of the counter: it is queried straight from the
+   * table, which is what the weekly report reads.
+   */
+  @Test
+  void aNoTickFillLeavesADurableRowNotOnlyACounter() {
+    String sym = "H44OBS-" + UUID.randomUUID();
+
+    // An explicit CALLER price, with no tick seeded: this is the shape of the two legs that
+    // actually stranded on 2026-08-28 (both refSource=CALLER). Without a price the fill is
+    // refused for "no price available" long before the listener runs, and the test would be
+    // asserting nothing about H44 at all.
+    paper.openOrder(
+        new PaperService.OrderRequest(
+            null, "NFO", sym, "BUY", 50, new BigDecimal("101.25"), null, null));
+
+    Map<String, Object> row =
+        jdbc.queryForMap(
+            "SELECT exchange, tradingsymbol, qty FROM strategy.paper_fill_observations"
+                + " WHERE tradingsymbol=?",
+            sym);
+    assertThat(row.get("exchange")).isEqualTo("NFO");
+    assertThat(((Number) row.get("qty")).longValue())
+        .as("the attempted size must be on the row -- a rate without sizes cannot be judged")
+        .isEqualTo(50L);
+  }
 }

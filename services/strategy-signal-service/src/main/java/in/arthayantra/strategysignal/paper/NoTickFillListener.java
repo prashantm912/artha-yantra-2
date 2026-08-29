@@ -50,9 +50,20 @@ public class NoTickFillListener {
   private final LastTickReader lastTick;
   private final MeterRegistry meterRegistry;
 
-  public NoTickFillListener(LastTickReader lastTick, MeterRegistry meterRegistry) {
+  /**
+   * H44 durability (V065). The counter alone CANNOT carry the weekly rate the arming decision rests
+   * on -- it is process-lifetime and resets on every restart, and this stack restarts often. Found
+   * 2026-08-29 when the weekly report's first run read 11 minutes of a Saturday.
+   */
+  private final PaperFillObservationRepository observations;
+
+  public NoTickFillListener(
+      LastTickReader lastTick,
+      MeterRegistry meterRegistry,
+      PaperFillObservationRepository observations) {
     this.lastTick = lastTick;
     this.meterRegistry = meterRegistry;
+    this.observations = observations;
   }
 
   @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -73,6 +84,12 @@ public class NoTickFillListener {
         return;
       }
       meterRegistry.counter(NO_TICK_FILL_TOTAL, "exchange", e.exchange()).increment();
+
+      // DURABLE first-class record, not just the counter. Written INSIDE the same try, so a failure
+      // here is caught by the existing fail-soft handler and can never touch the (already durable)
+      // trade. The counter stays for alerting on increments; this row is what a weekly rate reads.
+      observations.record(
+          e.positionId(), e.book(), e.exchange(), e.tradingsymbol(), e.qty());
       log.warn(
           "paper position {} opened on {}:{} with NO usable last tick — AUTOMATIC exits cannot"
               + " settle it until one arrives (an explicit-price manual close still can). H44.",

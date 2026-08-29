@@ -171,7 +171,7 @@ public class KiteAutoLoginService {
    * Earliest and latest wall-clock IST at which a BOOT catch-up may reach the wire.
    *
    * <p>The window exists because the catch-up fires on every start, and most starts are not
-   * mornings. Tonight (2026-08-27) market-data was recreated four times between 20:00 and 21:30
+   * mornings. Tonight (2026-08-27) market-data was recreated repeatedly inside half an hour
    * during a deploy and a test; without a window an armed service would have attempted a broker
    * login on each one. The lower bound matches the login cron's hour, the upper bound is the
    * close -- after it a session is not needed again until tomorrow, so touching the wire buys

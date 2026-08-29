@@ -702,7 +702,7 @@ class KiteAutoLoginServiceTest {
 
   /**
    * ⚠️ Without a window the catch-up fires on EVERY start, and most starts are not mornings.
-   * market-data was recreated four times between 20:00 and 21:30 on 2026-08-27 during a deploy and
+   * market-data was recreated repeatedly inside half an hour on 2026-08-27 during a deploy and
    * a test; an armed service would have attempted a broker login on each one.
    */
   @Test

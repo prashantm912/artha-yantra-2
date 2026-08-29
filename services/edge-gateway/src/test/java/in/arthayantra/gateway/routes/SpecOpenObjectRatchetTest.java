@@ -290,12 +290,17 @@ class SpecOpenObjectRatchetTest {
                   "#ErrorResponse.details"),
           "market-data-service",
               Set.of(
-                  // DELIBERATE STOPS of the HeroZeroPremium kind, and the documented floor #1190
-                  // drove this service down to: oiExpiry emits 3 keys empty / 4 populated and
-                  // openHighStrategy 3 / 5, so a record would add the missing keys as nulls to the
-                  // empty response — a wire change on a live OI page, not a refactor.
-                  "GET /api/v1/market/options/oi-expiry 200",
-                  "GET /api/v1/market/options/open-high-strategy 200",
+                  // ⚠️ oi-expiry and open-high-strategy WERE frozen here as "deliberate stops of
+                  // the HeroZeroPremium kind" and are GONE as of 2026-08-29 — both converted to
+                  // records on an owner shape decision, so this service now freezes NO open response
+                  // object at all. The wire change they were parked for (each ADDS a key to its
+                  // EMPTY response: asOf, plus spot for open-high-strategy) was made deliberately
+                  // and verified against every FE consumer first.
+                  // ⚠️ THE LESSON, since it cost a CI cycle: this platform has TWO ratchets on the
+                  // same fact and they must move TOGETHER. MapReturnRatchetTest counts Map-returning
+                  // HANDLERS; this one checks the CAPTURED SPEC. The conversion lowered the handler
+                  // count and left this list stale, and running MapReturnRatchetTest alone passed.
+                  // Run the whole edge-gateway shard, not the one test you changed.
                   // The deep-swing report blob. See the JsonNode note in backtest-service below.
                   "#DeepSwingRunResult.report -> JsonNode",
                   "#ErrorResponse.details"),

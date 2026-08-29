@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.options;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.InstrumentMasterUpdated;
 import in.arthayantra.marketdata.kite.PinnedSubscriptionRegistrar;
+import in.arthayantra.marketcalendar.MarketCalendar;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -11,6 +12,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.List;
+import java.time.Clock;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
@@ -18,6 +20,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -30,10 +33,29 @@ public class OptionAtmPinner {
 
   private final PinnedSubscriptionRegistrar registry;
   private final OptionsChainService chains;
+  private final in.arthayantra.marketdata.instruments.InstrumentRepository instruments;
+  private final in.arthayantra.marketdata.feed.LastTickStore lastTick;
   private final List<String> underlyings;
   private final int strikeWidth;
   private final int expiryHorizonDays;
   private final Set<InstrumentKey> currentPins = ConcurrentHashMap.newKeySet();
+
+  /** The authority on what a session is — the cron is only a coarse wake-up. */
+  private final MarketCalendar calendar = MarketCalendar.nse();
+
+  private final Clock clock;
+
+  /** One-slot coalescing gate — see {@link #repinAsync()}. */
+  private final java.util.concurrent.atomic.AtomicBoolean pendingRepin =
+      new java.util.concurrent.atomic.AtomicBoolean(false);
+
+  /** Counts fires dropped because a pass was already pending — a rising value means passes are slow. */
+  private final io.micrometer.core.instrument.Counter repinsCoalesced;
+
+  /** Passes served from the registry + last tick (free) vs a full chain fetch (REST). */
+  private final io.micrometer.core.instrument.Counter repinsFromTick;
+
+  private final io.micrometer.core.instrument.Counter repinsFromChain;
 
   public OptionAtmPinner(
       PinnedSubscriptionRegistrar registry,
@@ -44,13 +66,24 @@ public class OptionAtmPinner {
       // no-op. See application.yml for the measurement.
       @Value("${artha.options.atm-pinner.strike-width:10}") int strikeWidth,
       @Value("${artha.options.atm-pinner.expiry-horizon-days:7}") int expiryHorizonDays,
-      MeterRegistry meterRegistry) {
+      in.arthayantra.marketdata.instruments.InstrumentRepository instruments,
+      in.arthayantra.marketdata.feed.LastTickStore lastTick,
+      MeterRegistry meterRegistry,
+      Clock clock) {
+    this.clock = clock;
     this.registry = registry;
     this.chains = chains;
+    this.instruments = instruments;
+    this.lastTick = lastTick;
     this.underlyings = underlyings;
     this.strikeWidth = Math.max(0, strikeWidth);
     this.expiryHorizonDays = Math.max(0, expiryHorizonDays);
     meterRegistry.gauge("ay_options_atm_pinned_contracts", currentPins, Set::size);
+    this.repinsCoalesced = meterRegistry.counter("ay_options_atm_repin_coalesced_total");
+    this.repinsFromTick =
+        meterRegistry.counter("ay_options_atm_repin_source_total", "source", "tick");
+    this.repinsFromChain =
+        meterRegistry.counter("ay_options_atm_repin_source_total", "source", "chain");
   }
 
   /**
@@ -86,11 +119,91 @@ public class OptionAtmPinner {
     repinAsync();
   }
 
+  /**
+   * H44: RE-CENTRE THE BAND ON SPOT DURING THE SESSION.
+   *
+   * <p><b>The band already follows spot; nothing else did.</b> {@link #atmWindow} centres on the
+   * chain's CURRENT spot every time it runs, and {@link #repin()} is a full reconcile that
+   * subscribes what is newly desired and releases what is stale. The defect was purely its
+   * TRIGGERS: {@code ApplicationReadyEvent} and {@code InstrumentMasterUpdated} only, so the band
+   * was fixed at whatever spot was around the 08:30 master sync and never moved again all session.
+   *
+   * <p><b>Why that stranded money.</b> A contract outside the pinned band never ticks, and every
+   * AUTOMATIC exit refuses without a real tick (#694, never fabricate a price) — so a leg filled on
+   * an out-of-band strike cannot be settled by any automatic path. Measured 2026-08-28: two SENSEX
+   * PE legs sat through their TIME_STOPs, their signal-exit and the 15:44 square-off, and were
+   * released only by a manual explicit-price close at -Rs 8,892.79.
+   *
+   * <p><b>Why widening was not enough.</b> Width went 5 → 10 (±1000 pts on BFO), but the CENTRE
+   * stayed fixed, and BFO picks reach 829 points from spot — so roughly 171 points of one-way drift
+   * exhausts even the wider band. Width buys margin; only re-centring removes the failure mode.
+   *
+   * <p>⚠️ <b>This does NOT forfeit entries, which is the whole point.</b> The H44 closability gate
+   * ({@code artha.paper.refuse-no-tick-entries}) refuses such trades; this stops them arising. The
+   * two are complementary and the gate stays disarmed.
+   *
+   * <p>⚠️ <b>ON THE SHARED DEFAULT POOL, DELIBERATELY — and the census test is what forced the
+   * question.</b> {@code ScheduledPoolCensusTest} failed on this change because a new
+   * {@code @Scheduled} lands somewhere, and that pool has ONE thread shared by ~30 jobs. Two
+   * properties make it safe here rather than another dedicated bean:
+   *
+   * <ul>
+   *   <li><b>It cannot block a neighbour.</b> The method only hands work to {@code repinExecutor}
+   *       and returns, so it holds the pool thread for microseconds. All the real work — chain
+   *       reads, subscribe/release — runs off-pool, exactly as the boot and master-refresh
+   *       triggers already do.
+   *   <li><b>Being DELAYED by a neighbour is immaterial at this cadence.</b> The worst observed
+   *       hold on that pool is the ~70 s options pass (the S1 shape); a repin arriving a minute
+   *       late on a FIVE-MINUTE schedule still re-centres the band long before drift matters.
+   * </ul>
+   *
+   * <p>A dedicated single-thread scheduler for a microsecond dispatch would be cost without a
+   * property to show for it. If this ever grows real work, it needs its own bean — that is the
+   * moment to revisit, not now.
+   *
+   * <p>⚠️ <b>THE CRON ALONE IS NOT SESSION-BOUNDED, and I claimed it was.</b> {@code 0 *&#47;5 9-15}
+   * fires 84 times, 09:00 through 15:55 — EIGHT of them outside the 09:15–15:30 session (09:00/05/10
+   * and 15:35/40/45/50/55) plus every weekday exchange HOLIDAY. My javadoc, commit and PR all said
+   * "09:00–15:35, deliberately bounded"; cross-vendor review computed the real range. A cron whose
+   * hour field looks bounded is not the same as a schedule that is.
+   *
+   * <p>So the gate is in CODE, where it can be exact: {@link MarketCalendar#isOpen} refuses any fire
+   * outside a real trading session, holidays included. The cron stays coarse on purpose — it is a
+   * cheap wake-up, and the calendar is the authority on what a session is.
+   *
+   * <p>Outside the session spot does not move, so a repin would be pure churn against the
+   * subscription cap; the boot and master-refresh triggers already cover the pre-open pin. The
+   * reconcile is idempotent, so a pass with no drift subscribes nothing and releases nothing.
+   */
+  @Scheduled(cron = "${artha.options.atm-pinner.repin-cron:0 */5 9-15 * * MON-FRI}",
+      zone = "Asia/Kolkata")
+  public void repinDuringSession() {
+    if (!calendar.isOpen(clock.instant())) {
+      return; // pre-open, post-close, or a holiday — nothing to re-centre on
+    }
+    repinAsync();
+  }
+
   /** Hands one reconcile to the dedicated thread; never throws into the publishing caller. */
   private void repinAsync() {
+    // ⚠️ COALESCED, NOT QUEUED. The executor is a single thread with an UNBOUNDED queue, and the
+    // recurring schedule is what made that reachable: repinAsync() returns immediately, so Spring's
+    // no-overlap guarantee protects the SCHEDULER, not this executor. If one network-backed pass ever
+    // outran the 5-minute cron, every later fire would pile up behind it and then run in sequence --
+    // each re-resolving a band that the NEXT queued pass immediately supersedes. Pure churn against
+    // the subscription cap, and unbounded growth while the stall lasts.
+    //
+    // A repin is idempotent and always reconciles to CURRENT state, so a queued pass carries no
+    // information a later one lacks: at most ONE pending pass is ever useful. pendingRepin is that
+    // one slot -- if a pass is already waiting, this fire is dropped rather than stacked.
+    if (!pendingRepin.compareAndSet(false, true)) {
+      repinsCoalesced.increment();
+      return;
+    }
     repinExecutor.execute(
         () -> {
-          try {
+          pendingRepin.set(false); // released BEFORE the work: a fire arriving mid-pass must still
+          try {                    // be able to queue, or a drift during a slow pass is lost.
             repin();
           } catch (RuntimeException failure) {
             log.warn("option ATM repin pass failed: {}", failure.toString());
@@ -138,9 +251,7 @@ public class OptionAtmPinner {
         if (!belongsTo(stale, entry.getKey())) {
           continue;
         }
-        registry.unsubscribe(SUBSCRIBER, stale);
-        currentPins.remove(stale);
-        log.info("option ATM pin rolled off: {}", stale.canonical());
+        releaseOne(stale);
       }
     }
     // Cap refusals get ONE retry AFTER the stale sweep. On an expiry rollover against a full
@@ -167,6 +278,56 @@ public class OptionAtmPinner {
   private static String registryRoot(String underlying) {
     int space = underlying.indexOf(' ');
     return space < 0 ? underlying : underlying.substring(0, space);
+  }
+
+  /**
+   * Releases one stale pin, and drops it from {@code currentPins} EVEN IF the wire call throws.
+   *
+   * <p><b>Architect audit, on top of an APPROVED review.</b> This call used to be bare, while the
+   * subscribe directly above it was wrapped — and the asymmetry mattered, because
+   * {@code SubscriptionRegistry.unsubscribe} completes the durable AND in-memory release BEFORE
+   * its wire call. So a throw there means the hold is genuinely GONE while
+   * {@code currentPins.remove} never ran: the pinner then believes it holds a contract the
+   * registry has released, that contract is dark, and no later pass retries it because the pinner
+   * still counts it as pinned. H44 stranding by a third route, reached from the fix for the first
+   * two.
+   *
+   * <p>It also aborted the whole sweep — every remaining stale pin for that underlying, plus the
+   * cap-refused retry below it. At the old two passes a day this healed at the next restart; at 84
+   * it accumulates, which is what makes the recurring schedule the thing that promoted it.
+   *
+   * <p>⚠️ On a throw the pin is dropped only when the registry confirms the hold is GONE. A wire
+   * failure means the release completed and continuing to claim it is the defect; a durable-store
+   * failure means it did NOT, and dropping it there would un-claim a live pin. The two arrive as
+   * the same exception type, so the registry is asked rather than guessed at.
+   */
+  private void releaseOne(InstrumentKey stale) {
+    try {
+      registry.unsubscribe(SUBSCRIBER, stale);
+      // The ORDINARY path, and it must drop the pin too. Refining the old unconditional `finally`
+      // into a conditional catch is exactly how that gets lost: the conditional reads like the
+      // whole story while covering only the exceptional half. Four tests in OptionAtmPinnerTest
+      // caught it -- none of them in the file this change was about.
+      currentPins.remove(stale);
+      log.info("option ATM pin rolled off: {}", stale.canonical());
+    } catch (RuntimeException failure) {
+      // ⚠️ NOT every throw means the release happened. unsubscribe() calls store.remove FIRST
+      // (that ordering is itself one of this branch's fixes), so a Redis failure throws with
+      // the hold still INTACT. Dropping it unconditionally would then un-claim a pin the
+      // registry still holds, log it as a wire failure it was not, and skew the pin gauge.
+      // Ask the registry what it actually holds rather than inferring it from the throw.
+      boolean stillHeld = registry.heldBy(SUBSCRIBER).contains(stale);
+      if (stillHeld) {
+        log.warn(
+            "option ATM pin {} could NOT be released and is still held: {}",
+            stale.canonical(), failure.toString());
+      } else {
+        currentPins.remove(stale);
+        log.warn(
+            "option ATM pin {} released but the wire notification failed: {}",
+            stale.canonical(), failure.toString());
+      }
+    }
   }
 
   /** Subscribes one leg; collects cap refusals when {@code capRefused} is non-null. */
@@ -204,12 +365,20 @@ public class OptionAtmPinner {
           log.warn("no option expiry within {} days for {} yet", expiryHorizonDays, underlying);
           continue;
         }
-        OptionsChainService.Chain chain = chains.chain(underlying, expiries.get(0));
-        List<OptionsChainService.StrikeRow> rows = atmWindow(chain);
-        Set<InstrumentKey> forUnderlying = new HashSet<>();
-        for (OptionsChainService.StrikeRow row : rows) {
-          addLeg(forUnderlying, underlying, row.ce());
-          addLeg(forUnderlying, underlying, row.pe());
+        Set<InstrumentKey> forUnderlying = pinsFromTick(underlying, expiries.get(0));
+        if (forUnderlying == null) {
+          // FALLBACK: no live tick for the underlying yet (boot, or before the index has
+          // ticked). A full chain fetch prices every strike we do not need, but it is the only
+          // path that can produce a band with no tick at all, and it is what ran before this
+          // fast path existed.
+          repinsFromChain.increment();
+          OptionsChainService.Chain chain = chains.chain(underlying, expiries.get(0));
+          List<OptionsChainService.StrikeRow> rows = atmWindow(chain);
+          forUnderlying = new HashSet<>();
+          for (OptionsChainService.StrikeRow row : rows) {
+            addLeg(forUnderlying, underlying, row.ce());
+            addLeg(forUnderlying, underlying, row.pe());
+          }
         }
         desired.put(underlying, forUnderlying);
       } catch (RuntimeException failure) {
@@ -219,6 +388,93 @@ public class OptionAtmPinner {
       }
     }
     return desired;
+  }
+
+  /**
+   * The band from data we ALREADY HAVE (the instrument master plus the last tick), or {@code
+   * null} when the underlying has never ticked and only a chain fetch can answer.
+   *
+   * <p><b>Why this exists.</b> Making the repin RECURRING is what created the cost. The old
+   * triggers fired twice a day, so a full-chain fetch per underlying per pass was free in
+   * practice; at every five minutes it is not. Each default-path {@code chain()} costs a spot
+   * quote plus a batched quote over EVERY strike in the expiry, against the same ~60/min Kite
+   * budget that futures-OI capture draws on. Starving that limiter would either leave the band
+   * where it was (the exact defect being fixed) or cost OI capture, so the fix would have paid
+   * for itself in the currency it was trying to save. (Cross-vendor review Major.)
+   *
+   * <p><b>Why it is not a shortcut.</b> The pinner never reads a price. It needs the strike
+   * LADDER with each strike's CE/PE legs, which live in the instrument master and not in any
+   * quote, plus the SPOT to centre on. The ladder for an expiry does not change intraday, and
+   * the underlying is already subscribed, so its last tick IS the live spot. The full chain was
+   * computing several hundred prices to hand back two fields we already had.
+   *
+   * <p>WARNING: tick AGE is deliberately not checked. This is the #694 EXIT polarity, not the
+   * entry one. A stale spot re-centres the band slightly wrong; refusing on staleness leaves it
+   * where it was, which is the stranding this whole change exists to stop. A dead feed is the
+   * feed watchdog's job to report, and it already does.
+   */
+  private Set<InstrumentKey> pinsFromTick(String underlying, LocalDate expiry) {
+    List<in.arthayantra.marketdata.instruments.Instrument> ladder =
+        instruments.optionChain(underlying, expiry);
+    if (ladder.isEmpty()) {
+      return null;
+    }
+    // Same key rule as OptionsChainService: the underlying OWN exchange from the master, never
+    // a guess from its name, defaulting to NSE only when the master carries none.
+    String spotExchange =
+        ladder.get(0).underlyingExchange() == null ? "NSE" : ladder.get(0).underlyingExchange();
+    BigDecimal spot =
+        lastTick
+            .latest(new InstrumentKey(spotExchange, underlying))
+            .map(in.arthayantra.marketdata.feed.NormalizedTick::lastPrice)
+            .orElse(null);
+    if (spot == null) {
+      return null;
+    }
+
+    List<BigDecimal> strikes =
+        ladder.stream()
+            .map(in.arthayantra.marketdata.instruments.Instrument::strike)
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .sorted()
+            .toList();
+    if (strikes.isEmpty()) {
+      return null;
+    }
+    int atmIndex = 0;
+    BigDecimal best = null;
+    for (int i = 0; i < strikes.size(); i++) {
+      BigDecimal distance = strikes.get(i).subtract(spot).abs();
+      if (best == null || distance.compareTo(best) < 0) {
+        best = distance;
+        atmIndex = i;
+      }
+    }
+    java.util.Set<BigDecimal> band =
+        new HashSet<>(
+            strikes.subList(
+                Math.max(0, atmIndex - strikeWidth),
+                Math.min(strikes.size(), atmIndex + strikeWidth + 1)));
+
+    Set<InstrumentKey> pins = new HashSet<>();
+    for (in.arthayantra.marketdata.instruments.Instrument contract : ladder) {
+      if (contract.strike() == null || !band.contains(contract.strike())) {
+        continue;
+      }
+      if (contract.exchange() == null || contract.exchange().isBlank()) {
+        // Skip rather than guess, identical rule to addLeg: an unknown exchange pins a key the
+        // registry cannot resolve and the contract silently never gets captured.
+        log.warn(
+            "option ATM pin: {} for {} carries no exchange from the instrument master, skipped",
+            contract.tradingsymbol(),
+            underlying);
+        continue;
+      }
+      pins.add(new InstrumentKey(contract.exchange(), contract.tradingsymbol()));
+    }
+    repinsFromTick.increment();
+    return pins;
   }
 
   private List<OptionsChainService.StrikeRow> atmWindow(OptionsChainService.Chain chain) {

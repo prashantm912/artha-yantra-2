@@ -1,11 +1,14 @@
 package in.arthayantra.marketdata.options;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import in.arthayantra.marketdata.feed.LastTickStore;
+import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.InstrumentMasterUpdated;
 import in.arthayantra.marketdata.kite.InstrumentTokenResolver;
@@ -25,6 +28,9 @@ import java.util.Optional;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.support.CronExpression;
+import java.time.LocalDateTime;
 
 class OptionAtmPinnerTest {
 
@@ -47,7 +53,7 @@ class OptionAtmPinnerTest {
     seedExistingPins(registry);
     int before = registry.view().size();
 
-    OptionAtmPinner pinner = new OptionAtmPinner(registry, chains, List.of("NIFTY 50", "SENSEX"), 5, 7, new SimpleMeterRegistry());
+    OptionAtmPinner pinner = pinnerWithNoTicks(registry, chains, List.of("NIFTY 50", "SENSEX"), 5, 7, new SimpleMeterRegistry());
     pinner.repin();
 
     assertThat(pinner.pinnedContracts()).hasSize(44);
@@ -79,7 +85,7 @@ class OptionAtmPinnerTest {
     addOptionKeys(master, "NFO", "NIFTY 50", 100);
     addOptionKeys(master, "NFO", "NIFTY 50", 300);
     SubscriptionRegistry registry = registry(master, 3_000);
-    OptionAtmPinner pinner = new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 1, 1, new SimpleMeterRegistry());
+    OptionAtmPinner pinner = pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 1, 1, new SimpleMeterRegistry());
 
     pinner.repin();
     pinner.repin();
@@ -100,7 +106,7 @@ class OptionAtmPinnerTest {
     addOptionKeys(master, "NFO", "NIFTY 50", 100);
     SubscriptionRegistry registry = registry(master, 14);
     seedExistingPins(registry);
-    OptionAtmPinner pinner = new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 1, 1, new SimpleMeterRegistry());
+    OptionAtmPinner pinner = pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 1, 1, new SimpleMeterRegistry());
 
     pinner.repin();
 
@@ -119,7 +125,7 @@ class OptionAtmPinnerTest {
     addOptionKeys(master, "NFO", "NIFTY 50", 100);
     master.remove("NFO:NIFTY100CE");
     SubscriptionRegistry registry = registry(master, 3_000);
-    OptionAtmPinner pinner = new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 1, 1, new SimpleMeterRegistry());
+    OptionAtmPinner pinner = pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 1, 1, new SimpleMeterRegistry());
 
     pinner.repin();
 
@@ -149,7 +155,7 @@ class OptionAtmPinnerTest {
     SubscriptionRegistry registry = registry(master, 3_000);
 
     OptionAtmPinner pinner =
-        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+        pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
     pinner.repin();
 
     assertThat(pinner.pinnedContracts())
@@ -172,7 +178,7 @@ class OptionAtmPinnerTest {
     SubscriptionRegistry registry = registry(master, 3_000);
 
     OptionAtmPinner pinner =
-        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+        pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
     pinner.repin();
 
     assertThat(pinner.pinnedContracts())
@@ -263,7 +269,7 @@ class OptionAtmPinnerTest {
         new SubscriptionRegistry(
             key -> Optional.ofNullable(master.get(key.canonical())), 3_000, new SimpleMeterRegistry());
     OptionAtmPinner pinner =
-        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+        pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
 
     pinner.repin();
     assertThat(pinner.pinnedContracts()).hasSize(22);
@@ -294,7 +300,7 @@ class OptionAtmPinnerTest {
         new SubscriptionRegistry(
             key -> Optional.ofNullable(master.get(key.canonical())), 3_000, new SimpleMeterRegistry());
     OptionAtmPinner pinner =
-        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+        pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
     pinner.repin();
     assertThat(pinner.pinnedContracts()).hasSize(22);
 
@@ -332,7 +338,7 @@ class OptionAtmPinnerTest {
     assertThat(restored).isEqualTo(22);
 
     OptionAtmPinner fresh =
-        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+        pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
     fresh.repin();
 
     assertThat(fresh.pinnedContracts())
@@ -340,6 +346,34 @@ class OptionAtmPinnerTest {
         .containsExactlyInAnyOrderElementsOf(
             expectedSymbols("NFO", "NIFTY", 100).stream().map(OptionAtmPinnerTest::key).toList());
     assertThat(registry.view()).hasSize(22);
+  }
+
+  /**
+   * The CHAIN-path pinner: an instrument master that knows no option rows and a tick store with
+   * nothing in it, so {@code pinsFromTick} returns null and every pass falls through to
+   * {@code chains.chain(...)}. That is deliberate — these cases were written against the chain
+   * path, it is still live as the no-tick fallback, and rewriting them onto the fast path would
+   * have silently stopped testing it.
+   */
+  private static OptionAtmPinner pinnerWithNoTicks(
+      SubscriptionRegistry registry,
+      OptionsChainService chains,
+      List<String> underlyings,
+      int width,
+      int horizonDays,
+      io.micrometer.core.instrument.MeterRegistry meters) {
+    InstrumentRepository instruments = mock(InstrumentRepository.class);
+    when(instruments.optionChain(anyString(), any())).thenReturn(List.of());
+    return new OptionAtmPinner(
+        registry,
+        chains,
+        underlyings,
+        width,
+        horizonDays,
+        instruments,
+        new LastTickStore(),
+        meters,
+        java.time.Clock.systemUTC());
   }
 
   private static InstrumentKey key(String canonical) {
@@ -368,7 +402,7 @@ class OptionAtmPinnerTest {
         new SubscriptionRegistry(
             key -> Optional.ofNullable(master.get(key.canonical())), 22, new SimpleMeterRegistry());
     OptionAtmPinner pinner =
-        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+        pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
 
     pinner.repin();
     assertThat(pinner.pinnedContracts()).hasSize(22);
@@ -428,5 +462,97 @@ class OptionAtmPinnerTest {
       return order == null ? org.springframework.core.Ordered.LOWEST_PRECEDENCE : order.value();
     }
     throw new AssertionError("no @EventListener for " + event.getSimpleName() + " on " + type);
+  }
+
+  /**
+   * ⚠️ H44: A SECOND REPIN MUST RE-CENTRE THE BAND ON THE NEW SPOT.
+   *
+   * <p>The band always CENTRED on current spot; the defect was that nothing re-ran it during the
+   * session. Triggers were {@code ApplicationReadyEvent} and {@code InstrumentMasterUpdated} only, so
+   * the band froze at roughly the 08:30 master sync and never moved. A contract outside it never
+   * ticks, and every AUTOMATIC exit refuses without a real tick (#694) — which is how two SENSEX PE
+   * legs became unsettleable on 2026-08-28 for -Rs 8,892.79.
+   *
+   * <p>⚠️ <b>THIS TEST DOES NOT PROVE THE FIX, and saying so is the point.</b> It calls
+   * {@code repin()} directly, and {@code repin()} ALWAYS re-centred — red-proofed 2026-08-29: with
+   * the scheduled trigger deleted this file still passes 12/12. The defect was never the band maths,
+   * it was that nothing CALLED it during the session. The trigger is pinned by
+   * {@link #theRepinScheduleFiresRepeatedlyInsideTheSessionAndNotOutsideIt}; this one only guards the
+   * property that trigger depends on.
+   *
+   * <p>It drives the pinner the way the new schedule does — call {@code repin()} again after spot
+   * has moved — and asserts the pinned SET changed. Asserting only that "repin ran" would pass even
+   * if the band were frozen, which is precisely the bug.
+   */
+  @Test
+  void aSecondRepinRecentresTheBandOnTheNewSpot() {
+    OptionsChainService chains = mock(OptionsChainService.class);
+    when(chains.expiriesWithin(anyString(), eq(7))).thenReturn(List.of(NEAR));
+    when(chains.chain("NIFTY 50", NEAR)).thenReturn(chain("NIFTY 50", NEAR, 100));
+
+    Map<String, InstrumentTokenResolver.TokenInfo> master = new HashMap<>();
+    addOptionKeys(master, "NFO", "NIFTY 50", 100);
+    addOptionKeys(master, "NFO", "NIFTY 50", 200); // the strikes the MOVED band will want
+    SubscriptionRegistry registry =
+        new SubscriptionRegistry(
+            key -> Optional.ofNullable(master.get(key.canonical())), 3_000, new SimpleMeterRegistry());
+
+    OptionAtmPinner pinner =
+        pinnerWithNoTicks(registry, chains, List.of("NIFTY 50"), 2, 7, new SimpleMeterRegistry());
+    pinner.repin();
+    List<String> atSpot100 =
+        pinner.pinnedContracts().stream().map(InstrumentKey::canonical).sorted().toList();
+
+    // Spot moves 100 -> 200, exactly what an intraday drift does.
+    when(chains.chain("NIFTY 50", NEAR)).thenReturn(chain("NIFTY 50", NEAR, 200));
+    pinner.repin();
+    List<String> atSpot200 =
+        pinner.pinnedContracts().stream().map(InstrumentKey::canonical).sorted().toList();
+
+    assertThat(atSpot200)
+        .as("the band must FOLLOW spot — a frozen band is the H44 failure mode")
+        .isNotEqualTo(atSpot100);
+    assertThat(atSpot200)
+        .as("and it must now cover the NEW centre, which is the strike the picker can reach")
+        .anyMatch(sym -> sym.contains("NIFTY200"));
+    assertThat(atSpot200)
+        .as("the reconcile RELEASES what drifted out of range, it does not accumulate")
+        .hasSameSizeAs(atSpot100);
+  }
+
+  /**
+   * ⚠️ THE ACTUAL H44 FIX: a repin must FIRE during the session. Everything else about the band
+   * already worked.
+   *
+   * <p>Asserts the SEMANTICS of the schedule, not merely that an annotation is present: the cron must
+   * fire more than once between 09:15 and 15:30 IST on a weekday (a band that re-centres once a day is
+   * the bug), and must NOT fire in the evening (outside the session spot does not move, so a repin is
+   * pure churn against the subscription cap).
+   */
+  @Test
+  void theRepinScheduleFiresRepeatedlyInsideTheSessionAndNotOutsideIt() throws Exception {
+    Scheduled scheduled =
+        OptionAtmPinner.class.getMethod("repinDuringSession").getAnnotation(Scheduled.class);
+    assertThat(scheduled)
+        .as("the session repin must be SCHEDULED — boot + master-refresh alone froze the band")
+        .isNotNull();
+    assertThat(scheduled.zone()).isEqualTo("Asia/Kolkata");
+
+    // The @Value default embedded in the placeholder is what ships when nothing overrides it.
+    String cron = scheduled.cron();
+    String expression = cron.substring(cron.indexOf(':') + 1, cron.length() - 1);
+    CronExpression parsed = CronExpression.parse(expression);
+
+    LocalDateTime open = LocalDateTime.of(2026, 8, 31, 9, 15); // a Monday
+    LocalDateTime first = parsed.next(open);
+    LocalDateTime second = parsed.next(first);
+    assertThat(second)
+        .as("must fire MORE THAN ONCE inside the session — once a day is the frozen-band bug")
+        .isBefore(LocalDateTime.of(2026, 8, 31, 15, 30));
+
+    LocalDateTime evening = LocalDateTime.of(2026, 8, 31, 20, 0);
+    assertThat(parsed.next(evening))
+        .as("must NOT fire in the evening — spot does not move, so a repin is pure churn")
+        .isAfter(LocalDateTime.of(2026, 8, 31, 23, 59));
   }
 }

@@ -296,20 +296,37 @@ public class OptionAtmPinner {
    * cap-refused retry below it. At the old two passes a day this healed at the next restart; at 84
    * it accumulates, which is what makes the recurring schedule the thing that promoted it.
    *
-   * <p>⚠️ {@code currentPins.remove} is OUTSIDE the try on purpose. The release already happened;
-   * continuing to claim the pin would be the actual defect, and a failed WIRE notification is the
-   * ticker's to recover, not ours to model.
+   * <p>⚠️ On a throw the pin is dropped only when the registry confirms the hold is GONE. A wire
+   * failure means the release completed and continuing to claim it is the defect; a durable-store
+   * failure means it did NOT, and dropping it there would un-claim a live pin. The two arrive as
+   * the same exception type, so the registry is asked rather than guessed at.
    */
   private void releaseOne(InstrumentKey stale) {
     try {
       registry.unsubscribe(SUBSCRIBER, stale);
+      // The ORDINARY path, and it must drop the pin too. Refining the old unconditional `finally`
+      // into a conditional catch is exactly how that gets lost: the conditional reads like the
+      // whole story while covering only the exceptional half. Four tests in OptionAtmPinnerTest
+      // caught it -- none of them in the file this change was about.
+      currentPins.remove(stale);
       log.info("option ATM pin rolled off: {}", stale.canonical());
     } catch (RuntimeException failure) {
-      log.warn(
-          "option ATM pin {} released but the wire notification failed: {}",
-          stale.canonical(), failure.toString());
-    } finally {
-      currentPins.remove(stale);
+      // ⚠️ NOT every throw means the release happened. unsubscribe() calls store.remove FIRST
+      // (that ordering is itself one of this branch's fixes), so a Redis failure throws with
+      // the hold still INTACT. Dropping it unconditionally would then un-claim a pin the
+      // registry still holds, log it as a wire failure it was not, and skew the pin gauge.
+      // Ask the registry what it actually holds rather than inferring it from the throw.
+      boolean stillHeld = registry.heldBy(SUBSCRIBER).contains(stale);
+      if (stillHeld) {
+        log.warn(
+            "option ATM pin {} could NOT be released and is still held: {}",
+            stale.canonical(), failure.toString());
+      } else {
+        currentPins.remove(stale);
+        log.warn(
+            "option ATM pin {} released but the wire notification failed: {}",
+            stale.canonical(), failure.toString());
+      }
     }
   }
 

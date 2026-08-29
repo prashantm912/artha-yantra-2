@@ -18,6 +18,8 @@ import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.InstrumentTokenResolver;
 import in.arthayantra.marketdata.kite.ticker.SubscriptionRegistry;
 import in.arthayantra.marketdata.kite.ticker.SubscriptionMode;
+import in.arthayantra.marketdata.kite.ticker.SubscriptionPriority;
+import in.arthayantra.marketdata.kite.ticker.SubscriptionStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
@@ -193,6 +195,7 @@ class OptionAtmPinnerTickPathTest {
 
     // Spot jumps far enough that the whole previous band is stale, then EVERY release throws --
     // the reconnect-blip shape, applied to the release side.
+    int staleCount = h.pinner().pinnedContracts().size();
     h.ticks().update(tick(new BigDecimal("26000")));
     h.ticker().failEveryUnsubscribe.set(true);
 
@@ -207,9 +210,13 @@ class OptionAtmPinnerTickPathTest {
       // fall through to the assertions
     }
 
-    assertThat(symbols(h))
-        .as("the sweep must not abort on the first throw — later stale pins are rolled off too")
-        .doesNotContain("NFO:NIFTY24900CE");
+    // ⚠️ ASSERTED ON ATTEMPTS, NOT ON ONE SURVIVING SYMBOL (review round 4). currentPins is a
+    // HashSet, so the sweep order is unspecified: naming a single stale symbol passes whenever
+    // the pre-fix body happened to reach it BEFORE the throw, which is a coin flip on the hash
+    // order rather than a statement about the code. Counting attempts is order-independent.
+    assertThat(h.ticker().unsubscribeAttempts)
+        .as("every stale pin must be attempted — one throw must not abandon the rest")
+        .hasSize(staleCount);
   }
 
   /**
@@ -237,6 +244,33 @@ class OptionAtmPinnerTickPathTest {
         .doesNotContain("NFO:NIFTY25000CE");
   }
 
+  /**
+   * Review round 4, Minor 1: the MIRROR of the test above, and the reason the drop is conditional.
+   *
+   * <p>{@code unsubscribe} calls {@code store.remove} FIRST, so a durable-store failure throws with
+   * the hold still INTACT — the opposite of a wire failure, arriving as the same exception type. An
+   * unconditional drop would un-claim a pin the registry genuinely still holds, report it as a wire
+   * failure it was not, and skew the pin gauge. The registry is asked instead of guessed at.
+   */
+  @Test
+  void aFailedDurableRemoveKeepsThePinClaimedBecauseTheHoldSurvived() {
+    Harness h = harness(new BigDecimal("25000"));
+    h.pinner().repin();
+    assertThat(symbols(h)).contains("NFO:NIFTY25000CE");
+
+    h.ticks().update(tick(new BigDecimal("26000")));
+    h.store().failEveryRemove.set(true);
+    try {
+      h.pinner().repin();
+    } catch (RuntimeException swallowedLikeRepinAsyncDoes) {
+      // fall through
+    }
+
+    assertThat(symbols(h))
+        .as("the hold survived the throw, so the pinner must keep claiming it and retry next pass")
+        .contains("NFO:NIFTY25000CE");
+  }
+
   // ---------------------------------------------------------------- harness
 
   private record Harness(
@@ -244,7 +278,31 @@ class OptionAtmPinnerTickPathTest {
       OptionsChainService chains,
       InstrumentRepository instruments,
       LastTickStore ticks,
-      FlakyTicker ticker) {}
+      FlakyTicker ticker,
+      FlakyStore store) {}
+
+  /** A durable store whose remove() can be made to fail, unlike the wire. */
+  private static final class FlakyStore implements SubscriptionStore {
+    private final java.util.concurrent.atomic.AtomicBoolean failEveryRemove =
+        new java.util.concurrent.atomic.AtomicBoolean();
+
+    @Override
+    public void put(String s, InstrumentKey k, SubscriptionMode m, SubscriptionPriority p) {
+      // writes are not what this case exercises
+    }
+
+    @Override
+    public void remove(String s, InstrumentKey k) {
+      if (failEveryRemove.get()) {
+        throw new IllegalStateException("redis unavailable");
+      }
+    }
+
+    @Override
+    public java.util.List<PersistedHold> all() {
+      return java.util.List.of();
+    }
+  }
 
   /** A ticker whose UNSUBSCRIBE-side notification can be made to fail, like a reconnect blip. */
   private static final class FlakyTicker implements SubscriptionRegistry.TickerCommands {
@@ -256,8 +314,13 @@ class OptionAtmPinnerTickPathTest {
       // the subscribe side is not what this case exercises
     }
 
+    /** Every token the sweep ATTEMPTED to release, including the ones this ticker refused. */
+    private final java.util.List<Long> unsubscribeAttempts =
+        java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
     @Override
     public void unsubscribe(java.util.List<Long> tokens) {
+      unsubscribeAttempts.addAll(tokens);
       if (failEveryUnsubscribe.get()) {
         throw new IllegalStateException("websocket not connected");
       }
@@ -307,9 +370,13 @@ class OptionAtmPinnerTickPathTest {
           contract.exchange() + ":" + contract.tradingsymbol(),
           new InstrumentTokenResolver.TokenInfo(token++, contract.instrumentType(), "NFO-OPT"));
     }
+    FlakyStore store = new FlakyStore();
     SubscriptionRegistry registry =
         new SubscriptionRegistry(
-            key -> Optional.ofNullable(master.get(key.canonical())), 3_000, new SimpleMeterRegistry());
+            key -> Optional.ofNullable(master.get(key.canonical())),
+            3_000,
+            new SimpleMeterRegistry(),
+            store);
 
     MeterRegistry meters = new SimpleMeterRegistry();
     OptionAtmPinner pinner =
@@ -325,7 +392,7 @@ class OptionAtmPinnerTickPathTest {
             clock);
     FlakyTicker ticker = new FlakyTicker();
     registry.attachTicker(ticker);
-    return new Harness(pinner, chains, instruments, ticks, ticker);
+    return new Harness(pinner, chains, instruments, ticks, ticker, store);
   }
 
   /** A realistic ladder: 100-point strikes either side of 25000, CE and PE per strike. */

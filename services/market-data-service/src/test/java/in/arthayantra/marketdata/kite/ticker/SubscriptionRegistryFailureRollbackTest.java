@@ -174,6 +174,17 @@ class SubscriptionRegistryFailureRollbackTest {
     assertThat(store.writes)
         .as("nothing durable was written for a mode the wire refused")
         .isEmpty();
+
+    // ⚠️ THE MODE, NOT JUST THE PRESENCE (review round 4). containsExactly(KEY) above proves the
+    // hold was not DROPPED, and a rollback that did nothing at all would satisfy it too -- the map
+    // would simply keep the FULL hold nobody agreed to. Dropping holder-a makes holder-b the only
+    // holder, so the effective mode IS its restored mode and a no-op rollback reports FULL here.
+    registry.unsubscribe("holder-a", KEY);
+    assertThat(registry.view())
+        .singleElement()
+        .extracting(SubscriptionRegistry.SubscriptionView::mode)
+        .as("the subscriber must be back at LTP, not left holding the FULL it never got")
+        .isEqualTo(SubscriptionMode.LTP);
   }
 
   // ---------------------------------------------------------------- harness

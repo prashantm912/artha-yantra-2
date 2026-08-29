@@ -35,14 +35,34 @@ public interface TakeAdmission {
    * refusal only, and deliberately carry the SAME error codes the writers throw, so one fact reads
    * as one fact wherever it surfaces.
    */
-  record Verdict(boolean admitted, String code, String reason, Map<String, Object> details) {
+  record Verdict(
+      boolean admitted,
+      String code,
+      String reason,
+      Map<String, Object> details,
+      /**
+       * The HTTP status the CALLER should answer with. Added 2026-08-29 (H44 round 3): every
+       * refusal used to map to 422 at the controller, so a DEPENDENCY OUTAGE and a bad input were
+       * indistinguishable to a client. The writer already threw 503 for an unreachable tick store
+       * while the same failure through /taken answered 422 — turning a retryable outage into an
+       * apparently permanent input rejection, on the same underlying fact.
+       */
+      int httpStatus) {
 
     /** The pass — nothing to report. */
-    public static final Verdict ADMITTED = new Verdict(true, null, null, Map.of());
+    public static final Verdict ADMITTED = new Verdict(true, null, null, Map.of(), 200);
 
     /** A refusal carrying the writer's own error code plus the facts that decided it. */
     public static Verdict refused(String code, String reason, Map<String, Object> details) {
-      return new Verdict(false, code, reason, details);
+      return new Verdict(false, code, reason, details, 422);
+    }
+
+    /**
+     * A refusal whose cause is a DEPENDENCY being unavailable rather than the request being wrong.
+     * 503 so a client (and an operator reading the log) can tell "try again" from "never".
+     */
+    public static Verdict unavailable(String code, String reason, Map<String, Object> details) {
+      return new Verdict(false, code, reason, details, 503);
     }
   }
 

@@ -50,7 +50,9 @@ class PaperEventPublisherTest {
             isNull(), isNull()))
         .thenReturn(77L);
 
-    publisher.onOpened(new PaperPositionOpened(42L, "scalper", "NFO", "NIFTY24JUL", "BUY", 50L));
+    publisher.onOpened(new PaperPositionOpened(
+            42L, "scalper", "NFO", "NIFTY24JUL", "BUY", 50L,
+            in.arthayantra.strategyengine.fills.InstrumentClass.OPTION));
 
     verify(eventsRepo)
         .insert(42L, "OPENED", "scalper", "NFO", "NIFTY24JUL", "BUY", 50L, null, null);

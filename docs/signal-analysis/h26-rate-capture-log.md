@@ -180,3 +180,72 @@ on, has been flat across all three sessions.** Only the Upstox baseline is noisy
 [#1519](https://github.com/prashantm912/artha-yantra-2/pull/1519) and
 [#1520](https://github.com/prashantm912/artha-yantra-2/pull/1520) are open against exactly that. Out of scope for
 this read-only capture.
+
+---
+
+## Row — 2026-08-31
+
+| session | coverage | Upstox 30m peak | 1m peak | 1s peak | Upstox batch / live | live refused | Kite QUOTE | Kite HIST | Kite DUMP |
+|---|---|---|---|---|---|---|---|---|---|
+| **2026-08-31** (Mon) | **100%** — process up **08:32:30 IST**, before the 09:15 open; `RestartCount=0`, **no restart**; captured **15:28**, 2 min before close | **215 / 1800** (12%) | 213 / 450 (47%) | 20 / 45 (44%) | 210 / 31 | **0** | **17,403** | 789 | 1 |
+
+`computed` 2026-08-31 15:28 IST from `ay-market-data-service` `/actuator/prometheus`; container start `sourced` from
+`docker inspect` (`2026-08-31T03:02:30Z`, `RestartCount=0`).
+
+## Reading of 2026-08-31 — the 08-28 attribution REPRODUCES, exactly
+
+**The 08-28 row claimed the Upstox term is driven by `ExpiredBackfillAutoResume`'s per-session workload, not by the
+H31 precompute. Today reproduces that prediction to the digit.**
+
+`sourced` from today's boot log:
+
+```
+2026-08-31T03:03:24Z  expired-backfill … done: 104 expiries, 32081 contracts,
+                      0 written, 32081 skipped, 0 failed, 0 rows   (ran 03:02:46→03:03:24, 38 s)
+```
+
+Nothing outstanding to fetch — the **same shape as 08-27**, and the Upstox terms land on the same numbers:
+
+| session | backfill outcome | Upstox `batch` | Upstox 30m peak |
+|---|---|---|---|
+| 2026-08-27 | 0 written, 0 rows, 65 s | **210** | **215** |
+| 2026-08-28 | 269 written, 978,059 rows, 4 h 17 m | 1,286 | 1,291 |
+| **2026-08-31** | **0 written, 0 rows, 38 s** | **210** | **215** |
+
+⚠️ **`batch` = 210 and the 30-min peak = 215 on both empty-backfill sessions, byte-identical.** That is not a
+correlation any more — it is a **fixed steady-state cost**, and the backfill is the entire variable term. The
+08-28 warning that "the five-session projection must separate the backfill burst from the steady term" is now
+**measured rather than argued**: the steady term is **215 / 1800 = 12%** and it does not move.
+
+`ay_day_context_snapshot_refresh_total` = **28** today (27 on 08-28), one batched Upstox call each — confirming
+again that the H31 precompute is ~28 calls/session and arithmetically incapable of the swings this log recorded.
+
+⚠️ **A stronger control than either previous session offers.** Roughly **twenty PRs merged and deployed between
+the 08-28 row and this one** (`#1518`…`#1542`, including live-engine changes H20/H44/D3/N23-A/N26). The Upstox
+steady term did not move by a single call. **Code churn is not a confound for this metric; backfill backlog is
+the only one found so far.**
+
+### The Kite side — still flat, which is the term H26 turns on
+
+| session (same ~15:28 clock time) | Kite `QUOTE` | per 30-min window |
+|---|---|---|
+| 2026-08-27 | 16,657 | ≈1,340 |
+| 2026-08-28 | 17,726 | ≈1,426 |
+| **2026-08-31** | **17,403** | **≈1,400** |
+
+`computed`: 09:15→15:28 = 373 min = 12.43 half-hour windows; 17,403 / 12.43 ≈ **1,400**. Spread across the three
+comparable sessions is **±3%**. **Four sessions in, the migrating term is the stable one and the Upstox baseline
+is the noisy one** — the opposite of what the first two rows suggested.
+
+### Stop-rule arithmetic, on the steady term
+
+- Naive raw-transfer projection: **215 + 1,400 = 1,615** against the 1440 stop threshold — **still FAILS**, and
+  now on the *quietest* possible Upstox baseline. The naive model cannot pass on any session this log has seen.
+- Remapped model (the only one that can pass): needs the **call-shape factor** for the dominant Kite consumer
+  (`OptionsSnapshotService`, ~70 batched `/quote` calls per 2-min cycle → ~6 `/v2/option/chain` calls, ≈12:1).
+  At 12:1 the migrating term is ≈117 and the projection is ≈332 — comfortably under. **That factor is still
+  `assumed`, never measured, and it remains the whole question.**
+
+⚠️ **Still no verdict — this is session four of five.** But the shape of the answer is now clear: **H26 is decided
+by measuring one job's call shape, not by accumulating more sessions.** A fifth row will add a decimal place to
+1,400; it will not decide anything. Recording that so the fifth capture is not mistaken for the deciding one.

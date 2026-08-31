@@ -78,6 +78,31 @@ public class TokenResolverAdapter implements InstrumentTokenResolver {
    * all inactive rows have a twin at all — returning empty for the remainder would turn a broken
    * {@code 400} into a NEW {@code 404} across a population nobody asked about, which is a wider
    * change than this fix is for. Nothing that resolved before stops resolving.
+   *
+   * <p>⚠️ <b>A THIRD SHAPE EXISTS AND IS DELIBERATELY NOT FIXED: the twin you fall
+   * back TO can itself be bad.</b> The direct path requires the bare row be {@code active()}
+   * below, but {@link #lookup} checks only that the twin carries a TOKEN — never that the
+   * twin is active. So an inactive twin wins, and Kite rejects its token exactly as it rejected
+   * the bare one. The asymmetry is real; it is the population that is not.
+   *
+   * <p>{@code computed} live 2026-08-31, re-derived rather than quoted: of the rows that reach
+   * this fallback at all, <b>21</b> are H29 with an ACTIVE twin, <b>150</b> are H36 with an
+   * ACTIVE twin, and <b>exactly one</b> — {@code SABEVENTS} — has an inactive twin.
+   * Both of its rows are inactive, its last bhavcopy row and last candle are both 2026-08-04,
+   * and it was not fetched once all session. A fallback that never fires cannot strand anything,
+   * so a guard here would be unverifiable live: nothing exercises it.
+   *
+   * <p>⚠️ <b>How this was nearly filed as a defect, which is the part worth keeping.</b>
+   * A scheduled health check saw two 08:35 log lines — {@code MODISONLTD} and {@code KOPRAN},
+   * both fail-softing to stale cached data on a {@code 400 invalid token} — and reported them
+   * as a new H29-shaped hole. It read the SHAPE off the log line rather than querying the rows.
+   * By 09:05 the {@code INSTRUMENT_SYNC} had given both bare rows an active token, so neither
+   * reaches this fallback at all any more, and neither was ever the shape reported. Two named
+   * instances are not the set: re-derive the population before acting, then ask the second
+   * question — not "do these exist?" but "which still has effect?".
+   *
+   * <p>If that count ever climbs above one, or a symbol in it is still trading, the fix is one
+   * line in {@link #lookup}. Until then it would be a guard on a delisted stock.
    */
   @Override
   public Optional<TokenInfo> resolve(InstrumentKey key) {

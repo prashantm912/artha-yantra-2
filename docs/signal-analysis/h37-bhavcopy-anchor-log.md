@@ -42,11 +42,14 @@ EQ 2,624–2,639 · SM 343–380 · BE 226–238.
 | — | 2026-08-26 | — | **NO RECORD** | — | — | — | — | **UNKNOWN** | weekday, task should have fired; no artifact found in repo or ledger. Treated as not measured. |
 | 3 | 2026-08-27 | 18:24 | 3,457 | 2,623 | 358 | 242 | yes (`27-Aug-2026`, sole distinct value) | **YES** | `computed` — `curl` HTTP 200, 391,423 bytes; `wc -l` 3,458 total / 3,457 data; file runs `20MICRONS` → `ZYDUSWELL` (not truncated) |
 | 4 | 2026-08-28 | 18:24 | 3,460 | 2,629 | 352 | 243 | yes (`28-Aug-2026`, sole distinct value) | **YES** | `computed` — `curl` HTTP 200, 391,621 bytes; `wc -l` 3,461 total / 3,460 data; file runs `1018GS2026` → `ZYDUSWELL` (not truncated) |
+| 5 | 2026-08-31 | 18:25 | 3,475 | 2,647 | 353 | 232 | yes (`31-Aug-2026`, sole distinct value) | **YES** | `computed` — `curl` HTTP 200, 394,397 bytes; `wc -l` 3,476 total / 3,475 data; file runs `1018GS2026` → `ZYDUSWELL`, final line carries all 15 fields (not truncated) |
 
-**Tally: 3 clean sessions cited (08-24, 08-27, 08-28) of ≥5 required.** Not 4 — session 2 has no
-citable row, and per this file's own rule a tally with no row to cite is not a tally.
+**Tally: 4 clean sessions cited (08-24, 08-27, 08-28, 08-31) of ≥5 required.** Not 5 — session 2
+has no citable row, and per this file's own rule a tally with no row to cite is not a tally.
+08-29 was a **Saturday** (`computed`: the `29082026` URL 404s; `date(2026,8,29)` = Saturday), so no
+session was missed between 08-28 and 08-31.
 
-**VERDICT: not yet enough evidence. Do NOT move the anchor.**
+**VERDICT: not yet enough evidence. Do NOT move the anchor.** ONE more clean session needed.
 
 ## ⚠️ Same-day corroboration for 2026-08-28 — complete at 17:10, NOT a fourth session
 
@@ -118,3 +121,22 @@ the earliest hour with same-day support.
   tail, not the head.
 - **Tally after tonight: 3 clean cited sessions (08-24, 08-27, 08-28) of ≥5. VERDICT UNCHANGED — do
   NOT move the anchor.** Two more clean sessions needed; 08-25 / 08-26 are unrecoverable.
+
+## Session 5 — 2026-08-31 (Monday)
+
+- `computed` 18:25 IST probe: HTTP 200, 394,397 bytes, **3,475** data rows, EQ **2,647** · SM **353**
+  · BE **232**, sole distinct `DATE1` = `31-Aug-2026` (3,475 of 3,475), tail reaches `ZYDUSWELL` with
+  a full 15-field line. Inside the 3,296–3,506 bar; SM and BE inside their cross-check bands. EQ
+  **2,647** is 8 above the 8-session max (2,639) — again membership drift UPWARD, which cannot be a
+  truncation signature. Session reads **complete**.
+- `sourced` anchor re-read at run time: `docker inspect ay-market-data-service` →
+  `ARTHA_BHAVCOPY_EOD_CRON=0 45 18 * * MON-FRI`. Unchanged.
+- `computed` from `marketdata.ingest_runs` (21 days): today's only `BHAVCOPY` run so far is
+  **08:32:46**, `SUCCESS`, `rows_written=0`, 26.5 s — the morning boot catch-up, correctly writing
+  nothing for a session that had not closed. The 18:45 anchor had not fired when this was taken, so
+  there is **no same-day stored-row cross-check tonight** (unlike 08-28's accidental 17:10 deploy
+  catch-up). The probe stands on the file itself.
+- `computed` from `marketdata.nse_eod_bhavcopy`: last stored trade date is **2026-08-28** (3,460
+  rows). No 08-29 row, and that is correct — 08-29 was a Saturday.
+- **Tally after tonight: 4 clean cited sessions (08-24, 08-27, 08-28, 08-31) of ≥5. VERDICT
+  UNCHANGED — do NOT move the anchor.** One more clean session (next: 2026-09-01) reaches the bar.

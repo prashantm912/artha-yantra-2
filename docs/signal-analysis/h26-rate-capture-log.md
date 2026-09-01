@@ -249,3 +249,59 @@ is the noisy one** — the opposite of what the first two rows suggested.
 ⚠️ **Still no verdict — this is session four of five.** But the shape of the answer is now clear: **H26 is decided
 by measuring one job's call shape, not by accumulating more sessions.** A fifth row will add a decimal place to
 1,400; it will not decide anything. Recording that so the fifth capture is not mistaken for the deciding one.
+
+---
+
+## Row — 2026-09-01 ⚠️ NULL ROW, 0% COVERAGE — DO NOT COUNT IT AS SESSION FIVE
+
+| session | coverage | Upstox 30m peak | 1m peak | 1s peak | Upstox batch / live | live refused | Kite QUOTE | Kite HIST | Kite DUMP |
+|---|---|---|---|---|---|---|---|---|---|
+| **2026-09-01** (Tue) | **0% of the session.** Host was DOWN 12:42–18:45 IST; the process holding the session's high-water marks died with it and is **unrecoverable**. Current process started **18:48:59 IST**, uptime **4.3 min** at capture (19:53 → see below), covering only the post-boot burst + the 18:45 evening chain | 213 / 1800 — **NOT a session peak** | 213 / 450 — **NOT a session peak** | 14 / 45 — **NOT a session peak** | 210 / 3 | **0** | **74** | 250 | 0 |
+
+**Every number in that row is post-close.** Per this file's own rule, a truncated peak must never be quoted as a
+session peak, so the four session-peak cells are struck out in prose rather than folded into any average.
+
+### What actually happened, `computed` 2026-09-01
+
+- **Windows System log** (`sourced`, events 6005/6006/1074/6008): boot **07:48:25**; winlogon-initiated shutdown
+  **12:42:12**, log service stopped **12:42:17**; boot **18:45:33**, an **unexpected** shutdown at that same
+  moment (6008), then boot **18:47:43**.
+- **All 11 containers report `Up 4 minutes`** including `ay-timescaledb`, `ay-redis` and `ay-wiremock`, and
+  `RestartCount=0`. The market-data image is dated **2026-08-29T14:47:37Z** — unchanged. **This was a host boot,
+  not a deploy**, which matters because the usual suspect for a lost high-water mark here is a post-close deploy.
+- **Live tick capture stopped at 11:56 IST**, ~46 min *before* the shutdown. Per-hour distinct minutes
+  (`source='TICK_AGG'`): 09h **45**, 10h **60**, 11h **56**, then nothing. The single 15:29 bucket in the table
+  (117 bars) carries `fetched_at = 18:49:22` — it is the **EOD bhavcopy ingest writing a close bar**, not live
+  capture, and reading it as live coverage is exactly the trap the `TICK_AGG` filter exists to prevent.
+- `marketdata.ingest_runs`: `OPTIONS_SNAPSHOT_CAPTURE` SUCCESS 09:18 (475,044 rows); the whole evening chain
+  (BHAVCOPY / NSE_* / MANAS_SCREEN / DATA_QUALITY / MINERVINI_SCREEN / EQUITY_BREADTH) SUCCESS 18:49–18:51,
+  post-boot. **The evening chain was not lost; only the intraday metrics were.**
+- **The 15:25 capture slot could not fire** — the box was off from 12:42 to 18:45. This run executed at **18:53**.
+
+### The one thing this null row DOES measure, and it is not nothing
+
+`computed`, two scrapes 18:53 and 18:55, byte-identical: a process that saw **no trading session at all** logged
+**210** Upstox `batch` calls and a **30-min peak of 213**, then went **flat** (Kite `QUOTE` likewise frozen at 74).
+
+**210 batch / ~213 peak is precisely the figure the 2026-08-27 and 2026-08-31 rows report as a *whole-session*
+value.** So the Upstox baseline term this log has been treating as a session measurement appears to be dominated
+by a **boot-and-batch burst that is very nearly session-independent** — 08-31's process booted 08:32 and by 15:28
+had accumulated the same 210, and today's booted 18:48 and reached 210 within four minutes with the market shut.
+
+⚠️ **`assumed`, and deliberately not promoted further.** This is one observation, and the file already records
+what happens when a rule is induced from one case. Two things it does *not* establish: which call sites make up
+the 210 (never enumerated), and whether the 08-28 outlier (1,286 batch / peak 1,291) shares the same base — that
+row was explained by an expired-backfill resume and remains the only session where the Upstox term moved at all.
+**The distinguishing check is a call-site breakdown of `ay_upstox_calls_total{path="batch"}` across boot vs
+intraday, not another day's total.**
+
+If it holds, it *strengthens* rather than changes the standing conclusion: the Upstox baseline is a near-constant
+~215 that carries almost no session load, so the stop rule turns entirely on the migrating Kite term and its
+call-shape factor — which is what the 08-31 reading already said.
+
+### Stop rule — unchanged, and still undecided
+
+Four usable sessions (08-26 pre-fix, 08-27, 08-28, 08-31), not five; this row adds none. The arithmetic is
+untouched: naive raw transfer **215 + 1,400 = 1,615 > 1,440 FAILS**; the remapped model at the `assumed` ≈12:1
+call-shape factor gives ≈332 and passes. **The factor is still unmeasured and remains the whole question** —
+consistent with the 08-31 note that H26 is decided by measuring one job's call shape, not by accumulating rows.

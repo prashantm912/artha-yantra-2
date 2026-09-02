@@ -64,24 +64,30 @@ COMMENT ON COLUMN instruments.upstox_instrument_key IS
 -- ⚠️ SCOPED, NOT UNCONDITIONAL — and the first cut of this migration got it wrong.
 --
 -- That cut asserted "instruments is written only by the Kite instrument-dump sync" and backfilled
--- every row. **That premise is FALSE**, and cross-vendor review caught it. There are two other
--- writers, neither of which involves Kite:
+-- every row. **That premise is FALSE**, and cross-vendor review caught it. Two other writers exist,
+-- neither involving Kite:
 --   * `tools/historical-import/ingest.py` inserts inactive placeholders carrying no token, no name
 --     and no segment;
 --   * `InstrumentRepository.upsertSyntheticCont` writes `SYN-CONT` continuous-futures rows whose
 --     own javadoc says they can "never reach a Kite port".
 --
--- `computed` live before writing this predicate: the placeholders are **182,487 rows — 58% of the
--- table** — against 134,435 Kite-dump rows and 6 SYN-CONT. An unconditional backfill would have
--- stamped "Kite asserted this" on the majority of the table, corrupting the exact provenance U-A2
--- uses to decide tombstone ownership. That is not a cosmetic error: it is the input to a rule whose
--- failure mode is deactivating every Kite-only row.
+-- Stamping Kite provenance on either would corrupt the input to U-A2's tombstone-ownership rule,
+-- whose failure mode is deactivating every Kite-only row. So the predicate keeps rows that carry
+-- MASTER METADATA and drops the two non-Kite writers. That test is about the SHAPE each writer
+-- leaves behind, which is a property of the code, not of the data.
 --
--- The predicate keeps rows that carry master metadata and drops the two non-Kite writers. Verified
--- against the H29/H36 population specifically, because those are the rows the plan warns must not be
--- mis-scoped: DIACABS, MENONBE and SABEVENTS all carry token + name + segment and are correctly
--- INCLUDED. `computed`: zero rows are tokenless-but-named, so the metadata test does not strand a
--- tokenless Kite row.
+-- ⚠️ NO COUNTS, NO SYMBOL NAMES, AND NO PERCENTAGES ARE RECORDED HERE — deliberately, and
+-- this is the second time this migration has had to learn it. The first draft cited V057's
+-- precedent for exactly this reason and then, while FIXING the predicate above, embedded a live
+-- census anyway: row counts, a percentage, named symbols and a zero-population assertion. A
+-- migration comment is checksum-locked FOREVER, and this population moves with every import,
+-- expiry roll and instrument sync, so a frozen number here could never be corrected. Removing my
+-- own guard while justifying a fix is the failure worth remembering.
+--
+-- The census, the H29/H36 verification and the load-bearing caveat (no Kite row is currently
+-- tokenless-AND-nameless, which is what makes the metadata test safe) live in a dated receipt:
+--   docs/signal-analysis/2026-09-02-h26-ua1-instruments-writer-census.md
+-- Re-derive it before relying on the predicate again.
 UPDATE instruments
    SET kite_last_seen_at = last_seen_at
  WHERE segment IS DISTINCT FROM 'SYN-CONT'

@@ -71,7 +71,7 @@ absence of later writes. Sound, but a different instrument — and this file alr
 session 2 for having no citable row. Promoting a different measurement to the tally because it
 points the way we want would be the same error wearing better clothes.
 
-**Tally unchanged at 3 of ≥5. Verdict unchanged: do NOT move the anchor.** What this does change is
+**Tally unchanged at 3 of ≥5 as of 2026-08-28 (⚠️ STALE — 4 as of Session 5; see the table). Verdict unchanged: do NOT move the anchor.** What this does change is
 the PRIOR: an anchor move looks considerably more likely to survive the remaining sessions than the
 18:24-only evidence suggested. If a future run wants to test an earlier slot directly, 17:10 is now
 the earliest hour with same-day support.
@@ -140,3 +140,47 @@ the earliest hour with same-day support.
   rows). No 08-29 row, and that is correct — 08-29 was a Saturday.
 - **Tally after tonight: 4 clean cited sessions (08-24, 08-27, 08-28, 08-31) of ≥5. VERDICT
   UNCHANGED — do NOT move the anchor.** One more clean session (next: 2026-09-01) reaches the bar.
+
+## Session 6 — 2026-09-01 (Tuesday) — ⚠️ **PROBE FIRED LATE, NOT COUNTABLE**
+
+- ⚠️ **The run fired at 18:52 IST, not 18:23.** `computed`: `datetime.now(ZoneInfo('Asia/Kolkata'))`
+  at the start of the run read `2026-09-01 18:52:29`. That is **7 minutes AFTER the 18:45 anchor**,
+  so tonight's fetch measures the file at a moment the anchor has already passed. **It cannot
+  answer the question this watch exists to ask** — "is the file complete 20+ minutes EARLY?" — and
+  is therefore **NOT counted as a clean session**. ⚠️ **Why it fired late is now `computed`, not `assumed` — and it was neither
+  scheduler drift nor a late morning boot.** The HOST WAS DOWN. Windows System log: `winlogon`
+  event 1074 initiated power-off at **12:42:12 IST**, event 6006 at 12:42:17; boot at 18:45:33,
+  then event 41 + 6008 (*“the previous system shutdown at 6:45:33 PM was unexpected”*) — a
+  power flicker — and the successful boot at **18:47:43**. All 11 containers started 18:48:59.
+  The 18:15 cron therefore never fired at all; the run happened when the box and Claude came back.
+  **So this is not a probe defect and not scheduler drift — it is an environmental outage, and
+  the correct disposition is exactly the one taken here: not countable.** Same conclusion, but the
+  cause is now measured, so a future session should not re-derive it — see the outage register
+  and `docs/signal-analysis/2026-09-01-session-findings.md`.
+- `computed` file probe anyway, for the record: HTTP 200, 396,242 bytes, **3,495** data rows,
+  EQ **2,646** · SM **374** · BE **233**, sole distinct `DATE1` = `01-Sep-2026` (3,495 of 3,495),
+  head `1018GS2026`, tail `ZYDUSWELL` with a full 15-field line. Inside the 3,296–3,506 bar.
+  Command: `curl -sS -o <tmp> -w 'HTTP=%{http_code} BYTES=%{size_download}'` with the
+  `NseHttpClient` UA + `Referer: https://www.nseindia.com/` against
+  `https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_01092026.csv`.
+- ✅ `computed` cross-check, and it is exact: `marketdata.nse_eod_bhavcopy` stores **3,495** rows for
+  `trade_date = 2026-09-01`, `fetched_at` 18:49:28–18:49:29 IST — **identical to the probe count**.
+  The file the probe read is the file the anchor consumed. Confirms the probe is sound; it does not
+  make it early.
+- ⚠️ `computed` from `marketdata.ingest_runs`: tonight's anchor run started **18:49:21**, not 18:45
+  (`SUCCESS`, `rows_written=8500`, 37.1 s). The 08-31 run started 18:44:58, so this is a ~4-minute
+  slip on the anchor itself, same night the scheduled task slipped ~29 minutes. **Not investigated
+  here** (this task is read-only and the question is the anchor's EARLINESS, not its jitter), but
+  worth naming: if the 18:45 job can start at 18:49, the real margin to a ~19:00 shutdown is
+  smaller than the cron string suggests — which strengthens, not weakens, the case for moving the
+  anchor earlier once the evidence bar is met.
+- `computed` earlier same-day run: **07:50:48**, `SUCCESS`, `rows_written=0` — the morning boot
+  catch-up correctly writing nothing for an unclosed session.
+- ⚠️ **Stale tally corrected:** the "Tally unchanged at 3 of ≥5" line in the 08-28 corroboration
+  section above predates Session 5 and is superseded. The authoritative tally is the one under the
+  sessions table.
+- **Tally after tonight: 4 clean cited sessions (08-24, 08-27, 08-28, 08-31) of ≥5 — UNCHANGED,
+  because tonight's probe was post-anchor and does not qualify. VERDICT UNCHANGED — do NOT move the
+  anchor.** One more clean, ON-TIME session is still needed. **If the scheduled task keeps firing
+  near 18:52 it can never produce one** — the fire time is now the blocker, not NSE. Next run should
+  check its own clock FIRST and say so loudly if it is again past 18:45.

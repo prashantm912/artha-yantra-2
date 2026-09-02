@@ -232,6 +232,21 @@ resilience4j:
           # breaker, and CircuitBreakerDiagnostics counts ignored errors separately so this
           # cannot become an invisible failure.
           - org.springframework.web.client.HttpClientErrorException$Forbidden
+          # NEW-14, 2026-09-02. A 400 is a PERMANENT client error: the request will never succeed on
+          # retry, so it can never mean "the upstream is unavailable" -- which is the one thing this
+          # breaker exists to detect. Identical reasoning to the 403 above, one status code over.
+          # Measured 2026-09-02 15:45 IST: five `400 "invalid segment for continuous data"` from
+          # GapBackfillService's EOD prefetch on BFO SENSEX option contracts opened this SHARED
+          # breaker post-close. Kite was healthy and answering; we had simply asked it for 1d history
+          # on a segment it does not serve.
+          # WHY SO FEW CALLS COULD DO IT, and this is the part worth keeping: the window is
+          # COUNT_BASED over 10 with a 50% threshold, so the breaker is MOST FRAGILE WHEN TRAFFIC IS
+          # LOWEST. Post-close, five permanent 400s are half the window. The 08-28 boot 403s were the
+          # same shape at the other quiet end of the day -- low volume, not high failure.
+          # As with the 403: the calls still FAIL and CircuitBreakerDiagnostics counts ignored errors
+          # separately, so this cannot become an invisible failure. It stops a bad REQUEST from being
+          # reported as a bad UPSTREAM.
+          - org.springframework.web.client.HttpClientErrorException$BadRequest
       # OpenAlgo gets its OWN breaker so an OpenAlgo outage never trips Kite-direct calls (§4)
       openalgo-rest:
         sliding-window-type: COUNT_BASED

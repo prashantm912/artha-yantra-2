@@ -99,7 +99,14 @@ public class NetworkReachabilityProbe {
    * incidents into one row — the record would show a single long outage that never happened, which
    * is a worse failure than a missing row because it looks authoritative.
    */
-  private PendingClose pendingClose;
+  /**
+   * When recovery was first OBSERVED and not yet fully recorded.
+   *
+   * <p>Retained across a failed close AND across a pass that could not read episode state at all,
+   * so the episode's end is the moment reachability actually returned rather than whenever the
+   * write eventually succeeded.
+   */
+  private Instant recoveryObservedAt;
 
   /**
    * An episode whose OPENING write never landed.
@@ -193,68 +200,83 @@ public class NetworkReachabilityProbe {
 
     unreachableGauge.set(failed.size());
     Instant now = clock.instant();
+    boolean hostNetworkDown = failed.size() >= quorum;
 
-    // A close that failed on an earlier pass is retried FIRST, carrying the instant recovery was
-    // actually observed. Retrying here rather than inside the recovery branch is what stops a new
-    // outage from being absorbed into the previous episode.
-    if (pendingClose != null && repository.close(pendingClose.key(), pendingClose.at())) {
-      pendingClose = null;
+    // Both observations are recorded BEFORE anything can decline to act, so a pass that cannot
+    // reach the database still contributes the time at which the world changed.
+    if (hostNetworkDown && outageFirstObservedAt == null) {
+      outageFirstObservedAt = now;
+    }
+    if (!hostNetworkDown && recoveryObservedAt == null) {
+      recoveryObservedAt = now;
     }
 
-    boolean hostNetworkDown = failed.size() >= quorum;
-    String openKey = repository.openEpisodeKey().orElse(null);
+    NetworkReachabilityRepository.OpenEpisodeLookup lookup = repository.openEpisode();
+    if (!lookup.readSucceeded()) {
+      // ⚠ UNKNOWN, not "nothing is open". Acting on a failed read is how an observed recovery used
+      // to be discarded entirely; the retained instants above mean the next pass records it at the
+      // right time instead.
+      log.warn("reachability: episode state unreadable — no transition this pass");
+      return;
+    }
+    String openKey = lookup.key();
+
+    // An unrecorded recovery is settled FIRST, whatever the current state. Deferring it into the
+    // recovery branch would let a new outage that begins before the close lands be absorbed into
+    // the previous episode, producing one long incident that never happened.
+    if (recoveryObservedAt != null) {
+      if (openKey != null) {
+        log.info("reachability: recovered — closing episode {}", openKey);
+        if (repository.close(openKey, recoveryObservedAt)) {
+          recoveryObservedAt = null;
+          openKey = null;
+        }
+      } else if (pendingOpen != null) {
+        // The outage ended before its opening write ever landed. Record it retrospectively rather
+        // than losing the incident: the original start, closed at the observed recovery.
+        log.warn(
+            "reachability: recording episode {} retrospectively — its opening write never landed",
+            pendingOpen.key());
+        if (write(pendingOpen) && repository.close(pendingOpen.key(), recoveryObservedAt)) {
+          pendingOpen = null;
+          recoveryObservedAt = null;
+        }
+      } else {
+        recoveryObservedAt = null;
+      }
+    }
 
     if (hostNetworkDown) {
-      if (outageFirstObservedAt == null) {
-        outageFirstObservedAt = now;
-      }
       if (openKey == null) {
-        Instant startedAt = outageFirstObservedAt;
-        PendingOpen episode =
-            new PendingOpen(
-                "reach-" + startedAt.toEpochMilli(),
-                startedAt,
-                destinations.size(),
-                failed.size(),
-                quorum,
-                String.join(",", failed),
-                "quorum " + failed.size() + "/" + destinations.size() + " unreachable"
-                    + " (threshold " + quorum + ")");
-        log.warn(
-            "reachability: {} of {} destinations unreachable ({}) — opening episode {}."
-                + " This is the HOST network, not one vendor.",
-            failed.size(), destinations.size(), episode.failedNames(), episode.key());
-        pendingOpen = write(episode) ? null : episode;
+        // ⚠ Only built when there is nothing retained. Rebuilding it each pass would keep the
+        // ORIGINAL start but overwrite the evidence with a later pass's failed set, so the row
+        // would claim counts that were never true at the moment it names as the start.
+        if (pendingOpen == null) {
+          Instant startedAt = outageFirstObservedAt;
+          pendingOpen =
+              new PendingOpen(
+                  "reach-" + startedAt.toEpochMilli(),
+                  startedAt,
+                  destinations.size(),
+                  failed.size(),
+                  quorum,
+                  String.join(",", failed),
+                  "quorum " + failed.size() + "/" + destinations.size() + " unreachable"
+                      + " (threshold " + quorum + ")");
+          log.warn(
+              "reachability: {} of {} destinations unreachable ({}) — opening episode {}."
+                  + " This is the HOST network, not one vendor.",
+              failed.size(), destinations.size(), pendingOpen.failedNames(), pendingOpen.key());
+        }
+        if (write(pendingOpen)) {
+          pendingOpen = null;
+        }
       } else {
         pendingOpen = null;
       }
     } else {
-      if (openKey == null && pendingOpen != null) {
-        // The outage ended before its opening write ever landed. Record it now as a COMPLETED
-        // episode rather than losing the incident: the start is the instant the outage was first
-        // observed, the end is now.
-        log.warn(
-            "reachability: recording episode {} retrospectively — its opening write never landed",
-            pendingOpen.key());
-        if (write(pendingOpen)) {
-          if (!repository.close(pendingOpen.key(), now)) {
-            pendingClose = new PendingClose(pendingOpen.key(), now);
-          }
-          pendingOpen = null;
-        }
-      }
       outageFirstObservedAt = null;
-      if (openKey != null) {
-        Instant recoveredAt =
-            pendingClose != null && pendingClose.key().equals(openKey) ? pendingClose.at() : now;
-        log.info("reachability: recovered ({} unreachable) — closing episode {}", failed.size(),
-            openKey);
-        if (repository.close(openKey, recoveredAt)) {
-          pendingClose = null;
-        } else {
-          pendingClose = new PendingClose(openKey, recoveredAt);
-        }
-      } else if (!failed.isEmpty()) {
+      if (!failed.isEmpty()) {
         // Below quorum: a vendor problem, deliberately NOT an episode. Logged so it is still
         // visible, because "one vendor is down" is a real finding — it is just a different one.
         log.info("reachability: {} unreachable ({}) — below the {} quorum, treating as vendor-local",
@@ -268,9 +290,6 @@ public class NetworkReachabilityProbe {
         e.key(), e.startedAt(), e.probed(), e.unreachable(), e.quorum(), e.failedNames(),
         e.detail());
   }
-
-  /** An observed recovery whose write has not landed yet. */
-  private record PendingClose(String key, Instant at) {}
 
   /** An observed outage whose opening write has not landed yet. */
   private record PendingOpen(
@@ -366,9 +385,16 @@ public class NetworkReachabilityProbe {
       }
       // Duplicates would inflate probed_count AND let ONE vendor meet the quorum by itself, which
       // is precisely the host-vs-vendor confusion the quorum exists to prevent.
+      // ⚠ An EXPLICIT default port is the same origin as an implicit one, so it must normalize to
+      // the same string. Otherwise https://vendor and https://vendor:443 are accepted as two
+      // destinations, which inflates probed_count and lets ONE vendor satisfy the majority alone —
+      // defeating the very distinction the quorum exists to draw.
+      int port = uri.getPort();
+      if (("https".equals(scheme) && port == 443) || ("http".equals(scheme) && port == 80)) {
+        port = -1;
+      }
       String origin =
-          scheme + "://" + uri.getHost().toLowerCase(Locale.ROOT)
-              + (uri.getPort() < 0 ? "" : ":" + uri.getPort());
+          scheme + "://" + uri.getHost().toLowerCase(Locale.ROOT) + (port < 0 ? "" : ":" + port);
       if (!seen.add(origin)) {
         throw new IllegalArgumentException(
             "reachability destination '" + name + "' duplicates an earlier origin");

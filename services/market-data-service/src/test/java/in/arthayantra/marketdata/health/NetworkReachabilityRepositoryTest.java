@@ -69,8 +69,33 @@ class NetworkReachabilityRepositoryTest {
   }
 
   @Test
-  @DisplayName("an unreadable open-episode query yields EMPTY rather than throwing")
-  void openEpisodeKeyFailsSoftToEmpty() {
+  @DisplayName("open REPORTS a failed write rather than swallowing it")
+  void openReportsFailure() {
+    // ⚠ Asserting only "it does not throw" DISCARDS the result, which is the same mocked-seam
+    // tautology this class was created to close — just moved to the other method. Changing the
+    // catch branch to return true would have kept every other test green while restoring complete
+    // episode loss, because every caller-side test mocks this repository.
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.update(anyString(), any(Object[].class)))
+        .thenThrow(new DataAccessResourceFailureException("connection reset"));
+
+    assertThat(new NetworkReachabilityRepository(jdbc).open("reach-1", T0, 5, 3, 3, "kite", "d"))
+        .isFalse();
+  }
+
+  @Test
+  @DisplayName("open reports success when the write lands")
+  void openReportsSuccess() {
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
+
+    assertThat(new NetworkReachabilityRepository(jdbc).open("reach-1", T0, 5, 3, 3, "kite", "d"))
+        .isTrue();
+  }
+
+  @Test
+  @DisplayName("an unreadable open-episode query reports UNKNOWN, never a false 'nothing is open'")
+  void openEpisodeReportsUnknownOnReadFailure() {
     // ⚠ This is the fail-soft with a real consequence: the next pass then believes nothing is open
     // and may try to open a second episode. The unique partial index in V061 is what stops that
     // becoming two overlapping open rows — see NetworkReachabilityEpisodeIntegrationTest.
@@ -78,6 +103,7 @@ class NetworkReachabilityRepositoryTest {
     when(jdbc.query(anyString(), any(RowMapper.class)))
         .thenThrow(new DataAccessResourceFailureException("connection reset"));
 
-    assertThat(new NetworkReachabilityRepository(jdbc).openEpisodeKey()).isEmpty();
+    var lookup = new NetworkReachabilityRepository(jdbc).openEpisode();
+    assertThat(lookup.readSucceeded()).isFalse();
   }
 }

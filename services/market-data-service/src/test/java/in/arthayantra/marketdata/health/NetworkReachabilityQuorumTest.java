@@ -19,7 +19,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -52,7 +51,7 @@ class NetworkReachabilityQuorumTest {
   @DisplayName("at or above the quorum, with nothing open, OPENS an episode")
   void opensAnEpisodeWhenTheQuorumIsMet() {
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisodeKey()).thenReturn(Optional.empty());
+    when(repo.openEpisode()).thenReturn(none());
     when(repo.open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString()))
         .thenReturn(true);
 
@@ -65,7 +64,7 @@ class NetworkReachabilityQuorumTest {
   @DisplayName("BELOW the quorum is a vendor problem and opens nothing")
   void doesNotOpenBelowTheQuorum() {
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisodeKey()).thenReturn(Optional.empty());
+    when(repo.openEpisode()).thenReturn(none());
 
     // Two of five — the 'one vendor is down' shape. An implementation without a quorum opens here.
     probe(repo, 3, "kite", "telegram").probe();
@@ -78,7 +77,7 @@ class NetworkReachabilityQuorumTest {
   @DisplayName("the failed destination NAMES and the THRESHOLD in force are both recorded")
   void recordsWhichDestinationsFailedAndTheThreshold() {
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisodeKey()).thenReturn(Optional.empty());
+    when(repo.openEpisode()).thenReturn(none());
 
     probe(repo, 3, "kite", "telegram", "ntfy").probe();
 
@@ -92,7 +91,7 @@ class NetworkReachabilityQuorumTest {
   @DisplayName("an episode already open is not re-opened while the outage continues")
   void doesNotReopenAnOpenEpisode() {
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisodeKey()).thenReturn(Optional.of("reach-1"));
+    when(repo.openEpisode()).thenReturn(open("reach-1"));
 
     probe(repo, 3, "kite", "telegram", "ntfy").probe();
 
@@ -105,7 +104,7 @@ class NetworkReachabilityQuorumTest {
   @DisplayName("recovery below the quorum CLOSES the open episode")
   void closesOnRecovery() {
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisodeKey()).thenReturn(Optional.of("reach-1"));
+    when(repo.openEpisode()).thenReturn(open("reach-1"));
     when(repo.close(anyString(), any())).thenReturn(true);
 
     probe(repo, 3).probe();
@@ -128,7 +127,7 @@ class NetworkReachabilityQuorumTest {
     // the exact moment the host is going down: the incident this table exists to record, corrupted
     // by the recorder.
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisodeKey()).thenReturn(Optional.of("reach-1"));
+    when(repo.openEpisode()).thenReturn(open("reach-1"));
 
     Thread.currentThread().interrupt();
     try {
@@ -141,7 +140,7 @@ class NetworkReachabilityQuorumTest {
     verify(repo, never()).close(anyString(), any());
     verify(repo, never())
         .open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString());
-    verify(repo, never()).openEpisodeKey();
+    verify(repo, never()).openEpisode();
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -152,7 +151,7 @@ class NetworkReachabilityQuorumTest {
   @DisplayName("a failed close is retried with the instant recovery was ACTUALLY observed")
   void retriesAFailedCloseWithTheOriginalRecoveryInstant() {
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisodeKey()).thenReturn(Optional.of("reach-1"));
+    when(repo.openEpisode()).thenReturn(open("reach-1"));
     when(repo.close(anyString(), any())).thenReturn(false).thenReturn(true);
 
     MutableClock clock = new MutableClock(T0);
@@ -174,9 +173,8 @@ class NetworkReachabilityQuorumTest {
     // a new outage then finds an episode already open and writes nothing, so two separate incidents
     // are recorded as one long one that never happened — authoritative-looking and wrong.
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisodeKey())
-        .thenReturn(Optional.of("reach-1")) // pass 1: still open, we observe recovery
-        .thenReturn(Optional.empty()); // pass 2: the retry landed, so nothing is open
+    // Pass 2 still reports it OPEN, which is what a failed close actually leaves behind.
+    when(repo.openEpisode()).thenReturn(open("reach-1"));
     when(repo.close(anyString(), any())).thenReturn(false).thenReturn(true);
 
     MutableClock clock = new MutableClock(T0);
@@ -197,7 +195,7 @@ class NetworkReachabilityQuorumTest {
     // The start instant is retained, so the retry re-derives the same episode key — which is what
     // makes ON CONFLICT (episode_key) DO NOTHING an idempotent retry rather than a second episode.
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisodeKey()).thenReturn(Optional.empty());
+    when(repo.openEpisode()).thenReturn(none());
 
     MutableClock clock = new MutableClock(T0);
     TestProbe p = new TestProbe(repo, 3, false, clock);
@@ -253,7 +251,7 @@ class NetworkReachabilityQuorumTest {
     // the recovery pass finds nothing open, and the incident leaves NO trace at all. A wrong
     // duration is a flawed record; this is no record.
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisodeKey()).thenReturn(Optional.empty());
+    when(repo.openEpisode()).thenReturn(none());
     when(repo.open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString()))
         .thenReturn(false)
         .thenReturn(true);
@@ -344,7 +342,7 @@ class NetworkReachabilityQuorumTest {
 
     new TestProbe(repo, 3, true, "kite", "telegram", "ntfy").probe();
 
-    verify(repo, never()).openEpisodeKey();
+    verify(repo, never()).openEpisode();
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -353,6 +351,92 @@ class NetworkReachabilityQuorumTest {
     return new NetworkReachabilityProbe(
         mock(NetworkReachabilityRepository.class), new SimpleMeterRegistry(), FIXED, true, 5, spec,
         quorum);
+  }
+
+  private static NetworkReachabilityRepository.OpenEpisodeLookup none() {
+    return new NetworkReachabilityRepository.OpenEpisodeLookup(true, null);
+  }
+
+  private static NetworkReachabilityRepository.OpenEpisodeLookup open(String key) {
+    return new NetworkReachabilityRepository.OpenEpisodeLookup(true, key);
+  }
+
+  /** A lookup that FAILED — "I could not find out", which is not the same as "nothing is open". */
+  private static NetworkReachabilityRepository.OpenEpisodeLookup unknown() {
+    return new NetworkReachabilityRepository.OpenEpisodeLookup(false, null);
+  }
+
+  @Test
+  @DisplayName("an UNREADABLE episode state makes no transition and does not discard the recovery")
+  void anUnreadableLookupDefersRatherThanDiscarding() {
+    // ⚠ "I could not find out" is not "nothing is open". Treating a failed read as a clean slate
+    // silently threw away an observed recovery: the next pass then closed the real episode minutes
+    // late, or merged a new outage into it.
+    NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
+    when(repo.openEpisode()).thenReturn(unknown()).thenReturn(open("reach-1"));
+    when(repo.close(anyString(), any())).thenReturn(true);
+
+    MutableClock clock = new MutableClock(T0);
+    TestProbe p = new TestProbe(repo, 3, false, clock);
+
+    p.probe(); // recovery observed at T0, but episode state is unreadable
+    clock.set(T0.plusSeconds(300));
+    p.probe(); // readable now
+
+    // Closed at T0 — when recovery actually happened — not at the later pass that managed to write.
+    verify(repo).close(eq("reach-1"), eq(T0));
+  }
+
+  @Test
+  @DisplayName("an unreadable lookup writes NOTHING at all that pass")
+  void anUnreadableLookupWritesNothing() {
+    NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
+    when(repo.openEpisode()).thenReturn(unknown());
+
+    probe(repo, 3, "kite", "telegram", "ntfy").probe();
+
+    verify(repo, never())
+        .open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString());
+    verify(repo, never()).close(anyString(), any());
+  }
+
+  @Test
+  @DisplayName("a retained failed open keeps its ORIGINAL evidence, not a later pass's")
+  void aRetainedOpenKeepsItsOriginalEvidence() {
+    // ⚠ started_at and the counts must describe the SAME moment. Rebuilding the pending episode
+    // each pass kept the original start but overwrote the evidence, so the row would claim a
+    // failure count that was never true at the instant it names as the start.
+    NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
+    when(repo.openEpisode()).thenReturn(none());
+    when(repo.open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString()))
+        .thenReturn(false)
+        .thenReturn(true);
+
+    MutableClock clock = new MutableClock(T0);
+    TestProbe p = new TestProbe(repo, 3, false, clock);
+    p.failing("kite", "telegram", "ntfy"); // 3 of 5
+    p.probe(); // the opening write fails
+
+    clock.set(T0.plusSeconds(300));
+    p.failing("kite", "telegram", "ntfy", "nse"); // now 4 of 5
+    p.probe(); // retried
+
+    // BOTH attempts carry the first observation: 3 failures, those three names.
+    verify(repo, times(2))
+        .open(eq("reach-" + T0.toEpochMilli()), eq(T0), eq(5), eq(3), eq(3),
+            eq("kite,telegram,ntfy"), anyString());
+  }
+
+  @Test
+  @DisplayName("an explicit default port is the SAME origin — one vendor cannot fill the quorum")
+  void refusesADuplicateOriginWrittenWithAnExplicitDefaultPort() {
+    // https://x and https://x:443 are one origin. Accepted as two, a single vendor inflates
+    // probed_count and can satisfy the majority alone — defeating the quorum's whole purpose.
+    assertThatThrownBy(
+            () -> newProbe("a=https://api.kite.trade,b=https://api.kite.trade:443,c=https://x.test",
+                2))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("duplicates");
   }
 
   private static TestProbe probe(

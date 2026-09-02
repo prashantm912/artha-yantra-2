@@ -106,7 +106,7 @@ class NetworkReachabilityEpisodeIntegrationTest extends MarketDataIntegrationTes
     repository.open("reach-1", T0, 5, 3, 3, "kite,telegram,ntfy", "quorum 3/5 unreachable");
 
     assertThat(repository.close("reach-1", T0.plusSeconds(600))).isTrue();
-    assertThat(repository.openEpisodeKey()).isEmpty();
+    assertThat(repository.openEpisode().key()).isNull();
     // Already closed is still SUCCESS — the desired state holds, so there is nothing to retry.
     assertThat(repository.close("reach-1", T0.plusSeconds(900))).isTrue();
   }

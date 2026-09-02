@@ -1,7 +1,6 @@
 package in.arthayantra.marketdata.health;
 
 import java.time.Instant;
-import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -27,26 +26,47 @@ public class NetworkReachabilityRepository {
     this.jdbc = jdbc;
   }
 
-  /** The currently-open episode key, if one exists. At most one is open by construction. */
-  public Optional<String> openEpisodeKey() {
+  /**
+   * The currently-open episode, if any. At most one is open by construction.
+   *
+   * <p>⚠ TRI-STATE ON PURPOSE, and an {@code Optional} here was a real defect. "No episode is
+   * open" and "I could not find out" are different facts, and collapsing them made a read failure
+   * indistinguishable from a clean slate — so an observed RECOVERY was silently discarded, and the
+   * next pass either closed the real episode minutes late or, if another outage had begun, merged
+   * two incidents into one row. The caller must be able to decline to act.
+   */
+  public OpenEpisodeLookup openEpisode() {
     try {
-      return jdbc
-          .query(
-              "SELECT episode_key FROM network_reachability_episodes"
-                  + " WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
-              (rs, i) -> rs.getString(1))
-          .stream()
-          .findFirst();
+      String key =
+          jdbc
+              .query(
+                  "SELECT episode_key FROM network_reachability_episodes"
+                      + " WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+                  (rs, i) -> rs.getString(1))
+              .stream()
+              .findFirst()
+              .orElse(null);
+      return new OpenEpisodeLookup(true, key);
     } catch (DataAccessException e) {
       log.warn("reachability: could not read the open episode: {}", e.toString());
-      // ⚠️ EMPTY, not a throw — but note this is the one fail-soft with a visible consequence: a
-      // DB blip here makes the next pass believe no episode is open, so it may open a second one.
-      // The UNIQUE PARTIAL INDEX on (ended_at IS NULL) is what stops that becoming two overlapping
-      // open rows. NOT the UNIQUE on episode_key, which this comment used to name: each attempt
-      // mints a key from its own start millisecond, so the second insert carries a different key.
-      return Optional.empty();
+      // ⚠️ UNKNOWN, not a throw and not "none". The caller makes no transition on an unknown
+      // read, so a blip here can no longer be mistaken for a clean slate. Should a second open
+      // ever be attempted anyway, the UNIQUE PARTIAL INDEX on (ended_at IS NULL) is the backstop —
+      // NOT the UNIQUE on episode_key, which this comment used to name: each attempt mints a key
+      // from its own start millisecond, so a second insert carries a different key.
+      return new OpenEpisodeLookup(false, null);
     }
   }
+
+  /**
+   * The outcome of an open-episode lookup.
+   *
+   * @param readSucceeded whether the database answered at all; {@code false} means UNKNOWN, and the
+   *     caller must not treat it as "nothing is open"
+   * @param key the open episode's key, or {@code null} when none is open (only meaningful when
+   *     {@code readSucceeded})
+   */
+  public record OpenEpisodeLookup(boolean readSucceeded, String key) {}
 
   /**
    * Open an episode.

@@ -53,6 +53,20 @@ third bucket that must be tombstoned by **neither**. Getting this wrong reactiva
 
 ---
 
+## 1a. ⚠️ SUPERSEDED SAME DAY — the grammar-synthesis premise does not hold
+
+Open question 2 below was measured before any code was written, and the answer changes this plan's shape. Full receipt: `docs/signal-analysis/2026-09-02-h26-ua2-identity-join-measurement.md`.
+
+**`exchange_token` joins 100.00% on BOTH halves** — 9,694/9,694 NSE_EQ and 31,836/31,836 NSE_FO. **Nothing needs to synthesise a Kite tradingsymbol.**
+
+For equities the symbol difference is entirely Kite's series-suffix convention (`-SG`, `-ST`, `-BE`), and the rule is exact — bare for EQ, else `<symbol>-<instrument_type>` — at **100.00%, zero unmatched**. That also generalises [[H29]]/[[H36]]: the `-BE` twin is one instance of a convention spanning SG, N0, SM, BE, GS and ST.
+
+`trading_symbol` and `isin` are **already in `UpstoxInstrumentMaster` and parsed on every load**, so A2-2 is a retention change, not a new parser.
+
+**What this does to the units below:** A2-3 stops being "validate a risky synthesis" and becomes "confirm a measured join stays at 100% across sessions and an expiry roll". Smaller and much safer — but **not deleted**, because a join that is perfect today is exactly what an expiry roll or a rename could degrade, and that is what a soak is for. Everything in §2 about counters, durability and the weekly expiry still applies to the new form.
+
+⚠️ **Do NOT read this as "the risk is gone".** Three things are unmeasured and each could restore it: BSE entirely (and BSE is where the BE rule already does not apply), the reverse direction (rows of ours with no Upstox counterpart, which is what tombstone scoping turns on), and `exchange_token` UNIQUENESS — 30 active NSE tokens map to more than one row, so the join key needs a tie-break rule before it can be trusted as identity.
+
 ## 2. The shadow diff — the crux, and what would make it worthless
 
 The parent plan's verify is `mismatch_total = 0 across ≥5 sessions`. That is necessary and **not

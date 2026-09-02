@@ -41,7 +41,9 @@ public class NetworkReachabilityRepository {
       log.warn("reachability: could not read the open episode: {}", e.toString());
       // ⚠️ EMPTY, not a throw — but note this is the one fail-soft with a visible consequence: a
       // DB blip here makes the next pass believe no episode is open, so it may open a second one.
-      // The UNIQUE key on episode_key is what stops that becoming two overlapping open rows.
+      // The UNIQUE PARTIAL INDEX on (ended_at IS NULL) is what stops that becoming two overlapping
+      // open rows. NOT the UNIQUE on episode_key, which this comment used to name: each attempt
+      // mints a key from its own start millisecond, so the second insert carries a different key.
       return Optional.empty();
     }
   }
@@ -56,8 +58,14 @@ public class NetworkReachabilityRepository {
    * key; the {@code WHERE NOT EXISTS} does, and the unique partial index in V061 enforces it even
    * if this predicate races. An earlier revision had only the first guard and claimed it delivered
    * both.
+   *
+   * @return whether the row is now present — {@code false} ONLY when the write failed. The caller
+   *     needs this: if an outage RECOVERS before its opening write ever lands, nothing in the
+   *     database refers to it and the incident would be lost entirely, which is the one outcome
+   *     this table exists to prevent. Zero rows written because an episode is already open is
+   *     SUCCESS, not failure — there is nothing left to retry.
    */
-  public void open(
+  public boolean open(
       String episodeKey,
       Instant startedAt,
       int probedCount,
@@ -81,8 +89,10 @@ public class NetworkReachabilityRepository {
           quorumCount,
           failedNames,
           detail);
+      return true;
     } catch (DataAccessException e) {
       log.warn("reachability: could not open episode {}: {}", episodeKey, e.toString());
+      return false;
     }
   }
 
@@ -102,7 +112,14 @@ public class NetworkReachabilityRepository {
   public boolean close(String episodeKey, Instant endedAt) {
     try {
       jdbc.update(
-          "UPDATE network_reachability_episodes SET ended_at = ?"
+          // ⚠️ GREATEST, because a retained recovery instant is REPLAYED unchanged and the row
+          // carries CHECK (ended_at >= started_at). If the host clock steps backwards between the
+          // start of an outage and the observation of its recovery, an unclamped retry violates
+          // that constraint, fails, is retained, and is retried with the SAME invalid value
+          // forever — leaving the episode permanently open and merging every later outage into
+          // it. Clamping turns an unrecoverable state into a zero-length episode.
+          "UPDATE network_reachability_episodes"
+              + " SET ended_at = GREATEST(CAST(? AS TIMESTAMPTZ), started_at)"
               + " WHERE episode_key = ? AND ended_at IS NULL",
           java.sql.Timestamp.from(endedAt),
           episodeKey);

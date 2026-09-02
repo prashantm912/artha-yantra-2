@@ -131,6 +131,27 @@ class NetworkReachabilityEpisodeIntegrationTest extends MarketDataIntegrationTes
         .isInstanceOf(DataIntegrityViolationException.class);
   }
 
+  @Test
+  void aBackwardClockCannotPermanENTLYPoisonAnEpisode() {
+    // ⚠ The retained recovery instant is REPLAYED unchanged on every retry. If the host clock steps
+    // backwards between an outage starting and its recovery being observed, an unclamped value
+    // violates CHECK (ended_at >= started_at) — so the write fails, is retained, and is retried with
+    // the same invalid value forever, leaving the row open and merging every later outage into it.
+    // Clamping makes the worst case a zero-length episode instead of an unrecoverable one.
+    repository.open("reach-1", T0, 5, 3, 3, "kite,telegram,ntfy", "quorum 3/5 unreachable");
+
+    assertThat(repository.close("reach-1", T0.minusSeconds(600))).isTrue();
+
+    assertThat(openRowCount()).isZero();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT ended_at = started_at FROM network_reachability_episodes"
+                    + " WHERE episode_key = ?",
+                Boolean.class,
+                "reach-1"))
+        .isTrue();
+  }
+
   private void insertOpen(String key, Instant startedAt) {
     jdbc.update(
         "INSERT INTO network_reachability_episodes (episode_key, started_at, probed_count,"

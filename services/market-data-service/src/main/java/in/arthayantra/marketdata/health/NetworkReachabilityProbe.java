@@ -101,6 +101,16 @@ public class NetworkReachabilityProbe {
    */
   private PendingClose pendingClose;
 
+  /**
+   * An episode whose OPENING write never landed.
+   *
+   * <p>⚠ Without this, an outage that recovers before its insert succeeds is lost completely: the
+   * recovery pass finds nothing open, clears the retained start, and writes nothing — so the
+   * incident leaves no trace at all. That is strictly worse than a wrong duration, and it is the
+   * single outcome this table exists to prevent.
+   */
+  private PendingOpen pendingOpen;
+
   public NetworkReachabilityProbe(
       NetworkReachabilityRepository repository,
       MeterRegistry meterRegistry,
@@ -124,10 +134,15 @@ public class NetworkReachabilityProbe {
           "reachability quorum " + quorum + " exceeds the " + this.destinations.size()
               + " configured destinations — it could never be met");
     }
-    int floor = this.destinations.size() > 1 ? 2 : 1;
-    if (quorum < floor) {
+    // A MAJORITY, not merely "more than one". Both this class and the migration state the
+    // diagnosis as "most or all failing together is the host"; accepting 2-of-5 would let the
+    // implementation contradict its own documented contract, which is the misreading the
+    // 08-19 / 08-20 / 09-01 incidents cost. Integer division is deliberate: for 5 destinations
+    // this requires 3, for 2 it requires 2, for 1 it requires 1.
+    int majority = this.destinations.size() / 2 + 1;
+    if (quorum < majority) {
       throw new IllegalArgumentException(
-          "reachability quorum must be at least " + floor + " for "
+          "reachability quorum must be a majority — at least " + majority + " of "
               + this.destinations.size() + " destinations; got " + quorum);
     }
     this.quorum = quorum;
@@ -195,17 +210,39 @@ public class NetworkReachabilityProbe {
       }
       if (openKey == null) {
         Instant startedAt = outageFirstObservedAt;
-        String key = "reach-" + startedAt.toEpochMilli();
-        String names = String.join(",", failed);
+        PendingOpen episode =
+            new PendingOpen(
+                "reach-" + startedAt.toEpochMilli(),
+                startedAt,
+                destinations.size(),
+                failed.size(),
+                quorum,
+                String.join(",", failed),
+                "quorum " + failed.size() + "/" + destinations.size() + " unreachable"
+                    + " (threshold " + quorum + ")");
         log.warn(
             "reachability: {} of {} destinations unreachable ({}) — opening episode {}."
                 + " This is the HOST network, not one vendor.",
-            failed.size(), destinations.size(), names, key);
-        repository.open(key, startedAt, destinations.size(), failed.size(), quorum, names,
-            "quorum " + failed.size() + "/" + destinations.size() + " unreachable"
-                + " (threshold " + quorum + ")");
+            failed.size(), destinations.size(), episode.failedNames(), episode.key());
+        pendingOpen = write(episode) ? null : episode;
+      } else {
+        pendingOpen = null;
       }
     } else {
+      if (openKey == null && pendingOpen != null) {
+        // The outage ended before its opening write ever landed. Record it now as a COMPLETED
+        // episode rather than losing the incident: the start is the instant the outage was first
+        // observed, the end is now.
+        log.warn(
+            "reachability: recording episode {} retrospectively — its opening write never landed",
+            pendingOpen.key());
+        if (write(pendingOpen)) {
+          if (!repository.close(pendingOpen.key(), now)) {
+            pendingClose = new PendingClose(pendingOpen.key(), now);
+          }
+          pendingOpen = null;
+        }
+      }
       outageFirstObservedAt = null;
       if (openKey != null) {
         Instant recoveredAt =
@@ -226,8 +263,24 @@ public class NetworkReachabilityProbe {
     }
   }
 
+  private boolean write(PendingOpen e) {
+    return repository.open(
+        e.key(), e.startedAt(), e.probed(), e.unreachable(), e.quorum(), e.failedNames(),
+        e.detail());
+  }
+
   /** An observed recovery whose write has not landed yet. */
   private record PendingClose(String key, Instant at) {}
+
+  /** An observed outage whose opening write has not landed yet. */
+  private record PendingOpen(
+      String key,
+      Instant startedAt,
+      int probed,
+      int unreachable,
+      int quorum,
+      String failedNames,
+      String detail) {}
 
   /**
    * ⚠️ ANY HTTP RESPONSE COUNTS AS REACHABLE, including 4xx and 5xx. The question is whether packets

@@ -53,6 +53,8 @@ class NetworkReachabilityQuorumTest {
   void opensAnEpisodeWhenTheQuorumIsMet() {
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
     when(repo.openEpisodeKey()).thenReturn(Optional.empty());
+    when(repo.open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString()))
+        .thenReturn(true);
 
     probe(repo, 3, "kite", "telegram", "ntfy").probe();
 
@@ -225,13 +227,52 @@ class NetworkReachabilityQuorumTest {
   }
 
   @Test
-  @DisplayName("a quorum of one is refused when several destinations are configured")
-  void refusesAQuorumOfOneAcrossManyDestinations() {
-    // One destination failing is that VENDOR. Filing it as the host is the exact misreading the
-    // 08-19 / 08-20 / 09-01 incidents cost, so the config that would produce it is refused.
+  @DisplayName("a quorum of ONE is refused — that shape is a vendor outage, not a host one")
+  void refusesAQuorumOfOne() {
     assertThatThrownBy(() -> new TestProbe(mock(NetworkReachabilityRepository.class), 1, false))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("at least 2");
+        .hasMessageContaining("majority");
+  }
+
+  @Test
+  @DisplayName("a quorum of TWO of five is refused — 'most or all' means a majority")
+  void refusesAQuorumBelowAMajority() {
+    // Separate from the quorum-of-one case on purpose. 2-of-5 is the boundary that actually moved:
+    // it passed the earlier "at least 2" floor while still contradicting the diagnosis both this
+    // class and the migration state. A single method asserting both would stop at the first and
+    // never demonstrate this one.
+    assertThatThrownBy(() -> new TestProbe(mock(NetworkReachabilityRepository.class), 2, false))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("at least 3");
+  }
+
+  @Test
+  @DisplayName("an outage whose OPENING write never landed is still recorded, not lost")
+  void recordsAnOutageWhoseOpeningWriteNeverLanded() {
+    // ⚠ The worst outcome available to this class: the outage recovers before its insert succeeds,
+    // the recovery pass finds nothing open, and the incident leaves NO trace at all. A wrong
+    // duration is a flawed record; this is no record.
+    NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
+    when(repo.openEpisodeKey()).thenReturn(Optional.empty());
+    when(repo.open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString()))
+        .thenReturn(false)
+        .thenReturn(true);
+    when(repo.close(anyString(), any())).thenReturn(true);
+
+    MutableClock clock = new MutableClock(T0);
+    TestProbe p = new TestProbe(repo, 3, false, clock);
+    p.failing("kite", "telegram", "ntfy");
+    p.probe(); // outage observed; the opening write fails
+
+    clock.set(T0.plusSeconds(300));
+    p.failing(); // recovered before the episode was ever written
+    p.probe();
+
+    // Written retrospectively under the ORIGINAL start, then closed at the observed recovery.
+    verify(repo, times(2))
+        .open(eq("reach-" + T0.toEpochMilli()), eq(T0), anyInt(), anyInt(), anyInt(), anyString(),
+            anyString());
+    verify(repo).close(eq("reach-" + T0.toEpochMilli()), eq(T0.plusSeconds(300)));
   }
 
   @Test

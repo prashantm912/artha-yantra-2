@@ -353,6 +353,111 @@ class NetworkReachabilityQuorumTest {
         quorum);
   }
 
+  // -------------------------------------------------------------------------------------------
+  // Sequences that cross an UNKNOWN lookup. Each of these lost an outage entirely, and none was
+  // reachable by the earlier tests: they all assumed episode state was readable on every pass.
+  // -------------------------------------------------------------------------------------------
+
+  @Test
+  @DisplayName("an outage whose FIRST lookup is unreadable is still recorded once it recovers")
+  void anOutageWhoseFirstLookupIsUnreadableIsStillRecorded() {
+    // ⚠ The evidence must be captured BEFORE the lookup. Built after it, this outage retained only
+    // its start; the recovery pass then found nothing pending, cleared that start, and wrote
+    // nothing at all — the incident vanished with no trace and no error.
+    NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
+    when(repo.openEpisode()).thenReturn(unknown()).thenReturn(none());
+    when(repo.open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString()))
+        .thenReturn(true);
+    when(repo.close(anyString(), any())).thenReturn(true);
+
+    MutableClock clock = new MutableClock(T0);
+    TestProbe p = new TestProbe(repo, 3, false, clock);
+    p.failing("kite", "telegram", "ntfy");
+    p.probe(); // down, but episode state is unreadable
+
+    clock.set(T0.plusSeconds(300));
+    p.failing(); // recovered before any other down pass
+    p.probe();
+
+    verify(repo)
+        .open(eq("reach-" + T0.toEpochMilli()), eq(T0), eq(5), eq(3), eq(3),
+            eq("kite,telegram,ntfy"), anyString());
+    verify(repo).close(eq("reach-" + T0.toEpochMilli()), eq(T0.plusSeconds(300)));
+  }
+
+  @Test
+  @DisplayName("an unreadable RECOVERY pass does not leak the old start into the next outage")
+  void anUnreadableRecoveryDoesNotLeakTheOldStart() {
+    // ⚠ The killer detail: reusing the old start also reuses the old episode KEY, and that insert
+    // is an ON CONFLICT no-op against the already-closed row. The write reports SUCCESS and the
+    // new outage is never recorded — a silent loss wearing a passing result.
+    NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
+    when(repo.openEpisode())
+        .thenReturn(none()) // pass 1: down, nothing open yet
+        .thenReturn(unknown()) // pass 2: recovered, but state unreadable
+        .thenReturn(open("reach-" + T0.toEpochMilli())); // pass 3: down again, old row still open
+    when(repo.open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString()))
+        .thenReturn(true);
+    when(repo.close(anyString(), any())).thenReturn(true);
+
+    MutableClock clock = new MutableClock(T0);
+    TestProbe p = new TestProbe(repo, 3, false, clock);
+    p.failing("kite", "telegram", "ntfy");
+    p.probe(); // opens reach-T0
+
+    clock.set(T0.plusSeconds(300));
+    p.failing();
+    p.probe(); // recovery observed; lookup unreadable
+
+    clock.set(T0.plusSeconds(600));
+    p.failing("kite", "telegram", "ntfy");
+    p.probe(); // a NEW outage
+
+    // The second episode carries its OWN start and key, not the first one's.
+    verify(repo)
+        .open(eq("reach-" + T0.plusSeconds(600).toEpochMilli()), eq(T0.plusSeconds(600)), anyInt(),
+            anyInt(), anyInt(), anyString(), anyString());
+  }
+
+  @Test
+  @DisplayName("a durable retrospective open is not replayed into the NEXT outage")
+  void aDurableRetrospectiveOpenIsNotReplayed() {
+    // ⚠ Distinct from the bounded merge accepted while a close keeps failing: here the close HAS
+    // landed. The stale pending object survived it and was replayed as the next outage, whose
+    // insert then no-opped on the old key — losing the new incident.
+    NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
+    when(repo.openEpisode())
+        .thenReturn(none()) // pass 1: down; the opening write fails
+        .thenReturn(none()) // pass 2: recovered; retrospective write lands, close fails
+        .thenReturn(open("reach-" + T0.toEpochMilli())) // pass 3: still recovered; close retried
+        .thenReturn(none()); // pass 4: a NEW outage
+    when(repo.open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString()))
+        .thenReturn(false) // pass 1 fails
+        .thenReturn(true); // every later write lands
+    when(repo.close(anyString(), any()))
+        .thenReturn(false) // pass 2 close fails
+        .thenReturn(true);
+
+    MutableClock clock = new MutableClock(T0);
+    TestProbe p = new TestProbe(repo, 3, false, clock);
+    p.failing("kite", "telegram", "ntfy");
+    p.probe();
+
+    clock.set(T0.plusSeconds(300));
+    p.failing();
+    p.probe();
+    clock.set(T0.plusSeconds(600));
+    p.probe();
+
+    clock.set(T0.plusSeconds(900));
+    p.failing("kite", "telegram", "ntfy");
+    p.probe();
+
+    verify(repo)
+        .open(eq("reach-" + T0.plusSeconds(900).toEpochMilli()), eq(T0.plusSeconds(900)), anyInt(),
+            anyInt(), anyInt(), anyString(), anyString());
+  }
+
   private static NetworkReachabilityRepository.OpenEpisodeLookup none() {
     return new NetworkReachabilityRepository.OpenEpisodeLookup(true, null);
   }

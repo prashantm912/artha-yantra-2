@@ -202,28 +202,67 @@ public class NetworkReachabilityProbe {
     Instant now = clock.instant();
     boolean hostNetworkDown = failed.size() >= quorum;
 
-    // Both observations are recorded BEFORE anything can decline to act, so a pass that cannot
-    // reach the database still contributes the time at which the world changed.
-    if (hostNetworkDown && outageFirstObservedAt == null) {
-      outageFirstObservedAt = now;
-    }
-    if (!hostNetworkDown && recoveryObservedAt == null) {
-      recoveryObservedAt = now;
+    // ---------------------------------------------------------------------------------------
+    // OBSERVE — touches NO database. Everything this pass learned is retained here, so a pass
+    // that cannot reach the database still contributes what it saw.
+    //
+    // ⚠ The split is load-bearing, and getting it wrong lost outages three different ways. The
+    // ACT phase below returns early when episode state is unreadable; anything recorded after
+    // that point is simply not recorded on such a pass.
+    // ---------------------------------------------------------------------------------------
+    if (hostNetworkDown) {
+      if (outageFirstObservedAt == null) {
+        outageFirstObservedAt = now;
+      }
+      // ⚠ The evidence is captured HERE, not after the lookup. Built later, an outage whose very
+      // first lookup was unreadable retained only its start; the recovery pass then found nothing
+      // pending, cleared that start and wrote nothing — the incident vanished completely.
+      if (pendingOpen == null) {
+        pendingOpen =
+            new PendingOpen(
+                "reach-" + outageFirstObservedAt.toEpochMilli(),
+                outageFirstObservedAt,
+                destinations.size(),
+                failed.size(),
+                quorum,
+                String.join(",", failed),
+                "quorum " + failed.size() + "/" + destinations.size() + " unreachable"
+                    + " (threshold " + quorum + ")");
+        log.warn(
+            "reachability: {} of {} destinations unreachable ({}) — opening episode {}."
+                + " This is the HOST network, not one vendor.",
+            failed.size(), destinations.size(), pendingOpen.failedNames(), pendingOpen.key());
+      }
+    } else {
+      if (recoveryObservedAt == null) {
+        recoveryObservedAt = now;
+      }
+      // ⚠ The outage observation ENDS here, not after the lookup. Cleared later, an unreadable
+      // recovery pass returned early and left the old start standing; the NEXT outage then reused
+      // it as both start and episode key, and that insert is an ON CONFLICT no-op against the
+      // already-closed row — so the new outage reported success and was never recorded.
+      outageFirstObservedAt = null;
+      if (!failed.isEmpty()) {
+        // Below quorum: a vendor problem, deliberately NOT an episode. Logged so it is still
+        // visible, because "one vendor is down" is a real finding — it is just a different one.
+        log.info("reachability: {} unreachable ({}) — below the {} quorum, treating as vendor-local",
+            failed.size(), String.join(",", failed), quorum);
+      }
     }
 
+    // ---------------------------------------------------------------------------------------
+    // ACT — every database transition, and every one of them may decline.
+    // ---------------------------------------------------------------------------------------
     NetworkReachabilityRepository.OpenEpisodeLookup lookup = repository.openEpisode();
     if (!lookup.readSucceeded()) {
-      // ⚠ UNKNOWN, not "nothing is open". Acting on a failed read is how an observed recovery used
-      // to be discarded entirely; the retained instants above mean the next pass records it at the
-      // right time instead.
+      // UNKNOWN, not "nothing is open". Everything observed above survives to the next pass.
       log.warn("reachability: episode state unreadable — no transition this pass");
       return;
     }
     String openKey = lookup.key();
 
-    // An unrecorded recovery is settled FIRST, whatever the current state. Deferring it into the
-    // recovery branch would let a new outage that begins before the close lands be absorbed into
-    // the previous episode, producing one long incident that never happened.
+    // An unrecorded recovery is settled FIRST, whatever the current state. Deferring it would let
+    // a new outage beginning before the close lands be absorbed into the previous episode.
     if (recoveryObservedAt != null) {
       if (openKey != null) {
         log.info("reachability: recovered — closing episode {}", openKey);
@@ -237,51 +276,29 @@ public class NetworkReachabilityProbe {
         log.warn(
             "reachability: recording episode {} retrospectively — its opening write never landed",
             pendingOpen.key());
-        if (write(pendingOpen) && repository.close(pendingOpen.key(), recoveryObservedAt)) {
+        if (write(pendingOpen)) {
+          // ⚠ Cleared the moment the row is DURABLE, not once the close also lands. Held past
+          // that, a stale pending object survives the close and is then replayed as the NEXT
+          // outage — whose insert is an ON CONFLICT no-op, so that outage is silently lost.
+          String recorded = pendingOpen.key();
           pendingOpen = null;
-          recoveryObservedAt = null;
+          if (repository.close(recorded, recoveryObservedAt)) {
+            recoveryObservedAt = null;
+          }
         }
       } else {
         recoveryObservedAt = null;
       }
     }
 
-    if (hostNetworkDown) {
-      if (openKey == null) {
-        // ⚠ Only built when there is nothing retained. Rebuilding it each pass would keep the
-        // ORIGINAL start but overwrite the evidence with a later pass's failed set, so the row
-        // would claim counts that were never true at the moment it names as the start.
-        if (pendingOpen == null) {
-          Instant startedAt = outageFirstObservedAt;
-          pendingOpen =
-              new PendingOpen(
-                  "reach-" + startedAt.toEpochMilli(),
-                  startedAt,
-                  destinations.size(),
-                  failed.size(),
-                  quorum,
-                  String.join(",", failed),
-                  "quorum " + failed.size() + "/" + destinations.size() + " unreachable"
-                      + " (threshold " + quorum + ")");
-          log.warn(
-              "reachability: {} of {} destinations unreachable ({}) — opening episode {}."
-                  + " This is the HOST network, not one vendor.",
-              failed.size(), destinations.size(), pendingOpen.failedNames(), pendingOpen.key());
-        }
-        if (write(pendingOpen)) {
-          pendingOpen = null;
-        }
-      } else {
+    if (hostNetworkDown && pendingOpen != null) {
+      if (openKey != null && openKey.equals(pendingOpen.key())) {
+        pendingOpen = null; // already durable under this very key
+      } else if (openKey == null && write(pendingOpen)) {
         pendingOpen = null;
       }
-    } else {
-      outageFirstObservedAt = null;
-      if (!failed.isEmpty()) {
-        // Below quorum: a vendor problem, deliberately NOT an episode. Logged so it is still
-        // visible, because "one vendor is down" is a real finding — it is just a different one.
-        log.info("reachability: {} unreachable ({}) — below the {} quorum, treating as vendor-local",
-            failed.size(), String.join(",", failed), quorum);
-      }
+      // An open row under a DIFFERENT key means a previous episode's close has not landed yet.
+      // The pending observation is kept for a later pass rather than merged into that row.
     }
   }
 

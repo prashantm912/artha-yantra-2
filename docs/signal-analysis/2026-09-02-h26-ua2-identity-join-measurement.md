@@ -81,14 +81,56 @@ needs none.
   unit, and it is still worth doing — a join that is 100% today can degrade on an expiry roll or a
   rename, which is exactly what a soak is for.
 
+## The three caveats, now measured
+
+They were written as open. All three were closed the same day; the results change one of them from a
+caveat into a **named hazard**.
+
+### 1. `exchange_token` uniqueness — RESOLVED, the key is `(segment, exchange_token)`
+
+30 active NSE tokens map to more than one row. They are **exactly 30 `INDICES` rows colliding with 30
+`NSE` cash rows** — e.g. token `1001` is both `NIFTY 50` and the bond `94SFL28-YL`. Within each
+segment the token is perfectly unique:
+
+| segment | rows | distinct tokens |
+|---|---|---|
+| `NSE` (cash) | 10,096 | **10,096** |
+| `INDICES` | 136 | **136** |
+
+`NFO`, `BSE` and `BFO` are already unique without scoping. **So the join key is
+`(segment, exchange_token)`**, and both sources segment natively (Upstox has `NSE_EQ` and
+`NSE_INDEX` separately), so the collision never arises in a segment-scoped join.
+
+### 2. BSE — measured, and every gap is the same segmentation difference
+
+| population | joined by token |
+|---|---|
+| our BSE cash (12,819) | 12,744 — **99.41%** |
+| our BFO (4,132) | 4,130 — **99.95%** |
+
+⚠️ **Neither shortfall is a data gap.** The 75 BSE misses are **BSE INDICES** — `BANKEX`,
+`MIDCAP INDEX`, `ALLCAP`, `BSE 1000`, `BSE 200 EQUAL WEIGHT` — which Kite files under
+`exchange='BSE'` while Upstox puts them in a separate index segment. The 2 BFO misses are our own
+rows carrying **no `exchange_token` at all**. Both vanish under segment-scoped joining.
+
+### 3. ⚠️ The reverse direction is a REAL HAZARD, and it now has a name
+
+**402 of our 10,096 NSE cash rows have no Upstox counterpart, and every single one is an ETF
+indicative-NAV pseudo-instrument** — `AB10BKINAV`, `ABGSECINAV`, `ABSLBAINAV`, `ABSLLQINAV`,
+`ABSLNNINAV`, `ABSMSCINAV` and so on. All carry `instrument_type = 'EQ'`; Upstox simply does not
+list iNAV instruments.
+
+**An Upstox-authoritative sync with naive tombstoning would deactivate all 402.** This is the
+concrete instance of the failure the three-bucket rule in the U-A2 plan exists to prevent, and it
+means that rule is **necessary rather than defensive**. A test should assert iNAV-count stability
+across a simulated first Upstox-authoritative sync, exactly as one already must for the `-BE` twins.
+
 ## What is NOT claimed
 
-- **NSE only.** `BSE_EQ` (12,744 rows) and `BSE_FO` (4,130) are unmeasured; BSE is where the
-  BE-suffix rule was already known not to apply, so it must be measured separately.
+- **The BE-suffix RULE is still NSE-only.** BSE join coverage is measured above, but the
+  `<symbol>-<instrument_type>` derivation was verified against NSE symbols only, and BSE is where
+  that convention is already known not to apply. Do not assume it transfers.
 - **One snapshot.** Expiry rolls and renames are precisely the events that could break a join, and
   none occurred during this measurement.
-- **Direction not fully measured.** 10,232 of our active NSE rows against 9,694 Upstox `NSE_EQ`, and
-  31,840 NFO against 31,836 — so a small population of ours has no Upstox counterpart. Which rows,
-  and why, is unmeasured and matters for tombstone scoping.
-- **`exchange_token` uniqueness is not proven.** 30 of our active NSE tokens map to more than one
-  row; that is small but non-zero, and a join key with duplicates needs a tie-break rule.
+- **Still one snapshot.** Every figure above, including the three resolved caveats, is a single
+  reading taken with no expiry roll and no rename in flight.

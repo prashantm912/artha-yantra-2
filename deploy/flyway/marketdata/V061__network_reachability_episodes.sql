@@ -23,8 +23,12 @@
 CREATE TABLE network_reachability_episodes (
     id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
-    -- One open episode at a time, enforced rather than assumed: a crash mid-episode must not be able
-    -- to produce two overlapping open rows that each look authoritative.
+    -- Idempotency for a RETRY of the same open: a re-issued insert carrying the same key is a
+    -- no-op rather than a duplicate.
+    -- ⚠️ This UNIQUE does NOT enforce one-open-at-a-time, and an earlier revision of this file
+    -- claimed that it did. The key embeds the episode's start millisecond, so a second pass
+    -- generates a DIFFERENT key and inserts cleanly past it. The rule is enforced by
+    -- network_reachability_one_open_idx below; this constraint only makes a retry safe.
     episode_key    TEXT        NOT NULL UNIQUE,
 
     started_at     TIMESTAMPTZ NOT NULL,
@@ -36,6 +40,11 @@ CREATE TABLE network_reachability_episodes (
     probed_count      SMALLINT NOT NULL,
     unreachable_count SMALLINT NOT NULL,
 
+    -- The THRESHOLD in force when this row was written, not just the observation. Without it a row
+    -- cannot be re-judged later: "3 of 5 failed" means something different under a quorum of 3 than
+    -- under a quorum of 5, and the config can change between an incident and the day it is read.
+    quorum_count      SMALLINT NOT NULL,
+
     -- Which destinations failed, so a vendor-specific pattern stays visible in the record itself.
     -- Names only -- never a URL, because a probe target can carry a credential in its path (an ntfy
     -- topic URL IS the credential) and this table is read by humans and dumps.
@@ -45,6 +54,9 @@ CREATE TABLE network_reachability_episodes (
 
     CONSTRAINT network_reachability_counts_sane
         CHECK (probed_count > 0 AND unreachable_count >= 0 AND unreachable_count <= probed_count),
+    CONSTRAINT network_reachability_quorum_sane
+        CHECK (quorum_count >= 1 AND quorum_count <= probed_count
+               AND unreachable_count >= quorum_count),
     CONSTRAINT network_reachability_window_sane
         CHECK (ended_at IS NULL OR ended_at >= started_at)
 );
@@ -61,7 +73,15 @@ COMMENT ON COLUMN network_reachability_episodes.unreachable_count IS
     'host''s own outbound network. Misreading that distinction is why the 2026-08-19 and 2026-08-20 '
     'incidents were first filed as Kite outages.';
 
--- Open episodes are what a live check asks for, and there is normally at most one.
-CREATE INDEX network_reachability_open_idx
-    ON network_reachability_episodes (started_at DESC)
+-- ⚠️ AT MOST ONE OPEN EPISODE, ENFORCED BY THE DATABASE. Indexing the constant expression
+-- (ended_at IS NULL) over only the open rows makes every open row collide on the same index key, so
+-- a second one cannot be inserted at all.
+--
+-- This is not belt-and-braces. The writer reads "is an episode already open?" and that read FAILS
+-- SOFT to "no" on a transient DB error -- so the very failure mode this table exists to record is
+-- the one that makes the process try to open a second episode. The application-side guard cannot
+-- close that race by itself, and the UNIQUE on episode_key cannot either, because each attempt
+-- mints a new timestamp key. Only this index can.
+CREATE UNIQUE INDEX network_reachability_one_open_idx
+    ON network_reachability_episodes ((ended_at IS NULL))
     WHERE ended_at IS NULL;

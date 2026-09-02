@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.health;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -9,8 +10,12 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -52,6 +57,28 @@ public class NetworkReachabilityProbe {
    */
   private final List<Destination> destinations;
 
+  /**
+   * The shipped destinations, as a NAMED CONSTANT rather than a literal buried in the {@code @Value}
+   * below.
+   *
+   * <p>⚠️ This exists so the origins-only rule can be tested against the value production actually
+   * uses. The previous revision asserted that rule against a COPY of this string living in the test
+   * file, which would have stayed green while someone added a credential-bearing path here — the
+   * test supplied its own input and therefore proved nothing about this class.
+   */
+  static final String DEFAULT_DESTINATION_SPEC =
+      "kite=https://api.kite.trade,"
+          + "upstox=https://api.upstox.com,"
+          + "nse=https://www.nseindia.com,"
+          + "telegram=https://api.telegram.org,"
+          + "ntfy=https://ntfy.sh";
+
+  private static final String DESTINATIONS_PROPERTY =
+      "${artha.health.reachability.destinations:" + DEFAULT_DESTINATION_SPEC + "}";
+
+  /** Names go into log lines and a TEXT column, so they are restricted rather than trusted. */
+  private static final Pattern SAFE_NAME = Pattern.compile("[A-Za-z0-9_-]{1,32}");
+
   private final HttpClient http;
   private final NetworkReachabilityRepository repository;
   private final Clock clock;
@@ -59,26 +86,51 @@ public class NetworkReachabilityProbe {
   private final boolean enabled;
   private final AtomicInteger unreachableGauge = new AtomicInteger();
 
+  /**
+   * When the current outage was FIRST observed, retained across a failed open so the episode's
+   * {@code started_at} is the real start rather than whenever the retry happened to succeed.
+   */
+  private Instant outageFirstObservedAt;
+
+  /**
+   * A close that did not land, retained with the instant recovery was actually observed.
+   *
+   * <p>⚠️ Without this, a failed close plus a NEW outage inside one cron period silently MERGES two
+   * incidents into one row — the record would show a single long outage that never happened, which
+   * is a worse failure than a missing row because it looks authoritative.
+   */
+  private PendingClose pendingClose;
+
   public NetworkReachabilityProbe(
       NetworkReachabilityRepository repository,
       MeterRegistry meterRegistry,
       Clock clock,
       @Value("${artha.health.reachability.enabled:true}") boolean enabled,
       @Value("${artha.health.reachability.timeout-seconds:5}") int timeoutSeconds,
-      @Value(
-              "${artha.health.reachability.destinations:"
-                  + "kite=https://api.kite.trade,"
-                  + "upstox=https://api.upstox.com,"
-                  + "nse=https://www.nseindia.com,"
-                  + "telegram=https://api.telegram.org,"
-                  + "ntfy=https://ntfy.sh}")
-          String destinationSpec,
+      @Value(DESTINATIONS_PROPERTY) String destinationSpec,
       @Value("${artha.health.reachability.quorum:3}") int quorum) {
     this.repository = repository;
     this.clock = clock;
     this.enabled = enabled;
-    this.quorum = quorum;
     this.destinations = parse(destinationSpec);
+    // ⚠️ Both bounds fail at STARTUP, because both misconfigurations are SILENT at runtime and
+    // point the wrong way. A quorum above the destination count can never be met, so the probe
+    // reports healthy forever while recording nothing — the "structurally unsatisfiable gate" shape.
+    // A quorum below 2 (with more than one destination) contradicts this class's own diagnosis:
+    // one destination failing is that vendor, not the host, and filing it as the host is exactly
+    // the misreading the 08-19 / 08-20 / 09-01 incidents cost.
+    if (quorum > this.destinations.size()) {
+      throw new IllegalArgumentException(
+          "reachability quorum " + quorum + " exceeds the " + this.destinations.size()
+              + " configured destinations — it could never be met");
+    }
+    int floor = this.destinations.size() > 1 ? 2 : 1;
+    if (quorum < floor) {
+      throw new IllegalArgumentException(
+          "reachability quorum must be at least " + floor + " for "
+              + this.destinations.size() + " destinations; got " + quorum);
+    }
+    this.quorum = quorum;
     this.http =
         HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(timeoutSeconds))
@@ -112,32 +164,70 @@ public class NetworkReachabilityProbe {
         failed.add(d.name());
       }
     }
+
+    // ⚠ AN INTERRUPTED PASS HAS NO OPINION, AND MUST NOT WRITE ONE.
+    // Once the thread is interrupted every remaining send fails instantly, and `reachable` reports
+    // those as REACHABLE (correctly — they are not a network verdict). The result is a pass that
+    // looks like recovery. With an episode open that would CLOSE it, stamping a FALSE recovery at
+    // the exact moment the host is shutting down — the incident this table exists to record. So the
+    // pass is abandoned whole: no gauge update, no transition.
+    if (Thread.currentThread().isInterrupted()) {
+      log.info("reachability: pass interrupted (shutdown) — no verdict, no episode transition");
+      return;
+    }
+
     unreachableGauge.set(failed.size());
     Instant now = clock.instant();
+
+    // A close that failed on an earlier pass is retried FIRST, carrying the instant recovery was
+    // actually observed. Retrying here rather than inside the recovery branch is what stops a new
+    // outage from being absorbed into the previous episode.
+    if (pendingClose != null && repository.close(pendingClose.key(), pendingClose.at())) {
+      pendingClose = null;
+    }
 
     boolean hostNetworkDown = failed.size() >= quorum;
     String openKey = repository.openEpisodeKey().orElse(null);
 
-    if (hostNetworkDown && openKey == null) {
-      String key = "reach-" + now.toEpochMilli();
-      String names = String.join(",", failed);
-      log.warn(
-          "reachability: {} of {} destinations unreachable ({}) — opening episode {}."
-              + " This is the HOST network, not one vendor.",
-          failed.size(), destinations.size(), names, key);
-      repository.open(key, now, destinations.size(), failed.size(), names,
-          "quorum " + failed.size() + "/" + destinations.size() + " unreachable");
-    } else if (!hostNetworkDown && openKey != null) {
-      log.info("reachability: recovered ({} unreachable) — closing episode {}", failed.size(),
-          openKey);
-      repository.close(openKey, now);
-    } else if (!failed.isEmpty()) {
-      // Below quorum: a vendor problem, deliberately NOT an episode. Logged so it is still visible,
-      // because "one vendor is down" is a real finding — it is just a different one.
-      log.info("reachability: {} unreachable ({}) — below the {} quorum, treating as vendor-local",
-          failed.size(), String.join(",", failed), quorum);
+    if (hostNetworkDown) {
+      if (outageFirstObservedAt == null) {
+        outageFirstObservedAt = now;
+      }
+      if (openKey == null) {
+        Instant startedAt = outageFirstObservedAt;
+        String key = "reach-" + startedAt.toEpochMilli();
+        String names = String.join(",", failed);
+        log.warn(
+            "reachability: {} of {} destinations unreachable ({}) — opening episode {}."
+                + " This is the HOST network, not one vendor.",
+            failed.size(), destinations.size(), names, key);
+        repository.open(key, startedAt, destinations.size(), failed.size(), quorum, names,
+            "quorum " + failed.size() + "/" + destinations.size() + " unreachable"
+                + " (threshold " + quorum + ")");
+      }
+    } else {
+      outageFirstObservedAt = null;
+      if (openKey != null) {
+        Instant recoveredAt =
+            pendingClose != null && pendingClose.key().equals(openKey) ? pendingClose.at() : now;
+        log.info("reachability: recovered ({} unreachable) — closing episode {}", failed.size(),
+            openKey);
+        if (repository.close(openKey, recoveredAt)) {
+          pendingClose = null;
+        } else {
+          pendingClose = new PendingClose(openKey, recoveredAt);
+        }
+      } else if (!failed.isEmpty()) {
+        // Below quorum: a vendor problem, deliberately NOT an episode. Logged so it is still
+        // visible, because "one vendor is down" is a real finding — it is just a different one.
+        log.info("reachability: {} unreachable ({}) — below the {} quorum, treating as vendor-local",
+            failed.size(), String.join(",", failed), quorum);
+      }
     }
   }
+
+  /** An observed recovery whose write has not landed yet. */
+  private record PendingClose(String key, Instant at) {}
 
   /**
    * ⚠️ ANY HTTP RESPONSE COUNTS AS REACHABLE, including 4xx and 5xx. The question is whether packets
@@ -165,19 +255,72 @@ public class NetworkReachabilityProbe {
     }
   }
 
+  /**
+   * ⚠ The origins-only rule is ENFORCED here, not merely documented above it.
+   *
+   * <p>An earlier revision validated only the {@code name=value} shape, so a path, a query or
+   * embedded credentials were all accepted — and the value flows straight into a log line, a TEXT
+   * column and an outbound request. An ntfy topic URL IS the credential, which makes "no path" a
+   * security invariant rather than tidiness.
+   *
+   * <p>⚠ Failures NEVER echo the offending value. The whole reason to reject it is that it may be
+   * a secret, and an exception message is written to the same logs the value was being kept out of.
+   */
   private static List<Destination> parse(String spec) {
     List<Destination> out = new ArrayList<>();
-    for (String entry : spec.split(",")) {
-      String trimmed = entry.trim();
+    Set<String> seen = new HashSet<>();
+    String[] entries = spec.split(",");
+    for (int i = 0; i < entries.length; i++) {
+      String trimmed = entries[i].trim();
       if (trimmed.isEmpty()) {
         continue;
       }
       int eq = trimmed.indexOf('=');
       if (eq <= 0 || eq == trimmed.length() - 1) {
         throw new IllegalArgumentException(
-            "reachability destination must be name=origin, got: " + trimmed);
+            "reachability destination #" + (i + 1) + " must be name=origin"
+                + " (value withheld: it may carry a credential)");
       }
-      out.add(new Destination(trimmed.substring(0, eq), URI.create(trimmed.substring(eq + 1))));
+      String name = trimmed.substring(0, eq);
+      if (!SAFE_NAME.matcher(name).matches()) {
+        throw new IllegalArgumentException(
+            "reachability destination #" + (i + 1) + " has an unsafe name;"
+                + " expected [A-Za-z0-9_-]{1,32}");
+      }
+      URI uri;
+      try {
+        uri = new URI(trimmed.substring(eq + 1));
+      } catch (URISyntaxException malformed) {
+        throw new IllegalArgumentException(
+            "reachability destination '" + name + "' is not a valid URI"
+                + " (value withheld: it may carry a credential)");
+      }
+      String scheme =
+          uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+      String path = uri.getPath();
+      boolean originOnly =
+          ("http".equals(scheme) || "https".equals(scheme))
+              && uri.getHost() != null
+              && !uri.getHost().isEmpty()
+              && uri.getUserInfo() == null
+              && (path == null || path.isEmpty() || "/".equals(path))
+              && uri.getQuery() == null
+              && uri.getFragment() == null;
+      if (!originOnly) {
+        throw new IllegalArgumentException(
+            "reachability destination '" + name + "' must be a bare http(s) ORIGIN —"
+                + " no path, query, fragment or credentials (value withheld)");
+      }
+      // Duplicates would inflate probed_count AND let ONE vendor meet the quorum by itself, which
+      // is precisely the host-vs-vendor confusion the quorum exists to prevent.
+      String origin =
+          scheme + "://" + uri.getHost().toLowerCase(Locale.ROOT)
+              + (uri.getPort() < 0 ? "" : ":" + uri.getPort());
+      if (!seen.add(origin)) {
+        throw new IllegalArgumentException(
+            "reachability destination '" + name + "' duplicates an earlier origin");
+      }
+      out.add(new Destination(name, uri));
     }
     if (out.isEmpty()) {
       throw new IllegalArgumentException("reachability needs at least one destination");

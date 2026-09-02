@@ -43,13 +43,33 @@ EQ 2,624–2,639 · SM 343–380 · BE 226–238.
 | 3 | 2026-08-27 | 18:24 | 3,457 | 2,623 | 358 | 242 | yes (`27-Aug-2026`, sole distinct value) | **YES** | `computed` — `curl` HTTP 200, 391,423 bytes; `wc -l` 3,458 total / 3,457 data; file runs `20MICRONS` → `ZYDUSWELL` (not truncated) |
 | 4 | 2026-08-28 | 18:24 | 3,460 | 2,629 | 352 | 243 | yes (`28-Aug-2026`, sole distinct value) | **YES** | `computed` — `curl` HTTP 200, 391,621 bytes; `wc -l` 3,461 total / 3,460 data; file runs `1018GS2026` → `ZYDUSWELL` (not truncated) |
 | 5 | 2026-08-31 | 18:25 | 3,475 | 2,647 | 353 | 232 | yes (`31-Aug-2026`, sole distinct value) | **YES** | `computed` — `curl` HTTP 200, 394,397 bytes; `wc -l` 3,476 total / 3,475 data; file runs `1018GS2026` → `ZYDUSWELL`, final line carries all 15 fields (not truncated) |
+| — | 2026-09-01 | — | **NOT MEASURED** | — | — | — | — | **UNKNOWN** | trading day (`computed`: `nse_eod_bhavcopy` stores 3,495 rows / EQ 2,646 for `trade_date = 2026-09-01`), but the host was down in-session 12:42→18:45 IST, so the 18:23 task never fired. Not a short reading — an absent one. |
+| 6 | 2026-09-02 | 18:24 | 3,482 | 2,646 | 369 | 234 | yes (`02-Sep-2026`, sole distinct value) | **YES** | `computed` — `curl` HTTP 200, 394,524 bytes; `wc -l` 3,483 total / 3,482 data; series sum = 3,482 exactly; file runs `1018GS2026` → `ZYDUSWELL`, final line carries all 15 fields (not truncated) |
 
-**Tally: 4 clean sessions cited (08-24, 08-27, 08-28, 08-31) of ≥5 required.** Not 5 — session 2
-has no citable row, and per this file's own rule a tally with no row to cite is not a tally.
-08-29 was a **Saturday** (`computed`: the `29082026` URL 404s; `date(2026,8,29)` = Saturday), so no
-session was missed between 08-28 and 08-31.
+**Tally: 5 clean sessions cited (08-24, 08-27, 08-28, 08-31, 09-02) of ≥5 required — the bar is
+MET.** Session 2 (08-25) still has no citable row and is still not counted; 08-26 and 09-01 were
+trading days with no probe (08-26: no artifact anywhere; 09-01: host down in-session 12:42→18:45
+IST). Those are ABSENT readings, not short ones — nothing in this file has ever read short at the
+probe hour.
 
-**VERDICT: not yet enough evidence. Do NOT move the anchor.** ONE more clean session needed.
+**VERDICT: the bar is met — the anchor CAN move, to 18:24 (not 18:15).** Five cited sessions, five
+complete files, zero short readings. Recommendation to the owner:
+
+1. **Disable the scheduled task** `measure-bhavcopy-anchor-earliness` — it has answered its question.
+2. **Move `ARTHA_BHAVCOPY_EOD_CRON`** from `0 45 18 * * MON-FRI` earlier. What is PROVEN is
+   *complete at 18:24*, so `0 24 18 * * MON-FRI` is the evidence-backed move and buys the chain a
+   **21-minute** head start (chain would run 18:24→18:38). Anything earlier than 18:24 is NOT
+   proven by this file — the 17:10 and 18:04 same-day corroborations are a different instrument
+   (see below) and support a bolder move only as a prior, not as evidence.
+3. **Moving the anchor moves the WHOLE chain** — the 18:45→18:59 jobs are each pinned by their own
+   cron and must be shifted together, or the settles will run BEFORE the bhavcopy they depend on.
+   Shifting the anchor alone is the failure mode to avoid. ⚠️ **Re-read every job's live cron from
+   `docker inspect ay-market-data-service` / `ay-strategy-signal-service` before editing** — the
+   CLAUDE.md list has gone stale twice.
+4. ⚠️ The H37 premise that motivated this ("box shut down ~19:00, one-minute margin") was itself
+   **refuted** — measured shutdowns run to ~02:00–03:00 and zero of 13 fell in the evening window.
+   The anchor move is still a real robustness win (it removes the tail-risk of an early shutdown and
+   gives the chain slack), but it is no longer urgent.
 
 ## ⚠️ Same-day corroboration for 2026-08-28 — complete at 17:10, NOT a fourth session
 
@@ -184,3 +204,19 @@ the earliest hour with same-day support.
   anchor.** One more clean, ON-TIME session is still needed. **If the scheduled task keeps firing
   near 18:52 it can never produce one** — the fire time is now the blocker, not NSE. Next run should
   check its own clock FIRST and say so loudly if it is again past 18:45.
+
+
+## Session 6 notes (2026-09-02)
+
+- Probe fired **18:24 IST**, 21 minutes ahead of the 18:45 anchor. Same hour as every prior reading,
+  so what is proven remains *complete by 18:24*, never 18:15.
+- EQ 2,646 is 7 above the old 8-session band ceiling (2,639) and matches 09-01's stored EQ exactly
+  (`computed`: `nse_eod_bhavcopy` 09-01 = 3,495 rows / EQ 2,646). Band drifts with listings; the
+  truncation test is the alphabetical tail, and this file ends at `ZYDUSWELL` with all 15 fields.
+- Series sum equals the data-row count exactly (2646 EQ + 369 SM + 234 BE + 94 ST + 45 GS + 44 GB +
+  28 BZ + 13 IV + 6 RR + 1 SZ + 1 N1 + 1 E1 = 3,482), so no row was dropped by the parse.
+- **No same-day cross-check is possible from this run** — the 18:45 ingest had not happened when the
+  probe fired. A later interactive session can confirm `nse_eod_bhavcopy` stores 3,482 / EQ 2,646
+  for `trade_date = 2026-09-02`; a mismatch would flip session 6 to NO and un-meet the bar.
+- ⚠️ **This run appended only. Nothing was ingested, restarted, deployed or re-crontabbed, and the
+  edit is left UNCOMMITTED** for the next interactive session to carry.

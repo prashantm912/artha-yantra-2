@@ -60,6 +60,24 @@ public final class UpstoxFnoMasterClient {
   private final Clock clock;
 
   private volatile Map<FnoKey, FnoLeg> keysByLeg = Map.of();
+
+  /**
+   * H26 U-A2 — NSE CASH identity, indexed by the exchange token.
+   *
+   * <p>⚠️ <b>The class name says Fno and this index does not. That tension is deliberate and cheaper
+   * than the alternative.</b> Renaming would touch ~90 references across the live margin path, the
+   * tick-feed adapter, the quote gateway and the contract canary — money- and live-engine-adjacent
+   * code — to gain nothing but a better noun. The class is really "the Upstox instrument master
+   * client"; it had only ever been used for F&amp;O.
+   *
+   * <p>Built from the SAME parsed rows as {@link #keysByLeg}, so this adds no second download of a
+   * ~3 MB payload and inherits the candidate-then-check hardening in {@code reload()}.
+   *
+   * <p>⚠️ Assigned INDEPENDENTLY of the F&amp;O index, with its own emptiness guard. Gating both on
+   * one condition would let an Upstox change that kills NSE_EQ also block F&amp;O refresh — coupling
+   * two caches that fail for unrelated reasons.
+   */
+  private volatile Map<Long, NseCashIdentity> nseCashByToken = Map.of();
   private volatile Instant loadedAt = Instant.EPOCH;
   private volatile Instant lastAttemptAt = Instant.EPOCH;
 
@@ -197,6 +215,16 @@ public final class UpstoxFnoMasterClient {
         return false;
       }
       keysByLeg = candidate;
+      // Independent guard: an empty NSE index must neither discard a good one nor stop the F&O
+      // cache above from refreshing.
+      Map<Long, NseCashIdentity> cashCandidate = indexNseCash(rows);
+      if (cashCandidate.isEmpty()) {
+        log.warn(
+            "Upstox master mapped ZERO NSE cash rows — keeping prior cash index of {}",
+            nseCashByToken.size());
+      } else {
+        nseCashByToken = cashCandidate;
+      }
       loadedAt = attemptAt;
       log.info("Upstox F&O instrument master loaded: {} mapped legs", keysByLeg.size());
       return true;
@@ -214,6 +242,96 @@ public final class UpstoxFnoMasterClient {
       return false;
     }
   }
+
+  /**
+   * The NSE cash identity Upstox holds for {@code exchangeToken}, or {@code null}.
+   *
+   * <p>H26 U-A2, and NOTHING CONSUMES THIS YET — it exists so the A2-3 shadow diff can compare
+   * Upstox identity against our own without a second download.
+   */
+  public NseCashIdentity nseCashIdentity(long exchangeToken) {
+    cache();
+    return nseCashByToken.get(exchangeToken);
+  }
+
+  /** How many NSE cash rows the master currently maps. Zero means the index never loaded. */
+  public int nseCashSize() {
+    cache();
+    return nseCashByToken.size();
+  }
+
+  /**
+   * Indexes {@code NSE_EQ} rows by exchange token.
+   *
+   * <p>⚠️ <b>Keyed on the EXCHANGE TOKEN, not the symbol, and that is the measured choice.</b>
+   * {@code computed} 2026-09-02 over the live master: the token joins our table 9,694/9,694 —
+   * <b>100.00%</b> — while a naive {@code trading_symbol} join matches only 27% and would
+   * MIS-IDENTIFY roughly 73% of NSE equities. Receipt:
+   * {@code docs/signal-analysis/2026-09-02-h26-ua2-identity-join-measurement.md}.
+   *
+   * <p>⚠️ <b>The token is unique per SEGMENT, not per exchange.</b> Our {@code exchange='NSE'} lumps
+   * cash together with INDICES, and 30 tokens collide across those two (token 1001 is both
+   * {@code NIFTY 50} and a bond). Scoping this index to {@code NSE_EQ} is what makes the key unique
+   * — within segment the measurement is 10,096/10,096 distinct. Do not widen it to "all NSE".
+   *
+   * <p>NSE only, deliberately (owner, 2026-09-02): the suffix rule below is verified on NSE, and BSE
+   * is where that convention is already known not to apply.
+   */
+  private static Map<Long, NseCashIdentity> indexNseCash(List<UpstoxInstrumentMaster> rows) {
+    Map<Long, NseCashIdentity> map = new HashMap<>();
+    for (UpstoxInstrumentMaster r : rows) {
+      if (!"NSE_EQ".equals(r.segment()) || r.exchangeToken() == null || r.instrumentKey() == null) {
+        continue;
+      }
+      String symbol = r.tradingSymbol();
+      String series = r.instrumentType();
+      if (symbol == null || series == null) {
+        continue;
+      }
+      map.putIfAbsent(
+          r.exchangeToken(),
+          new NseCashIdentity(
+              r.exchangeToken(),
+              r.instrumentKey(),
+              r.isin(),
+              symbol,
+              series,
+              kiteTradingsymbol(symbol, series)));
+    }
+    return map;
+  }
+
+  /**
+   * Derives the Kite tradingsymbol from Upstox's bare symbol plus its series.
+   *
+   * <p>⚠️ <b>This is a DERIVATION, not a synthesis, and the distinction is the whole reason U-A2
+   * shrank.</b> Kite appends the series for every non-EQ series — {@code 749RJ35-SG},
+   * {@code KCK-ST}, and the familiar {@code -BE} — while Upstox carries the bare symbol and the
+   * series separately. {@code computed} 2026-09-02 against the live master and our table:
+   * 2,651 bare + 7,043 suffixed = <b>100.00%, ZERO unmatched</b>.
+   *
+   * <p>⚠️ It also generalises H29/H36: the {@code -BE} twin is not a special case but one instance
+   * of a Kite-wide convention also covering SG, N0, SM, GS and ST.
+   *
+   * <p>⚠️ <b>This is a CROSS-CHECK on the token join, never a substitute for it.</b> The token is
+   * the identity; if the two ever disagree, that disagreement is the A2-3 finding — resolving it in
+   * favour of this rule would be trusting a string over an exchange-issued key.
+   */
+  static String kiteTradingsymbol(String upstoxSymbol, String series) {
+    return "EQ".equals(series) ? upstoxSymbol : upstoxSymbol + "-" + series;
+  }
+
+  /**
+   * One NSE cash instrument as Upstox describes it, plus the Kite symbol derived from it.
+   * {@code isin} may be null; the token and key never are.
+   */
+  public record NseCashIdentity(
+      long exchangeToken,
+      String upstoxInstrumentKey,
+      String isin,
+      String upstoxTradingSymbol,
+      String series,
+      String derivedKiteTradingsymbol) {}
 
   /** Indexes the {@code *_FO} rows by the structured leg tuple → the resolved leg (key + lot). */
   private static Map<FnoKey, FnoLeg> index(List<UpstoxInstrumentMaster> rows) {

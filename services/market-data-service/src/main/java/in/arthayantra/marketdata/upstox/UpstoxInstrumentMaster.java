@@ -38,6 +38,16 @@ public record UpstoxInstrumentMaster(
     @JsonProperty("instrument_key") String instrumentKey,
     @JsonProperty("instrument_type") String instrumentType,
     @JsonProperty("trading_symbol") String tradingSymbol,
+    // ⚠️ H26 U-A2. The exchange's OWN token, and the measured identity key: it joins our
+    // instruments table 100.00% on both NSE_EQ and NSE_FO, where a trading_symbol join matches
+    // only 27% of equities. Boxed Long, NOT a primitive long — a master row for a segment that
+    // omits it must parse to null rather than silently becoming 0, which would collide every such
+    // row onto one key.
+    @JsonProperty("exchange_token") Long exchangeToken,
+    // Carried for provenance and for the equity cross-check; Upstox addresses NSE_EQ keys as
+    // NSE_EQ|<ISIN>. Not used as identity — an ISIN survives a rename, which is exactly why it
+    // cannot be a primary key here.
+    String isin,
     Long expiry,
     @JsonProperty("strike_price") BigDecimal strikePrice,
     @JsonProperty("lot_size") Integer lotSize) {}

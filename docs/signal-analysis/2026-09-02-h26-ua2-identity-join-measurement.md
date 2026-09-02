@@ -20,9 +20,16 @@ the crux inside the crux" rests on a premise that does not hold as stated.
 Every row has `isin`, `trading_symbol`, `exchange_token`, `instrument_key`, `instrument_type`,
 `segment`, `lot_size`, `name`, `tick_size`, `freeze_quantity`, `qty_multiplier`, `exchange`.
 
-⚠️ **`trading_symbol` and `isin` are ALREADY in our DTO** (`UpstoxInstrumentMaster`) and already
-parsed on every load — the F&O indexer simply ignores them. So this is a retention change, not a
-new download, and not a new parser.
+⚠️ **CORRECTION 2026-09-02, same day: this receipt originally said "`trading_symbol` and `isin` are
+ALREADY in our DTO". Only `trading_symbol` was.** `isin` was NOT in `UpstoxInstrumentMaster`, and
+neither was `exchange_token` — which is the very key this document recommends as the identity join.
+The error surfaced at the compiler when U-A2 tried to read them.
+
+The corrected statement: the master **carries** all three fields on the wire and the DTO is
+`@JsonIgnoreProperties(ignoreUnknown = true)`, so they were being silently DISCARDED on every load,
+not parsed. Adding them is two record components — still small, still no new download and no new
+parser — but "already parsed" was wrong, and a future reader sizing this work off that sentence
+would have been misled.
 
 ## NSE equities (`NSE_EQ`, 9,694 rows)
 

@@ -146,6 +146,58 @@ record before assuming a null-check suffices anywhere.
 
 ---
 
+## 5a. The open questions, SETTLED — 2026-09-02
+
+The plan required these be settled by the Architect before any builder is briefed. All three are
+answered; Q2 was answered by measurement (§1a) and changed the unit's shape.
+
+### Q1 — where the soak's durable row lives: **a small dedicated table (V062), not `ingest_runs`**
+
+`ingest_runs` is a JOB ledger: it answers "did this run, and did it throw". The soak needs to record
+an OBSERVATION — compared, matched, mismatched, per segment — and the only field available to carry
+it is `rows_written`, a single integer. Overloading that would mean a row saying `rows_written = 3`
+that means "3 mismatches", which reads as "wrote 3 rows" to every existing consumer, including the
+ingest-health board and `IngestCoverageCanary`.
+
+⚠️ **The deciding argument is not tidiness, it is that the two questions fail differently.** A soak
+pass that RAN but compared nothing is a success in the job ledger and a total failure as evidence —
+which is exactly the `compared_total` trap in §2. Keeping them in one row makes that failure
+invisible; keeping them separate makes it a column you must look at.
+
+**Still register a `SOURCE_INSTRUMENT_SHADOW_DIFF` in the ledger too**, for the run/failure
+lifecycle only. `IngestCoverageCanary.EXPECTED` is an explicit list, so adding a source does NOT
+auto-enrol it in the daily REQUIRE matrix and cannot false-RED the 08:45 canary — verified while
+building NEW-13. Do not add it to `EXPECTED` until the soak has passed once, mirroring the
+deliberate deferral `MarketContextEodJob` already documents.
+
+Shape mirrors V061: one row per session per segment, with `compared`, `matched`, `mismatched`, and
+the failing examples capped. **Never a Micrometer counter as the record** — same reasoning as V061
+and the H44 weekly report.
+
+### Q3 — what kills this unit, stated as a number BEFORE the soak
+
+Written now, on purpose, so the decision is not taken while looking at the result.
+
+**Baseline, `computed` 2026-09-02:** segment-scoped `(segment, exchange_token)` join coverage is
+**100.00%** on `NSE_EQ` (9,694/9,694) and `NSE_FO` (31,836/31,836).
+
+| observation | verdict |
+|---|---|
+| coverage stays 100.00% on NSE_EQ and NSE_FO for ≥5 sessions incl. one weekly expiry | **PROCEED to A2-4/A2-5** |
+| any miss whose cause is identified as a segmentation difference or a tokenless row of ours | **not a failure** — both are already-characterised classes (§1a, and the BSE/BFO measurement) |
+| any UNEXPLAINED miss, even one | **STOP.** Do not proceed, do not widen the tolerance. One unexplained identity miss is the whole risk of this item |
+| `compared` = 0 on any session | **the soak did not run that session** — it does not count toward the five, and it is not a pass |
+| the 402 iNAV rows change count without a listing event | **STOP** — the tombstone rule is wrong |
+
+⚠️ **"Explained" means identified BEFORE the verdict, against a named class.** Explaining a miss
+after seeing it, by inventing a class that fits it, is how a kill criterion becomes decorative. If a
+new class is genuinely discovered, that is a finding to record and re-baseline from — not a reason to
+call the current soak passed.
+
+⚠️ **The soak cannot be shortened by the 100% baseline.** A join that is perfect today is precisely
+what an expiry roll or a rename would degrade, and neither occurred during the measurement. The five
+sessions and the weekly expiry are load-bearing for that reason alone.
+
 ## 6. What this plan does NOT do
 
 No cutover, no flag flip, nothing authoritative. Every unit above ships dark, and the point of no

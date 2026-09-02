@@ -26,6 +26,24 @@ public class MarketContextDayRepository {
   }
 
   /**
+   * Whether a row already exists for {@code tradeDate}. Used only by the boot catch-up, to tell
+   * "the EOD pass already ran today" from "its slot was missed while the box was down".
+   *
+   * <p>⚠️ Deliberately keyed on the row's presence rather than on an {@code ingest_runs} SUCCESS.
+   * A ledger SUCCESS is also written for a holiday skip, which persists nothing — so keying on the
+   * ledger would read a skipped holiday as a completed pass. The row is the artifact; the ledger
+   * entry is a record that something ran.
+   */
+  public boolean existsFor(LocalDate tradeDate) {
+    Boolean found =
+        jdbc.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM market_context_days WHERE trade_date = ?)",
+            Boolean.class,
+            tradeDate);
+    return Boolean.TRUE.equals(found);
+  }
+
+  /**
    * Upsert one session-day row. {@code tradeDate} is the IST session date (never a UTC {@code ::date}).
    * Returns the affected-row count (1) — the {@code rows_written} the EOD job records in {@code
    * ingest_runs}.

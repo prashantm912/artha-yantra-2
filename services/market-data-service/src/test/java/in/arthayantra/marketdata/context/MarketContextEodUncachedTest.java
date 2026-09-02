@@ -56,7 +56,14 @@ class MarketContextEodUncachedTest {
         .when(ledger)
         .record(anyString(), any());
 
-    new MarketContextEodJob(dayContext, repository, ledger, "NIFTY 50").run();
+    new MarketContextEodJob(
+            dayContext,
+            repository,
+            ledger,
+            java.time.Clock.systemUTC(),
+            "0 49 18 * * MON-FRI",
+            "NIFTY 50")
+        .run();
 
     verify(dayContext).freshDayContext();
     // ⚠️ The never() is the load-bearing half. Without it an implementation that called BOTH — or

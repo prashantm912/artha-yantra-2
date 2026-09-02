@@ -266,4 +266,26 @@ public class MonitorSchedulingConfig {
     scheduler.setDaemon(true);
     return scheduler;
   }
+
+  /**
+   * The NEW-13 outbound-reachability probe (NetworkReachabilityProbe).
+   *
+   * <p>⚠️ <b>Its own thread, and the reason is the whole point of the class.</b> The probe
+   * deliberately BLOCKS on network timeouts — that is how it measures reachability — and the
+   * default pool is ONE thread shared by ~30 scheduled methods. Parking it there would let a network
+   * outage stall every other scheduled job in the service, so the probe would CAUSE a wider outage
+   * during exactly the minutes it exists to observe. With N destinations at a T-second timeout the
+   * worst-case pass is N x T, which is why it must be able to overrun only itself.
+   *
+   * <p><b>Why not {@code monitorTaskScheduler()}.</b> Same fence as the others: that pool is reserved
+   * for pure liveness DETECTORS that never block on an upstream. This blocks on five of them.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler reachabilityTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("reachability-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
 }

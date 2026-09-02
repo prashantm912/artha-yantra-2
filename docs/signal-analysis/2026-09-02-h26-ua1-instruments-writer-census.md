@@ -62,14 +62,23 @@ explicitly, because those are the rows most likely to be mis-scoped:
 | `MENONBE` / `MENONBE-BE` | present | present | `NSE` | f / t |
 | `SABEVENTS` / `SABEVENTS-BE` | present | present | `NSE` | f / f |
 
-All carry token + name + segment, so all are **included** by the backfill. And the
-`tokenless but has name/segment` bucket is **empty**, so the metadata test cannot strand a tokenless
-Kite row — the H29 shape is covered by construction, not by luck.
+All carry token + name + segment, so all are **included** by the backfill.
 
-⚠️ That empty bucket is the load-bearing observation here, and it is the one most likely to change.
-If a future Kite dump ever emits a row without `name` and without `segment`, the predicate would
-start excluding a genuinely Kite-asserted row. **Re-run the census before trusting the predicate
-again.**
+⚠️ **AN EARLIER VERSION OF THIS RECEIPT NAMED THE WRONG LOAD-BEARING CONDITION, and the
+correction matters because it makes the predicate STRUCTURALLY safe rather than incidentally safe.**
+It claimed the safety rested on the `tokenless but has name/segment` bucket being empty, and that
+the census therefore had to be re-derived before trusting the predicate. That reasoning is wrong:
+such rows would **already pass** the predicate, since it accepts `name OR segment`. An empty bucket
+proves nothing either way.
+
+**The real invariant is type-level.** `InstrumentDumpGateway.InstrumentRecord` declares
+`long instrumentToken` — a **primitive**, which cannot be null — and `InstrumentRepository`
+binds it with `setLong`. So **every row the Kite dump writes carries a non-null token, by
+construction**, and a metadata-empty row can only have come from the importer. The predicate cannot
+strand a Kite-asserted row unless that record type changes to a boxed `Long`.
+
+That is a much stronger guarantee than a population count, and it is the one to check if this is
+ever revisited: **look at the record’s field type, not at the census.**
 
 ## What is NOT claimed
 

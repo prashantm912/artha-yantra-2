@@ -84,10 +84,14 @@ COMMENT ON COLUMN instruments.upstox_instrument_key IS
 -- expiry roll and instrument sync, so a frozen number here could never be corrected. Removing my
 -- own guard while justifying a fix is the failure worth remembering.
 --
--- The census, the H29/H36 verification and the load-bearing caveat (no Kite row is currently
--- tokenless-AND-nameless, which is what makes the metadata test safe) live in a dated receipt:
+-- Why the predicate cannot strand a Kite row is a TYPE-LEVEL fact, not a population one:
+-- `InstrumentDumpGateway.InstrumentRecord` declares `long instrumentToken` -- a primitive, which
+-- cannot be null -- and the repository binds it with `setLong`. Every Kite-dump row therefore
+-- carries a token by construction, so a metadata-empty row can only be an importer placeholder.
+-- That invariant breaks only if the record type ever becomes a boxed `Long`.
+--
+-- The census, the H29/H36 verification and that reasoning live in a dated receipt:
 --   docs/signal-analysis/2026-09-02-h26-ua1-instruments-writer-census.md
--- Re-derive it before relying on the predicate again.
 UPDATE instruments
    SET kite_last_seen_at = last_seen_at
  WHERE segment IS DISTINCT FROM 'SYN-CONT'
@@ -104,8 +108,8 @@ UPDATE instruments
 --      tombstones the old row and admits the successor as a BRAND-NEW PK. Upstox equity keys are
 --      ISIN-addressed (`NSE_EQ|<ISIN>`), and a same-ISIN rename is documented explicitly
 --      (TATAMOTORS→TMPV keeps its ISIN). So after any such rename the retired row and its successor
---      legitimately hold the SAME Upstox key — and a unique index would fail the authoritative sync,
---      roughly 59 times a year, for correct data.
+--      legitimately hold the SAME Upstox key — and a unique index would reject CORRECT data,
+--      failing the authoritative sync every time the exchange renames a listing.
 --   2. It could not have protected the phase it was justified by anyway: U-A2's shadow soak writes
 --      NOTHING authoritative into this table, so the index would never see shadow output.
 --

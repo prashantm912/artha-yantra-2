@@ -391,3 +391,31 @@ row adds no information — the remaining uncertainty is not sampling noise. **W
 one job's call shape** (the OI snapshot's batched Kite `/quote` cycle against the Upstox
 `/v2/option/chain` equivalent), a code-and-job measurement, not a session capture. That is the same
 conclusion the 08-31 row reached; today's row is what makes it safe to act on.
+
+---
+
+## ✅ RETIRED 2026-09-02 (owner ruling) — the capture is disabled, not deleted
+
+The recommendation above was accepted. `h26-daily-rate-capture` is **disabled** in the scheduler
+rather than deleted, so the prompt survives and the decision is reversible if the baseline is ever
+suspected of drifting.
+
+**What retires and what does NOT.** The daily *capture* retires. **H26 itself stays open**, and its
+verdict is unchanged: **NOT STOP, NOT GO.** The stop rule is undecided because the three projections
+still span `≈332 → 1,615` against a 1,440 ceiling, and that spread is *entirely* the unmeasured
+call-shape factor:
+
+| projection | value | vs 1,440 |
+|---|---|---|
+| naive raw transfer | 215 + 1,400 = **1,615** | FAILS |
+| non-overlap (burst is pre-open) | max(215, 1,400) = **1,400** | passes by 2.8% |
+| remapped ≈12:1 (`assumed`) | **≈332** | passes comfortably |
+
+⚠️ **Retiring the capture is not evidence that H26 is safe.** It is evidence that *this instrument*
+has stopped producing information. Reading a retired measurement as a resolved question is exactly
+the inversion this file has warned about elsewhere.
+
+**What would actually decide it**, and the only thing that should be scheduled next on H26: measure
+one job's call shape — the OI snapshot's batched Kite `/quote` cycle against the Upstox
+`/v2/option/chain` equivalent — to get the real remap ratio. That is a code-and-job measurement, not
+a session capture, and no number of further daily rows can substitute for it.

@@ -13,6 +13,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -235,7 +236,10 @@ class InstrumentSyncIntegrationTest extends MarketDataIntegrationTestBase {
 
     assertThat(kiteLastSeen("NSE", "RELIANCE"))
         .as("the ON CONFLICT branch must advance it, not only the INSERT")
-        .isAfter(Timestamp.valueOf("2021-01-01 00:00:00"));
+        // Timestamp.valueOf parses in the JVM DEFAULT ZONE; the column is TIMESTAMPTZ. The margin
+        // here is a year so it cannot misfire, but the naive-local form is the shape CLAUDE.md
+        // warns about and it would sit three lines under a correctly-zoned literal.
+        .isAfter(Timestamp.from(Instant.parse("2021-01-01T00:00:00Z")));
   }
 
   @Test
@@ -243,7 +247,12 @@ class InstrumentSyncIntegrationTest extends MarketDataIntegrationTestBase {
     // The importer's exact shape (tools/historical-import/ingest.py, _UPSERT_INSTRUMENT): a bare
     // key with no token, name or segment. Kite has never published it, and the whole point of a
     // separate column is that this stays visibly true.
-    syncService.runSync();
+    //
+    // ⚠ INSERTED BEFORE THE SYNC, DELIBERATELY. Written the other way round — sync, then insert,
+    // then assert — nothing production runs between the insert and the assertion, so the test can
+    // only fail if the COLUMN gains a DEFAULT. That asserts a property of Postgres, not of this
+    // repository. Ordered this way, the sync's upsert and tombstoneVanished both run over the row
+    // and the assertion is about what THEY leave behind, which is the claim being made.
     jdbc.update(
         """
         INSERT INTO instruments
@@ -255,8 +264,10 @@ class InstrumentSyncIntegrationTest extends MarketDataIntegrationTestBase {
         ON CONFLICT (exchange, tradingsymbol) DO NOTHING
         """);
 
+    syncService.runSync();
+
     assertThat(kiteLastSeen("NFO", "A21IMPORTED25000CE"))
-        .as("an importer placeholder was never in a Kite dump")
+        .as("a sync must not stamp a row its dump never carried")
         .isNull();
   }
 
@@ -271,9 +282,23 @@ class InstrumentSyncIntegrationTest extends MarketDataIntegrationTestBase {
     repository.upsertSyntheticCont(
         "NFO", "A21NIFTY-FUT-CONT", "A21 continuous", "NSE", "NIFTY 50");
 
-    assertThat(kiteLastSeen("NFO", "A21NIFTY-FUT-CONT"))
-        .as("a synthetic row is ours, never something Kite asserted")
-        .isNull();
+    try {
+      assertThat(kiteLastSeen("NFO", "A21NIFTY-FUT-CONT"))
+          .as("a synthetic row is ours, never something Kite asserted")
+          .isNull();
+    } finally {
+      // ⚠ THE SAME CLEANUP byKeyFlagsRowsThatCarryNoMasterMetadata ALREADY DOES, for the same
+      // reason, and this method shipped without it in review. upsertSyntheticCont writes
+      // is_active = TRUE and tombstoneVanished exempts SYN-CONT, so the row survives every later
+      // sync — in a database with no per-method cleanup whose state persists ACROSS SUREFIRE
+      // RERUNS. It is a permanent +1 against
+      // syncPersistsFixtureWithStableKeysAndExactDecimals' exact countActive() equality. The first
+      // run is green only because that method is declared earlier; the second run is not, and a
+      // green first run is exactly what makes this easy to miss. In a finally so a failing
+      // assertion cannot poison the next run either.
+      jdbc.update(
+          "DELETE FROM instruments WHERE exchange = 'NFO' AND tradingsymbol = 'A21NIFTY-FUT-CONT'");
+    }
   }
 
   private Timestamp kiteLastSeen(String exchange, String tradingsymbol) {

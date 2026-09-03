@@ -43,13 +43,22 @@ third bucket that must be tombstoned by **neither**. Getting this wrong reactiva
 
 | Unit | Verify check (red→green) | Ships dark? |
 |---|---|---|
-| **A2-1** Wire `kite_last_seen_at = now()` into the Kite sync upsert | a sync run advances it for asserted rows and leaves importer placeholders NULL | yes (column unread) |
+| ✅ **A2-1** Wire `kite_last_seen_at = now()` into the Kite sync upsert — **MERGED 2026-09-03 [#1572](https://github.com/prashantm912/artha-yantra-2/pull/1572) @ `1eafd378`**, NOT YET DEPLOYED | a sync run advances it for asserted rows and leaves importer placeholders NULL | yes (column unread) |
 | **A2-2** Full-master retention: parse equities + F&O into a canonical view | WireMock fixture → expected `(exchange, tradingsymbol, upstox_key)` triples | yes |
 | **A2-3** Grammar synthesis + **shadow diff** | `ay_instrument_master_synth_mismatch_total` = 0 over ≥5 sessions incl. one weekly expiry | yes — writes nothing authoritative |
 | **A2-4** Surrogate tokens for Kite-tokenless rows + Kite-wire boundary refusal | a high-bit token at any Kite boundary is REFUSED and COUNTED | yes |
 | **A2-5** Per-source tombstone scoping | three-bucket table test: Kite-only, Upstox-only, importer | yes |
 
 **A2-1 before everything.** It is two lines and it is the input every later rule reads.
+
+✅ **A2-1 DONE — [#1572](https://github.com/prashantm912/artha-yantra-2/pull/1572) @ `1eafd378`, merged 2026-09-03.** It really was two lines, and both matter:
+
+- Set on **BOTH** branches of `InstrumentRepository.upsertFromStaging`. INSERT-only is the plausible wrong version and it looks finished — every row that already existed keeps its old value forever however many times Kite re-asserts it, so the column reads *"Kite has not seen this lately"* for precisely the rows Kite publishes most reliably. Red-proved.
+- `upsertSyntheticCont` left untouched, and pinned by its own test because it is a different production method: `SYN-CONT` rows are tokenless by design and are **ours, not Kite's**, which is why V060's backfill excluded them.
+
+⚠️ **NOT YET LIVE, and its verification is NOT the deploy.** The column is only written by the instrument sync, which runs **08:30 IST**, so the first real proof is the morning after the deploy — not the deploy itself. Check then: `kite_last_seen_at` advanced for Kite-asserted rows, still NULL for the 6 `SYN-CONT` rows and for importer placeholders.
+
+⚠️ **What review verified so a later unit need not re-derive it** (`timescale-domain-reviewer`, 2026-09-03): `now()` is `transaction_timestamp()`, so one dump yields ONE identical stamp across all its rows — which is what "this dump asserted these rows" should mean, and is why `clock_timestamp()` would be wrong. Leaving `tombstoneVanished` untouched is also correct rather than an omission: *"Kite last asserted this at T"* stays a true statement about the past after a row vanishes, and clearing it would destroy exactly the input **A2-5**'s per-source tombstone scoping needs. The `instruments_staging` V002-snapshot hazard is **inert** here — the upsert writes a literal `now()` and never selects the column (and V060 added it to staging regardless).
 
 ---
 

@@ -202,6 +202,32 @@ historical calls with a segment Kite rejects, in a burst of ≥5. First observat
 cause; NEW-14 (watch/identify the caller — likely a post-close candle warm touching a
 continuous-series symbol). In-session breaker transitions today: **zero**.
 
+✅ **CALLER IDENTIFIED AND FIXED, 2026-09-03 — and the guess above was close but not right.** It is
+not a candle *warm*: it is **`EodBackfillJob`**, whose cron is `0 45 15 * * MON-FRI`
+(`EodBackfillJob.java:49`) — matching the 15:44:58–15:45:01 burst to the second. It prefetches 1d
+for **every subscribed key** (`:69`), BFO SENSEX option contracts included, and
+`LiveHistoricalCandleGateway`'s `useContinuous` predicate gated on instrument TYPE (CE/PE) and
+interval (day) **but not the exchange** — so those fetches carried `continuous=1`, which Kite
+refuses for the BSE derivatives segment. Five subscribed BFO contracts, five permanent 400s, half
+a `COUNT_BASED` window of 10.
+
+⚠️ **The obvious discriminator is the wrong one, and it would have failed silently.** `TokenInfo`
+carries a `segment` and `BFO-OPT` reads like the natural gate — but `computed` live 2026-09-03,
+**175,766** NFO option rows and **6,423** BFO ones carry an **EMPTY** segment, so gating on it
+would have sent `continuous=0` across most of the NFO path that works today, with no failing test
+to reveal it. The fix gates on `exchange`, which is always populated, as an **NFO allow-list**
+rather than a BFO deny-list: only NFO is measured to serve continuous data (**1,289**
+`source='KITE'` option 1d bars against **ZERO** for BFO), and a deny-list would hand any future
+exchange the failing default.
+
+Two PRs, deliberately separate: [#1567](https://github.com/prashantm912/artha-yantra-2/pull/1567)
+stopped a permanent 400 being counted as an unavailable upstream (containment — a 400 can never
+mean "the upstream is down"), and [#1569](https://github.com/prashantm912/artha-yantra-2/pull/1569)
+stops the request being made at all. ⚠️ **Still unverified: whether BFO option 1d returns anything
+under `continuous=0`** — that needs a live Kite call. The failure direction is safe either way
+(today it returns nothing *and* poisons a shared breaker), but judge it at the next 15:45 pass
+rather than assuming.
+
 ### 6.4 09-01 watch items — resolutions
 
 - **Telegram/ntfy channels (09-01 §6.3):** healed. Today's whole-day telegram failure count:
@@ -245,7 +271,7 @@ Ledger §0 group G is the authoritative status; nothing applied by this run.
 
 | # | knob | status | today's evidence |
 |---|---|---|---|
-| NEW-14 (09-02) | post-close continuous-data 400 burst opens kite-rest breaker | **NEW WATCH** — 5× `invalid segment for continuous data` at 15:44:58–15:45:01, breaker OPEN 15:45; post-close, no capture impact; identify the 15:45 caller | §6.3 |
+| NEW-14 (09-02) | post-close continuous-data 400 burst opens kite-rest breaker | ✅ **CAUSE FOUND AND FIXED (09-03)** — the caller is `EodBackfillJob` (`0 45 15 * * MON-FRI`), which prefetched 1d for every subscribed key incl. BFO options while `useContinuous` gated on type+interval but **not exchange**. Containment [#1567](https://github.com/prashantm912/artha-yantra-2/pull/1567) (breaker ignores a permanent 400) + caller fix [#1569](https://github.com/prashantm912/artha-yantra-2/pull/1569) (NFO allow-list, gated on `exchange` because `segment` is EMPTY on 182k option rows). Residual watch: confirm BFO 1d actually returns bars under `continuous=0` at the next 15:45 pass | §6.3 |
 | NEW-13 (09-01) | recurring host outbound-network death | **OBSERVATION (owner/ops) — carried**; today clean (6th consecutive overnight downtime, but in-session network clean; telegram flood healed, §6.4) | §6.4 |
 | NEW-9 (08-26) | 60m-bias veto | **OPEN — day 6: 2 refused, both challenger-corroborated LOSERS**; tally 15 losers vs ~6 winners | §5.3 |
 | NEW-6 (08-19, reopened 08-31) | unexplained unpaired canary WARNs | **OPEN, shape SHARPENED — 2nd consecutive unpaired opening-bucket WARN at ~21–22 lots** (−1,430 / 0.56% today vs −1,365 / 1.8% on 09-01); reads systematic, small, rails-safe | §6.2 |

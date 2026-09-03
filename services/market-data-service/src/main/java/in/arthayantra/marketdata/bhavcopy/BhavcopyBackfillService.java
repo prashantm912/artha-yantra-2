@@ -28,6 +28,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -498,6 +499,19 @@ public class BhavcopyBackfillService {
     int dividends = 0;
     int nameChanges = 0;
     int unmatched = 0;
+    // ⚠️ THE DISCRIMINATOR, counted rather than hoped for. Review, 2026-09-03: keeping the first
+    // three unmatched subjects in FEED ORDER is biased toward the answer I already believed.
+    // Buybacks and AGMs vastly outnumber renames in this feed, so the samples would almost
+    // certainly all be buybacks — which I would then have read as "the feed genuinely lacks name
+    // changes", confirming my own hypothesis with evidence that could never have contradicted it.
+    // An instrument that can only produce one of the two answers it was built to distinguish is
+    // not an instrument.
+    //
+    // Counting the name-ish subjects directly IS decisive on the next run: >0 means they arrive
+    // and no parser claims them (widen the parser); 0 means the feed does not carry them (a
+    // different NSE endpoint is needed). The same ILIKE '%name%' probe was run by hand against the
+    // dividend table while investigating — it simply never made it into the instrument.
+    int unmatchedNameish = 0;
     List<String> unmatchedSamples = new ArrayList<>();
     for (CaRecord a : actions) {
       Optional<CorporateActionSubjectParser.Parsed> parsed =
@@ -534,10 +548,23 @@ public class BhavcopyBackfillService {
           // Buyback, AGM, EGM, listing changes — and anything a parser SHOULD have matched but
           // does not. Sampled rather than logged per row: the lookback holds thousands of these.
           unmatched++;
-          if (unmatchedSamples.size() < UNMATCHED_SAMPLES) {
-            String subject = a.subject() == null ? "" : a.subject();
-            unmatchedSamples.add(
-                subject.length() > 120 ? subject.substring(0, 120) + "…" : subject);
+          String subject = a.subject() == null ? "" : a.subject();
+          // ⚠️ "renam" as well as "name", and the test is what found this: "Renaming" does NOT
+          // contain "name" (r-e-n-a-m-i-n-g). A discriminator that misses the word most likely to
+          // appear in a rename subject would have reported 0 and been read as "the feed carries
+          // none" — the same false-confirmation this counter exists to prevent, one level down.
+          String lower = subject.toLowerCase(Locale.ROOT);
+          if (lower.contains("name") || lower.contains("renam")) {
+            unmatchedNameish++;
+            // A name-ish subject that no parser claimed is the interesting one, so it displaces a
+            // plain sample rather than queuing behind thousands of buybacks.
+            if (unmatchedSamples.size() < UNMATCHED_SAMPLES) {
+              unmatchedSamples.add(truncate(subject));
+            } else {
+              unmatchedSamples.set(UNMATCHED_SAMPLES - 1, truncate(subject));
+            }
+          } else if (unmatchedSamples.size() < UNMATCHED_SAMPLES) {
+            unmatchedSamples.add(truncate(subject));
           }
         }
         continue; // dividend / name-change / buyback / AGM — not a price adjustment
@@ -563,9 +590,16 @@ public class BhavcopyBackfillService {
         dividends,
         nameChanges,
         unmatched,
+        unmatchedNameish,
         unmatchedSamples.isEmpty() ? "" : " (e.g. " + String.join(" | ", unmatchedSamples) + ")");
     return new CaPartition(
-        actions.size(), applied, dividends, nameChanges, unmatched, List.copyOf(unmatchedSamples));
+        actions.size(),
+        applied,
+        dividends,
+        nameChanges,
+        unmatched,
+        unmatchedNameish,
+        List.copyOf(unmatchedSamples));
   }
 
   /**
@@ -577,11 +611,17 @@ public class BhavcopyBackfillService {
    * what stops the observability itself from silently mis-attributing.
    *
    * @param seen every record the feed returned inside the lookback
-   * @param ratios split/bonus rows written (the only arm that adjusts prices)
+   * @param ratios split/bonus ROWS written — deliberately not an arm of the partition. An action
+   *     whose ISIN has a BSE twin writes TWO rows, so this does not sum with the others against
+   *     {@code seen}, and the log line says so rather than inviting the arithmetic
    * @param dividends dividend rows written
    * @param nameChanges rename events written — the arm that has been at ZERO live
    * @param unmatched subjects no parser claimed: buybacks, AGMs, and anything a parser SHOULD have
-   *     matched but does not. This is the number that tells the two apart.
+   *     matched but does not
+   * @param unmatchedNameish how many of {@code unmatched} mention "name" — THE discriminator.
+   *     {@code >0} means rename subjects arrive and no parser claims them; {@code 0} means the feed
+   *     does not carry them at all. Raw samples cannot answer this, because the common categories
+   *     crowd them out
    * @param unmatchedSamples up to {@link #UNMATCHED_SAMPLES} truncated examples, enough to
    *     recognise a shape
    */
@@ -591,7 +631,13 @@ public class BhavcopyBackfillService {
       int dividends,
       int nameChanges,
       int unmatched,
+      int unmatchedNameish,
       List<String> unmatchedSamples) {}
+
+  /** Bounds one logged subject. Public NSE text, but the line still must not sprawl. */
+  private static String truncate(String subject) {
+    return subject.length() > 120 ? subject.substring(0, 120) + "…" : subject;
+  }
 
   /**
    * BSE corporate actions → ratios for BSE listings, including BSE-only scrips with no NSE twin

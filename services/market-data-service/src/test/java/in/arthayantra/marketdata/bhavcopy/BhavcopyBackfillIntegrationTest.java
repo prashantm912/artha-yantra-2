@@ -466,58 +466,6 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
    * Value Split" variant pins the KNOWN precedence hole: the split parser claims it first, so no
    * rename event is recorded for it.
    */
-  /**
-   * N2 follow-up, 2026-09-03: the feed's partition must be COUNTED, not just its successful arm.
-   *
-   * <p>⚠ The defect this guards is one the platform already lived through invisibly. The rename
-   * capture shipped 2026-08-10 and sat at ZERO rows for 24 days while ~5,063 non-ratio actions
-   * flowed through the same loop every run — and nothing could see it, because a subject matching
-   * NEITHER parser fell through the {@code continue} leaving no log line and no count. "The feed
-   * carries no name changes" and "the parser matches no name changes" were indistinguishable from
-   * outside: both look like silence.
-   *
-   * <p>The fixture deliberately contains one of each arm plus an unmatched buyback, because a
-   * partition that only ever sees matched subjects cannot demonstrate the arm that was missing.
-   */
-  @Test
-  @Order(10)
-  void theCorporateActionFeedPartitionIsCounted() {
-    NseCorporateActionFetcher nseActions =
-        (from, to) ->
-            List.of(
-                new NseCorporateActionFetcher.CaRecord(
-                    "PARTBONUS", "INEPART0001", D2, "Bonus 1:1"),
-                new NseCorporateActionFetcher.CaRecord(
-                    "PARTDIV", "INEPART0002", D2, "Interim Dividend Rs 5 Per Share"),
-                new NseCorporateActionFetcher.CaRecord(
-                    "PARTNAME",
-                    "INEPART0003",
-                    D2,
-                    "Change In Name From Alpha Limited To Beta Limited"),
-                new NseCorporateActionFetcher.CaRecord(
-                    "PARTBUYBACK", "INEPART0004", D2, "Buyback Of Equity Shares"));
-    BhavcopyBackfillService svc =
-        new BhavcopyBackfillService(
-            emptyNse(), nseRepo, emptyBse(), bseRepo, nseActions, emptyBseCa(), caRepo,
-            dividendRepo, renameRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10,
-            90, 7, 420);
-
-    BhavcopyBackfillService.CaPartition p = svc.runNseRatios();
-
-    assertThat(p.seen()).as("every record the feed returned").isEqualTo(4);
-    assertThat(p.ratios()).isEqualTo(1);
-    assertThat(p.dividends()).isEqualTo(1);
-    assertThat(p.nameChanges())
-        .as("the arm that has been at ZERO in production since 2026-08-10")
-        .isEqualTo(1);
-    assertThat(p.unmatched())
-        .as("the buyback — the arm that previously left NO trace of any kind")
-        .isEqualTo(1);
-    assertThat(p.unmatchedSamples())
-        .as("a sample must be carried, or the count cannot be diagnosed")
-        .containsExactly("Buyback Of Equity Shares");
-  }
-
   @Test
   @Order(9)
   void changeInNameIsCapturedInsteadOfDiscarded() {
@@ -583,6 +531,108 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
             jdbc.queryForObject(
                 "SELECT count(*) FROM candles WHERE tradingsymbol LIKE 'RENAM%'", Long.class))
         .isZero();
+  }
+
+  /**
+   * N2 follow-up, 2026-09-03: the feed's partition must be COUNTED, not just its successful arm.
+   *
+   * <p>⚠ The defect this guards is one the platform already lived through invisibly. The rename
+   * capture shipped 2026-08-10 and sat at ZERO rows for 24 days while ~5,063 non-ratio actions
+   * flowed through the same loop every run — and nothing could see it, because a subject matching
+   * NEITHER parser fell through the {@code continue} leaving no log line and no count. "The feed
+   * carries no name changes" and "the parser matches no name changes" were indistinguishable from
+   * outside: both look like silence.
+   *
+   * <p>The fixture deliberately contains one of each arm plus an unmatched buyback, because a
+   * partition that only ever sees matched subjects cannot demonstrate the arm that was missing.
+   */
+  @Test
+  @Order(10)
+  void theCorporateActionFeedPartitionIsCounted() {
+    NseCorporateActionFetcher nseActions =
+        (from, to) ->
+            List.of(
+                new NseCorporateActionFetcher.CaRecord(
+                    "PARTBONUS", "INEPART0001", D2, "Bonus 1:1"),
+                new NseCorporateActionFetcher.CaRecord(
+                    "PARTDIV", "INEPART0002", D2, "Interim Dividend Rs 5 Per Share"),
+                new NseCorporateActionFetcher.CaRecord(
+                    "PARTNAME",
+                    "INEPART0003",
+                    D2,
+                    "Change In Name From Alpha Limited To Beta Limited"),
+                new NseCorporateActionFetcher.CaRecord(
+                    "PARTBUYBACK", "INEPART0004", D2, "Buyback Of Equity Shares"));
+    BhavcopyBackfillService svc =
+        new BhavcopyBackfillService(
+            emptyNse(), nseRepo, emptyBse(), bseRepo, nseActions, emptyBseCa(), caRepo,
+            dividendRepo, renameRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10,
+            90, 7, 420);
+
+    BhavcopyBackfillService.CaPartition p = svc.runNseRatios();
+
+    assertThat(p.seen()).as("every record the feed returned").isEqualTo(4);
+    assertThat(p.ratios()).isEqualTo(1);
+    assertThat(p.dividends()).isEqualTo(1);
+    assertThat(p.nameChanges())
+        .as("the arm that has been at ZERO in production since 2026-08-10")
+        .isEqualTo(1);
+    assertThat(p.unmatched())
+        .as("the buyback — the arm that previously left NO trace of any kind")
+        .isEqualTo(1);
+    assertThat(p.unmatchedNameish())
+        .as("no unmatched subject mentions a name here — the feed-lacks-them shape")
+        .isZero();
+    assertThat(p.unmatchedSamples())
+        .as("a sample must be carried, or the count cannot be diagnosed")
+        .containsExactly("Buyback Of Equity Shares");
+  }
+
+  /**
+   * ⚠ THE CASE THE FIRST VERSION OF THIS INSTRUMENT COULD NOT SEE, and the reason it was reworked.
+   *
+   * <p>The original kept the first three unmatched subjects in FEED ORDER. Buybacks and AGMs vastly
+   * outnumber renames, so those three would almost certainly all have been buybacks — and that
+   * reads as "the feed genuinely carries no name changes", which is exactly the hypothesis the
+   * author already held. An instrument that can only produce one of the two answers it exists to
+   * distinguish is not an instrument, so the discriminator is COUNTED now rather than sampled.
+   *
+   * <p>This fixture is the other half of {@code theCorporateActionFeedPartitionIsCounted}: a
+   * name-bearing subject that NO parser claims, buried behind enough buybacks to have been crowded
+   * out of a naive sample.
+   */
+  @Test
+  @Order(11)
+  void aNameishSubjectNoParserClaimsIsCountedAndSurfaced() {
+    NseCorporateActionFetcher nseActions =
+        (from, to) ->
+            List.of(
+                new NseCorporateActionFetcher.CaRecord(
+                    "NAMEISH1", "INENAMEI001", D2, "Buyback Of Equity Shares"),
+                new NseCorporateActionFetcher.CaRecord(
+                    "NAMEISH2", "INENAMEI002", D2, "Annual General Meeting"),
+                new NseCorporateActionFetcher.CaRecord(
+                    "NAMEISH3", "INENAMEI003", D2, "Extra Ordinary General Meeting"),
+                new NseCorporateActionFetcher.CaRecord(
+                    "NAMEISH4", "INENAMEI004", D2, "Scheme Of Arrangement And Renaming Of Company"));
+    BhavcopyBackfillService svc =
+        new BhavcopyBackfillService(
+            emptyNse(), nseRepo, emptyBse(), bseRepo, nseActions, emptyBseCa(), caRepo,
+            dividendRepo, renameRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10,
+            90, 7, 420);
+
+    BhavcopyBackfillService.CaPartition p = svc.runNseRatios();
+
+    assertThat(p.unmatched()).isEqualTo(4);
+    assertThat(p.nameChanges())
+        .as("the rename parser did NOT claim it — that is the whole point")
+        .isZero();
+    assertThat(p.unmatchedNameish())
+        .as("but it IS counted, which is what distinguishes a parser miss from an absent category")
+        .isEqualTo(1);
+    assertThat(p.unmatchedSamples())
+        .as("and it is surfaced despite arriving fourth, behind a full sample of buybacks")
+        .contains("Scheme Of Arrangement And Renaming Of Company");
   }
 
   private static BhavcopyFetcher emptyNse() {

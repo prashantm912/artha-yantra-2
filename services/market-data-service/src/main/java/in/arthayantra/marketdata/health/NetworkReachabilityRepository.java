@@ -71,19 +71,18 @@ public class NetworkReachabilityRepository {
   /**
    * Open an episode.
    *
-   * <p>⚠ TWO guards, because they stop DIFFERENT things and neither is sufficient alone.
-   * {@code ON CONFLICT (episode_key)} makes a RETRY of the same open idempotent — the caller
-   * re-derives the same key from the same observed start, so a retry after an ambiguous commit is a
-   * no-op. It does NOT stop a SECOND, overlapping episode, because that one carries a different
-   * key; the {@code WHERE NOT EXISTS} does, and the unique partial index in V061 enforces it even
-   * if this predicate races. An earlier revision had only the first guard and claimed it delivered
-   * both.
+   * <p>⚠ THE ONE-OPEN-EPISODE RULE IS WHAT MATTERS HERE, and it is the {@code WHERE NOT EXISTS}
+   * plus the unique partial index in V061 that deliver it — never the {@code UNIQUE} on
+   * {@code episode_key}. Each pass mints a key from its own instant, so two attempts never collide
+   * on it; {@code ON CONFLICT (episode_key) DO NOTHING} is a cheap backstop against an
+   * ambiguously-committed write being re-issued verbatim, and nothing more. An earlier revision
+   * described it as the retry-idempotency mechanism, which was true only while the caller retained
+   * the original start and re-derived the same key — it no longer does.
    *
    * @return whether the row is now present — {@code false} ONLY when the write failed. The caller
-   *     needs this: if an outage RECOVERS before its opening write ever lands, nothing in the
-   *     database refers to it and the incident would be lost entirely, which is the one outcome
-   *     this table exists to prevent. Zero rows written because an episode is already open is
-   *     SUCCESS, not failure — there is nothing left to retry.
+   *     does not retry from memory: it re-observes on its next pass and writes then, so this is
+   *     used to LOG the gap rather than to drive recovery. Zero rows written because an episode is
+   *     already open is SUCCESS, not failure — the desired state already holds.
    */
   public boolean open(
       String episodeKey,
@@ -119,25 +118,22 @@ public class NetworkReachabilityRepository {
   /**
    * Close the open episode. A no-op if it was already closed or never opened.
    *
-   * @return whether the episode is now closed — {@code false} ONLY when the write failed.
-   *     <p>⚠ The caller needs this, and a {@code void} here is what made the gap. A swallowed
-   *     close leaves the row open; if a NEW outage then begins before the next pass, the caller
-   *     sees an episode already open and writes nothing, silently MERGING two incidents into one
-   *     row that reads as a single long outage which never happened. Returning the outcome lets the
-   *     caller retry with the instant recovery was ACTUALLY observed. Fail-soft is preserved: this
-   *     still never throws into the scheduled pass.
+   * @return whether the episode is now closed — {@code false} ONLY when the write failed. A
+   *     swallowed close leaves the row open, and the next pass sees exactly that and closes it
+   *     then; the outcome is returned so the gap is LOGGED rather than invisible. Fail-soft is
+   *     preserved: this still never throws into the scheduled pass.
    *     <p>Zero rows updated is SUCCESS, not failure — the row was already closed, so the desired
    *     state holds and there is nothing to retry.
    */
   public boolean close(String episodeKey, Instant endedAt) {
     try {
       jdbc.update(
-          // ⚠️ GREATEST, because a retained recovery instant is REPLAYED unchanged and the row
-          // carries CHECK (ended_at >= started_at). If the host clock steps backwards between the
-          // start of an outage and the observation of its recovery, an unclamped retry violates
-          // that constraint, fails, is retained, and is retried with the SAME invalid value
-          // forever — leaving the episode permanently open and merging every later outage into
-          // it. Clamping turns an unrecoverable state into a zero-length episode.
+          // ⚠️ GREATEST, because the row carries CHECK (ended_at >= started_at) and this value is
+          // the closing pass's own clock. If the host clock steps backwards between an episode
+          // opening and the pass that closes it, an unclamped write violates that constraint and
+          // fails — and it fails again every pass thereafter for the same reason, leaving the
+          // episode open forever and absorbing every later outage into it. Clamping turns a
+          // permanently-stuck episode into a zero-length one.
           "UPDATE network_reachability_episodes"
               + " SET ended_at = GREATEST(CAST(? AS TIMESTAMPTZ), started_at)"
               + " WHERE episode_key = ? AND ended_at IS NULL",

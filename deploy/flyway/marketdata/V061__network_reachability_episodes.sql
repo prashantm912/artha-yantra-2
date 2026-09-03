@@ -15,6 +15,16 @@
 -- problem (open/close, crash-safe, idempotent by key) and is proven in production; it lives in
 -- another service, so the shape is reused rather than the table.
 --
+-- ⚠️ WHAT A ROW'S TIMESTAMPS MEAN, because it is not what a reader assumes. The writer keeps NO
+-- state between passes: started_at is the first PASS THAT SUCCESSFULLY WROTE the row and ended_at
+-- the first that closed it, so both are late by up to one probe period, and an outage that begins
+-- and ends between two passes leaves no row at all. That is a deliberate trade (owner,
+-- 2026-09-02): the earlier revision retained the observed boundaries across failed writes, and
+-- every review round found a fresh way for that memory to corrupt the record -- a cleared start
+-- resurrected as the next outage's key, a pending episode replayed after its own close, two
+-- incidents merged into one authoritative-looking row. A record that is coarse is usable; a record
+-- that is confidently wrong is not.
+
 -- Record-only by design (owner, 2026-09-02). It never pages: when this fires, the paging channels
 -- are among the things that are down -- measured 2026-09-01, telegram AND ntfy both dead while the
 -- stack looked healthy -- so an alert is precisely the mechanism that cannot be relied upon. The
@@ -23,12 +33,12 @@
 CREATE TABLE network_reachability_episodes (
     id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
-    -- Idempotency for a RETRY of the same open: a re-issued insert carrying the same key is a
-    -- no-op rather than a duplicate.
-    -- ⚠️ This UNIQUE does NOT enforce one-open-at-a-time, and an earlier revision of this file
-    -- claimed that it did. The key embeds the episode's start millisecond, so a second pass
-    -- generates a DIFFERENT key and inserts cleanly past it. The rule is enforced by
-    -- network_reachability_one_open_idx below; this constraint only makes a retry safe.
+    -- A stable handle for one incident, and a backstop against one insert being re-issued
+    -- verbatim after an ambiguous commit.
+    -- ⚠️ This UNIQUE does NOT enforce one-open-at-a-time, and it is not the retry mechanism
+    -- either -- both claims have appeared here. The key embeds the writing pass's own
+    -- millisecond, so two attempts always carry DIFFERENT keys and neither collides with the
+    -- other. One-open-at-a-time is enforced by network_reachability_one_open_idx below.
     episode_key    TEXT        NOT NULL UNIQUE,
 
     started_at     TIMESTAMPTZ NOT NULL,

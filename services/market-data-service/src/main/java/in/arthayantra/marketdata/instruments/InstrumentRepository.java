@@ -91,6 +91,18 @@ public class InstrumentRepository {
    * duplicate (exchange, tradingsymbol) rows; {@code DISTINCT ON} collapses them to one
    * (highest instrument_token wins) so a single ON CONFLICT never touches the same key twice
    * ("ON CONFLICT DO UPDATE command cannot affect row a second time").
+   *
+   * <p>⚠️ <b>H26 A2-1 — this is the ONLY writer that may set {@code kite_last_seen_at}, and that is
+   * the column's entire meaning: "Kite's own dump asserted this row at this moment".</b> It is
+   * deliberately NOT the same as {@code last_seen_at}, which any writer advances. Later U-A2 units
+   * read the distinction to tell a row Kite still publishes from one that merely exists in our
+   * table — {@link #upsertSyntheticCont} must therefore leave it NULL forever, which it does by
+   * never naming the column, and V060's backfill excluded {@code SYN-CONT} for the same reason.
+   *
+   * <p>⚠️ Set on BOTH branches. On INSERT only, a row that already existed would keep a NULL
+   * forever however many times Kite re-asserted it — the column would then read as "Kite has never
+   * seen this" for the rows Kite publishes most reliably, which inverts its meaning. Nothing reads
+   * it yet, so that defect would have been invisible until a later unit trusted it.
    */
   public int upsertFromStaging() {
     return jdbc.update(
@@ -98,11 +110,12 @@ public class InstrumentRepository {
         INSERT INTO instruments
           (exchange, tradingsymbol, instrument_token, exchange_token, name, segment,
            instrument_type, underlying_exchange, underlying_tradingsymbol, expiry,
-           strike, tick_size, lot_size, is_active, first_seen_at, last_seen_at, updated_at)
+           strike, tick_size, lot_size, is_active, first_seen_at, last_seen_at,
+           kite_last_seen_at, updated_at)
         SELECT DISTINCT ON (exchange, tradingsymbol)
                exchange, tradingsymbol, instrument_token, exchange_token, name, segment,
                instrument_type, underlying_exchange, underlying_tradingsymbol, expiry,
-               strike, tick_size, lot_size, TRUE, now(), now(), now()
+               strike, tick_size, lot_size, TRUE, now(), now(), now(), now()
         FROM instruments_staging
         ORDER BY exchange, tradingsymbol, instrument_token DESC
         ON CONFLICT (exchange, tradingsymbol) DO UPDATE SET
@@ -119,6 +132,7 @@ public class InstrumentRepository {
           lot_size = EXCLUDED.lot_size,
           is_active = TRUE,
           last_seen_at = now(),
+          kite_last_seen_at = now(),
           updated_at = now()
         """);
   }

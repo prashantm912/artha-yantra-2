@@ -53,8 +53,10 @@ import org.springframework.stereotype.Component;
  * to open a second row, so a later recovery closes the FIRST — one authoritative row spanning two
  * incidents and the healthy gap between them.
  *
- * <p>A row is now an unconditionally true statement about one instant, and nothing a later pass
- * does can falsify it. Incidents are grouped at read time, where the judgement about what separates
+ * <p>A row is now an unconditionally true statement about ONE PASS — "during the pass ending at
+ * {@code observed_at}, this many of these destinations were unreachable" — and nothing a later pass
+ * does can falsify it. (Not about one INSTANT: the destinations are probed sequentially and the
+ * clock is read after the loop, so a pass spans as much as its timeouts allow.) Incidents are grouped at read time, where the judgement about what separates
  * two outages belongs and where getting it wrong cannot corrupt the facts. A failed insert loses
  * one observation out of one every five minutes and needs no recovery path — which is why there
  * is none to get wrong.
@@ -202,7 +204,13 @@ public class NetworkReachabilityProbe {
         String.join(",", failed))) {
       // No retry, by design. The next pass observes independently; one lost row out of one every
       // five minutes is a gap in the record, and the log line above is what covers it.
-      log.warn("reachability: the {} observation did not persist — see the WARN above for it", now);
+      // ⚠ "reported a failure", not "did not persist": a connection lost after the server commits
+      // reports failure for a row that exists. Nothing retries on it, so the ambiguity costs at
+      // most a duplicate-looking observation — but the log should not assert more than it knows.
+      log.warn(
+          "reachability: the write for the pass ending {} reported a failure — the observation may"
+              + " or may not have landed; see the WARN above for it",
+          now);
     }
   }
 

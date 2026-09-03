@@ -18,9 +18,15 @@
 -- outage A, a healthy gap, and outage B. A record that merges two incidents is worse than no
 -- record, because it is confidently wrong rather than absent.
 --
--- A row here is instead an unconditionally TRUE statement: at this instant, this many of these
--- probed destinations were unreachable. No sequence of passes, no failed write, no restart and no
--- clock step can make an existing row false. A failed insert loses exactly one observation and
+-- A row here is instead an unconditionally TRUE statement: DURING THE PASS ENDING AT observed_at,
+-- this many of these probed destinations were unreachable. No sequence of passes, no failed write,
+-- no restart and no clock step can make an existing row false.
+--
+-- ⚠️ "the pass ending at", not "the instant of": destinations are probed SEQUENTIALLY and the clock
+-- is read after the loop, so a row covers a window as wide as that pass's timeouts allow (five
+-- destinations at a five-second connect timeout is up to twenty-five seconds). It bounds the
+-- outage from ABOVE. Reading observed_at as a point sample would make a gap-based grouping look
+-- more precise than it is. A failed insert loses exactly one observation and
 -- needs no retry, because the next pass makes its own.
 --
 -- The cost is that INCIDENTS are derived at read time rather than stored. That is where the
@@ -49,6 +55,8 @@
 CREATE TABLE network_reachability_observations (
     id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
+    -- ⚠️ The END of the probe pass, not a point sample: the destinations are walked sequentially
+    -- and the clock is read once, afterwards.
     observed_at    TIMESTAMPTZ NOT NULL,
 
     -- Both numbers are kept, never just the ratio: "3 of 5 failed" and "3 of 3 failed" are

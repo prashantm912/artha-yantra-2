@@ -11,6 +11,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -87,13 +88,14 @@ class NetworkReachabilityQuorumTest {
   // ---------------------------------------------------------------------------------------------
 
   @Test
-  @DisplayName("a continuing outage writes ONE ROW PER PASS, each stamped with its own instant")
+  @DisplayName("a continuing outage writes ONE ROW PER PASS — the episode model's discriminator")
   void aContinuingOutageWritesOneRowPerPass() {
-    // The design, not an inefficiency. The five earlier revisions wrote one row per INCIDENT and
-    // had to remember, between passes, which incident was in flight - six review rounds and
-    // thirteen findings later, a failed close plus a new outage still merged two incidents and the
-    // healthy gap between them into one authoritative row. Here each pass makes an independent
-    // true statement and the grouping happens in SQL.
+    // ⚠ THIS is the test that the episode implementation cannot pass, and it is the only one in
+    // this file that can honestly claim so — the episode model wrote ONE row for a continuing
+    // outage and re-opened nothing on passes 2 and 3. The neighbouring failed-write and
+    // two-outage tests are weaker discriminators and say so themselves; keeping that distinction
+    // straight matters, because a suite whose tests all claim to be the decisive one is a suite
+    // nobody can reason about.
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
     when(repo.record(any(), anyInt(), anyInt(), anyInt(), anyString())).thenReturn(true);
 
@@ -156,15 +158,18 @@ class NetworkReachabilityQuorumTest {
     verify(repo).record(eq(T0), eq(5), eq(3), eq(3), eq("kite,telegram,ntfy"));
     verify(repo).record(eq(T0.plusSeconds(300)), eq(5), eq(4), eq(3), eq("kite,nse,telegram,ntfy"));
     verify(repo, times(2)).record(any(), anyInt(), anyInt(), anyInt(), anyString());
+    verifyNoMoreInteractions(repo);
   }
 
   @Test
-  @DisplayName("an outage, a recovery and a SECOND outage are three independent true rows")
+  @DisplayName("an outage, a recovery and a SECOND outage are TWO independent rows")
   void twoOutagesSeparatedByRecoveryAreNeverMerged() {
-    // The exact sequence that produced the Critical in the episode model: a close that does not
-    // land, then a new outage before the next healthy pass, yielding one row spanning both
-    // incidents and the healthy gap. Here there is no close to fail, so the sequence cannot arise -
-    // and the gap between rows is what a reader groups on.
+    // ⚠ An earlier version of this name promised THREE rows while asserting two, and its comment
+    // claimed to reproduce "the exact sequence" of the Critical. Neither was true, and both
+    // overstated the test: the Critical needed a FAILED CLOSE, which this design has no way to
+    // express, so the sequence cannot be set up here at all. What this does pin is the weaker but
+    // real property that a healthy pass writes NOTHING, so two outages leave two rows with a
+    // readable gap rather than one row spanning both.
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
     when(repo.record(any(), anyInt(), anyInt(), anyInt(), anyString())).thenReturn(true);
 
@@ -184,6 +189,8 @@ class NetworkReachabilityQuorumTest {
     verify(repo).record(eq(T0), anyInt(), anyInt(), anyInt(), anyString());
     verify(repo).record(eq(T0.plusSeconds(600)), anyInt(), anyInt(), anyInt(), anyString());
     verify(repo, times(2)).record(any(), anyInt(), anyInt(), anyInt(), anyString());
+    // The healthy middle pass read nothing and wrote nothing - asserted, not assumed.
+    verifyNoMoreInteractions(repo);
   }
 
   // ---------------------------------------------------------------------------------------------

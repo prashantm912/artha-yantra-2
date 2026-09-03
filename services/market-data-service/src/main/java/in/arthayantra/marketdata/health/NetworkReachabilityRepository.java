@@ -35,9 +35,18 @@ public class NetworkReachabilityRepository {
   /**
    * Record one pass in which the quorum said the host's own network was down.
    *
-   * @return whether the row landed. The caller does not retry on {@code false} — it logs, and the
-   *     next pass observes independently. Returned rather than {@code void} so a database problem
-   *     is visible in the log instead of silently thinning the record.
+   * <p>⚠ {@code observedAt} is the END of the pass, not an instant the whole world was sampled at:
+   * the destinations are probed SEQUENTIALLY and the clock is read after the loop. The row means
+   * "during the pass ending at {@code observedAt}", and the difference is real — five destinations
+   * at a five-second timeout can span twenty-five seconds.
+   *
+   * @return what the write REPORTED, which is not quite the same as what happened. {@code true}
+   *     means the row landed. {@code false} means the write reported failure — and a connection
+   *     that drops after the server has already committed reports failure for a row that exists,
+   *     so the outcome is strictly UNKNOWN rather than "did not persist". That ambiguity is
+   *     harmless here and worth stating rather than papering over: nothing retries on it, so the
+   *     worst case is one duplicate-looking observation, and duplicates group the same way as
+   *     singles. The caller uses this only to LOG the gap, never to drive recovery.
    */
   public boolean record(
       Instant observedAt,

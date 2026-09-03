@@ -285,3 +285,60 @@ Ledger §0 group G is the authoritative status; nothing applied by this run.
   regime; per §3.19 the session is REGIME-class for SENSEX-family tuning evidence.
 - Read-only run: SELECTs, log/snapshot reads, `docker inspect`, in-container health GETs. No
   restarts, deploys, writes, config changes, republishes. Docs-only PR: this file + rollup rows.
+
+---
+
+## 9 Post-chain addendum (interactive session, 2026-09-03 21:15 IST)
+
+Written after the evening chain, which the 15:45–16:40 scheduled run could not see (§8). Read-only;
+nothing was recreated, armed or deployed.
+
+### 9.1 N2 is ANSWERED — the feed does not carry name-change subjects
+
+The partition counter shipped today ([#1576](https://github.com/prashantm912/artha-yantra-2/pull/1576))
+produced its first live reading on the 18:45 chain. `computed`:
+
+```
+NSE corporate-actions 2025-07-10..2026-09-03: 2660 actions seen — 203 split/bonus applied,
+2331 dividends, 0 name-changes, 210 unmatched, 0 name-ish
+```
+
+**Zero of 210 unmatched subjects mention `"name"` or `"renam"`.** So rename subjects are not
+arriving at `/api/corporates-corporateActions?index=equities` at all — the parser is fine (an
+existing IT proves it handles three realistic shapes), and **widening it would be widening
+something with nothing to match.** `symbol_rename_events` stays at 0 and `symbol_lineage` at its 1
+`WITHHELD` row. Any remedy is SOURCING, on an endpoint nobody has measured, and it is not started.
+
+⚠️ **The instrument that produced this number is itself slightly broken, and the number still
+stands.** Two `.replace()` calls in the review-fix script silently no-opped (they carried no
+assert), so the format string kept 8 placeholders while the args list grew to 9 — SLF4J bound the
+trailing `{}` to `unmatchedNameish` and dropped the samples, printing `210 unmatched0`. **That
+trailing `0` IS the discriminator**, so the reading is sound; what is lost is the example subjects,
+which would have shown what the 210 look like. The commit message and PR body both claim two
+log-wording fixes that never landed. Cosmetic, no behaviour change, `CaPartition` and its tests are
+correct. One-line fix, not done.
+
+### 9.2 NEW-14's open question is CLOSED in the affirmative
+
+The PR deliberately refused to claim BFO coverage, only that a permanently-failing request would
+stop poisoning a shared breaker. `computed` 21:12 IST: **BFO option 1d bars 0 → 407** under
+`continuous=0` (NFO 1,289 → 1,331). The fetch does return data. Recorded because the honest
+pre-state was "absent BFO rows would still be a successful deploy" — it turned out better than the
+bar that was set.
+
+### 9.3 Deploy verified
+
+market-data recreated 15:36 IST, all 11 containers healthy at 21:12. **V061 applied** —
+`to_regclass` non-null, **0 rows, which is the correct state**: a clean network writes nothing, so
+an empty table is the feature working. A2-1's `kite_last_seen_at` remains DEPLOYED-NOT-EXERCISED;
+its first real pass is tomorrow's 08:30 sync (task `verify-a21-kite-last-seen-20260904`).
+
+### 9.4 ⚠️ OPEN ACTION, owner/architect: the strategy-signal log barrier
+
+§6.1's proposal is NOT actioned. `docker logs ay-strategy-signal-service` still ends at **09-01
+12:41 IST** for every read mode — third consecutive day, and the `--tail` workaround is now dead
+too. Every log-derived check in this file is **UNKNOWABLE rather than zero**, and each further
+session compounds the blind spot. A recreate would clear it, and the post-chain window is the safe
+time — but it restarts the live signal engine, so it is an owner call and was deliberately left
+alone. ⚠️ Note the container has been up 12 hours and is healthy: this is a log-plumbing fault, not
+a sick service, and recreating it buys readability, not correctness.

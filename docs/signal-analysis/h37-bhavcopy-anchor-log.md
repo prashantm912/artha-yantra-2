@@ -220,3 +220,59 @@ the earliest hour with same-day support.
   for `trade_date = 2026-09-02`; a mismatch would flip session 6 to NO and un-meet the bar.
 - ⚠️ **This run appended only. Nothing was ingested, restarted, deployed or re-crontabbed, and the
   edit is left UNCOMMITTED** for the next interactive session to carry.
+
+---
+
+## WATCH CLOSED — 2026-09-03. Bar MET, anchor NOT moved. Owner decision; do not re-propose.
+
+**Session 6's cross-check is done, and it PASSES.** The 09-02 run left it open — *"a later
+interactive session can confirm `nse_eod_bhavcopy` stores 3,482 / EQ 2,646 for
+`trade_date = 2026-09-02`; a mismatch would flip session 6 to NO and un-meet the bar."*
+
+`computed` 2026-09-03 10:00 IST:
+
+```
+SELECT count(*), count(*) FILTER (WHERE series='EQ'), min(fetched_at), max(fetched_at)
+  FROM marketdata.nse_eod_bhavcopy WHERE trade_date = DATE '2026-09-02';
+-- 3482 | 2646 | 2026-09-02 13:15:12+00 | 2026-09-02 13:15:13+00
+```
+
+**3,482 / EQ 2,646 — the probe's numbers exactly.** `fetched_at` 13:15:12 UTC is **18:45:12 IST**,
+i.e. the anchor run itself: the file the 18:24 probe read is byte-for-count the file the 18:45
+anchor stored. Session 6 stands, and the tally is **5 clean cited sessions (08-24, 08-27, 08-28,
+08-31, 09-02) — THE BAR IS MET.**
+
+**And the anchor is staying at 18:45 anyway.** Owner ruling, 2026-09-03.
+
+⚠️ **The bar being met is not the same as the move being worth making, and this watch outlived its
+own reason.** It was commissioned to buy headroom against the premise in ledger [[H37]] — *"the
+evening chain's last slot is 18:59 and the machine is routinely shut down at ~19:00, a one-minute
+margin."* **That premise was REFUTED on 2026-08-28**, from the Windows System log (event 6006, 30
+days): 13 shutdowns, **zero** in the 18:45–19:15 window, the box routinely running to ~02:00–03:00,
+and the very 08-20 shutdown that created the row landing at **20:28** — ~90 minutes after the chain
+finished. The 21 minutes this watch proved available are 21 minutes nothing needs.
+
+What was weighed and did not carry it:
+
+- **The anchor's own jitter is real but harmless.** One measured night it started **18:49:21**, not
+  18:45. Under the refuted premise that ate most of a one-minute margin; under the true one it eats
+  four minutes of a several-hour one.
+- **The downstream margin has never been consumed.** Screens-done to the 18:52 settle, post-#1418:
+  minimum **211 s** across seven sessions.
+- **Moving it is not a one-line edit.** Every job 18:45→18:59 is pinned by its own cron and would
+  have to shift as a unit — with each live value re-read from `docker inspect`, never the YAML — or
+  the settles run before the bhavcopy they depend on. Real risk, for no benefit.
+
+**What this watch actually produced, and it is worth more than the move would have been:** three
+corrections that outlive it. (1) `ingest_runs.rows_written` counts rows SUBMITTED, not STORED —
+bhavcopy writes `ON CONFLICT DO NOTHING`, so the "progressive 16:40→18:04 landing window" inferred
+from it never existed; every row for a trade date lands in a single minute. (2) The completeness bar
+built on that number was wrong by ~2.5× (~8,300–8,600 briefed vs 3,296–3,506 actually stored),
+which would have made the watch **unreachable by construction** — failing safe forever while looking
+healthy. (3) The `min/max(bucket)` coverage read that says "09:15→15:29, full coverage" can be
+satisfied by a 15:29 bar written at 18:49 by the EOD ingest.
+
+**The scheduled task `measure-bhavcopy-anchor-earliness` should now be retired** — like the H26 rate
+capture, disabled rather than deleted so the prompt and this record survive if the question ever
+reopens. ⚠️ Retiring it is evidence this INSTRUMENT has stopped producing information, **not** that
+an earlier anchor was proven wrong: it was proven available and then declined.

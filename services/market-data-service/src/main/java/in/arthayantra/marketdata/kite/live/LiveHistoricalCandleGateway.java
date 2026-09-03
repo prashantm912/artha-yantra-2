@@ -52,7 +52,7 @@ public class LiveHistoricalCandleGateway implements HistoricalCandleGateway {
   // ⚠️ Allow-list, not a BFO deny-list: only NFO is measured to serve continuous data (1 289
   // source='KITE' option 1d bars against ZERO for BFO). MCX and CDS may well serve it too, but we
   // trade neither, and a deny-list would hand any future exchange the failing default.
-  private static final String CONTINUOUS_EXCHANGE = "NFO";
+  private static final Set<String> CONTINUOUS_EXCHANGES = Set.of("NFO");
 
   private final RestClient restClient;
   private final String apiKey;
@@ -106,7 +106,7 @@ public class LiveHistoricalCandleGateway implements HistoricalCandleGateway {
     boolean useContinuous =
         CONTINUOUS_TYPES.contains(info.instrumentType())
             && "day".equals(kiteInterval)
-            && CONTINUOUS_EXCHANGE.equals(key.exchange());
+            && CONTINUOUS_EXCHANGES.contains(key.exchange());
     String fromParam = KITE_PARAM.format(OffsetDateTime.ofInstant(from, in.arthayantra.common.web.time.Ist.ZONE));
     String toParam = KITE_PARAM.format(OffsetDateTime.ofInstant(to, in.arthayantra.common.web.time.Ist.ZONE));
 

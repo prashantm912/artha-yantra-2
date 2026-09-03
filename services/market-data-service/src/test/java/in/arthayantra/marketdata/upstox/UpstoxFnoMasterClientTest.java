@@ -45,20 +45,36 @@ class UpstoxFnoMasterClientTest {
 
   // 1785263399000 ms = 2026-07-28T23:59:59+05:30 IST → expiry date 2026-07-28
   // 1782844199000 ms = 2026-06-30T23:59:59+05:30 IST → expiry date 2026-06-30
+  // ⚠️ EVERY row carries an exchange_token, because every row in the real master does — `computed`
+  // 2026-09-03: 117,344 of 117,344, none absent. An earlier version of this fixture gave the token
+  // only to the NSE_EQ rows, and that made the NSE_EQ scoping UNTESTABLE: widening the predicate to
+  // startsWith("NSE") stayed GREEN, because the extra NSE rows were skipped for a DIFFERENT reason
+  // (null token) rather than by the scoping under test. Caught by red-proof, not by review.
+  // NSE_INDEX deliberately carries token 1001 — the documented real collision (1001 is both
+  // NIFTY 50 and a bond), so the fixture reproduces the hazard the scoping exists to prevent.
   private static final String MASTER_JSON =
       """
       [
         {"segment":"NSE_FO","name":"NIFTY","asset_symbol":"NIFTY","underlying_symbol":"NIFTY",
-         "instrument_key":"NSE_FO|61093","instrument_type":"FUT","trading_symbol":"NIFTY FUT 28 JUL 26",
+         "instrument_key":"NSE_FO|61093","instrument_type":"FUT","trading_symbol":"NIFTY FUT 28 JUL 26","exchange_token":"61093",
          "expiry":1785263399000,"strike_price":0.0},
         {"segment":"NSE_FO","name":"NIFTY","asset_symbol":"NIFTY","underlying_symbol":"NIFTY",
-         "instrument_key":"NSE_FO|50973","instrument_type":"CE","trading_symbol":"NIFTY 27000 CE 30 JUN 26",
+         "instrument_key":"NSE_FO|50973","instrument_type":"CE","trading_symbol":"NIFTY 27000 CE 30 JUN 26","exchange_token":"50973",
          "expiry":1782844199000,"strike_price":27000.0,"lot_size":50},
         {"segment":"BSE_FO","name":"SENSEX","asset_symbol":"SENSEX","underlying_symbol":"SENSEX",
-         "instrument_key":"BSE_FO|1174631","instrument_type":"PE","trading_symbol":"SENSEX 67900 PE 30 JUN 26",
+         "instrument_key":"BSE_FO|1174631","instrument_type":"PE","trading_symbol":"SENSEX 67900 PE 30 JUN 26","exchange_token":"1174631",
          "expiry":1782844199000,"strike_price":67900.0},
         {"segment":"NSE_INDEX","name":"NIFTY 50","asset_symbol":null,"underlying_symbol":null,
-         "instrument_key":"NSE_INDEX|Nifty 50","instrument_type":"INDEX","trading_symbol":"Nifty 50",
+         "instrument_key":"NSE_INDEX|Nifty 50","instrument_type":"INDEX","trading_symbol":"Nifty 50","exchange_token":"1001",
+         "expiry":null,"strike_price":0.0},
+        {"segment":"NSE_EQ","name":"RELIANCE INDUSTRIES","instrument_key":"NSE_EQ|INE002A01018",
+         "instrument_type":"EQ","trading_symbol":"RELIANCE","exchange_token":"2885",
+         "isin":"INE002A01018","expiry":null,"strike_price":0.0},
+        {"segment":"NSE_EQ","name":"749RJ35","instrument_key":"NSE_EQ|IN2920250163",
+         "instrument_type":"SG","trading_symbol":"749RJ35","exchange_token":"758718",
+         "isin":"IN2920250163","expiry":null,"strike_price":0.0},
+        {"segment":"GLOBAL_INDEX","name":"DOW JONES","instrument_key":"GLOBAL_INDEX|DJI",
+         "instrument_type":"INDEX","trading_symbol":"DJI","exchange_token":"",
          "expiry":null,"strike_price":0.0}
       ]
       """;
@@ -358,6 +374,63 @@ class UpstoxFnoMasterClientTest {
     private void advance(Duration duration) {
       now = now.plus(duration);
     }
+  }
+
+  // -----------------------------------------------------------------------------------------------
+  // H26 U-A2 — the NSE cash index. ⚠️ Before these existed the fixture carried NO NSE_EQ row at all,
+  // so indexNseCash() returned empty on every load in the whole suite and only its "mapped ZERO"
+  // WARN branch was ever executed. The five shipped tests exercised a one-line ternary and nothing
+  // else — including neither of the two DTO fields this unit was built to add.
+  // -----------------------------------------------------------------------------------------------
+
+  @Test
+  void indexesNseCashScopedToTheEqSegmentAndExcludesEveryOther() {
+    // Two NSE_EQ rows out of six. ⚠️ This is the assertion that pins the scoping the javadoc calls
+    // load-bearing: widen the predicate to startsWith("NSE") and NSE_INDEX/NSE_FO join the index,
+    // which is exactly the token collision the scoping exists to stop (token 1001 is both NIFTY 50
+    // and a bond). Before this test, that widening passed every test in the file.
+    assertThat(client().nseCashSize()).isEqualTo(2);
+  }
+
+  @Test
+  void deserializesTheExchangeTokenAndIsinIdentityFields() {
+    // ⚠️ The defect this pins really happened on this very branch: both fields were absent from the
+    // DTO while a receipt claimed they were "already parsed", and only the compiler caught it.
+    // Untested, the same regression returns SILENTLY — a dropped field yields null, and a null
+    // token is skipped by indexNseCash rather than failing.
+    UpstoxFnoMasterClient.NseCashIdentity reliance = client().nseCashIdentity(2885L);
+
+    assertThat(reliance).isNotNull();
+    assertThat(reliance.upstoxInstrumentKey()).isEqualTo("NSE_EQ|INE002A01018");
+    assertThat(reliance.isin()).isEqualTo("INE002A01018");
+    assertThat(reliance.upstoxTradingSymbol()).isEqualTo("RELIANCE");
+    assertThat(reliance.series()).isEqualTo("EQ");
+    assertThat(reliance.derivedKiteTradingsymbol())
+        .as("EQ is the one series Kite leaves bare")
+        .isEqualTo("RELIANCE");
+  }
+
+  @Test
+  void derivesTheSuffixedKiteSymbolThroughTheRealParse() {
+    // The ternary is trivially unit-testable; what was NOT covered is that it is reached with the
+    // series Jackson actually produced from instrument_type, through the real payload.
+    assertThat(client().nseCashIdentity(758718L).derivedKiteTradingsymbol()).isEqualTo("749RJ35-SG");
+  }
+
+  @Test
+  void parsesAnEmptyExchangeTokenAsNullWithoutBreakingTheLoad() {
+    // ⚠️ exchange_token is a JSON STRING on the wire, and 13 live rows carry "" (10 GLOBAL_INDEX +
+    // 3 GLOBAL_INDICATOR — computed 2026-09-03 over all 117,344 rows). Mapping the field moved it
+    // out of the ignoreUnknown bucket, so its coercion to null is now load-bearing for the WHOLE
+    // parse: were it to throw, reload() would keep the prior cache and never warm again. The
+    // coercion is a global Jackson default this class does not own, which is exactly why it is
+    // pinned here rather than assumed.
+    UpstoxFnoMasterClient client = client();
+
+    assertThat(client.nseCashSize()).as("the load survived the empty token").isEqualTo(2);
+    assertThat(client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null))
+        .as("and the F&O index still warmed from the same payload")
+        .isEqualTo("NSE_FO|61093");
   }
 
   private static byte[] gzip(String json) {

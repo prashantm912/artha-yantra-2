@@ -248,13 +248,26 @@ public final class UpstoxFnoMasterClient {
    *
    * <p>H26 U-A2, and NOTHING CONSUMES THIS YET — it exists so the A2-3 shadow diff can compare
    * Upstox identity against our own without a second download.
+   *
+   * <p>⚠️ <b>PRECONDITION: the caller must already know this token belongs to a CASH row.</b> The
+   * index is scoped to {@code NSE_EQ}, which makes the key unique on the UPSTOX side — but OUR
+   * {@code exchange='NSE'} mixes cash with INDICES, and tokens collide across them (`computed`
+   * 2026-09-03: 47 such tokens; it was 30 on 09-02, so re-derive it rather than quoting either).
+   * Hand this an INDEX token and it returns a bond's identity — confidently, and wrong, rather than
+   * {@code null}. A2-3 will iterate exactly that mixed set, which is why the warning belongs on the
+   * method a caller reads and not only in the class doc.
    */
   public NseCashIdentity nseCashIdentity(long exchangeToken) {
     cache();
     return nseCashByToken.get(exchangeToken);
   }
 
-  /** How many NSE cash rows the master currently maps. Zero means the index never loaded. */
+  /**
+   * How many NSE cash rows the master currently maps.
+   *
+   * <p>Zero means the index holds nothing — which is "never loaded" OR "loaded and mapped nothing".
+   * The two are distinguishable only from the reload WARN, not from this number.
+   */
   public int nseCashSize() {
     cache();
     return nseCashByToken.size();
@@ -270,9 +283,13 @@ public final class UpstoxFnoMasterClient {
    * {@code docs/signal-analysis/2026-09-02-h26-ua2-identity-join-measurement.md}.
    *
    * <p>⚠️ <b>The token is unique per SEGMENT, not per exchange.</b> Our {@code exchange='NSE'} lumps
-   * cash together with INDICES, and 30 tokens collide across those two (token 1001 is both
-   * {@code NIFTY 50} and a bond). Scoping this index to {@code NSE_EQ} is what makes the key unique
-   * — within segment the measurement is 10,096/10,096 distinct. Do not widen it to "all NSE".
+   * cash together with INDICES, and tokens collide across those two — token 1001 is both
+   * {@code NIFTY 50} and a bond. Scoping this index to {@code NSE_EQ} is what makes the key unique;
+   * within segment the measurement is 10,096/10,096 distinct. Do not widen it to "all NSE".
+   *
+   * <p>⚠️ The collision COUNT moves and must be re-derived, never quoted: 30 on 2026-09-02, <b>47</b>
+   * on 2026-09-03. It is one query. A moving number written down as a fixed fact is a trap this
+   * repository has paid for before.
    *
    * <p>NSE only, deliberately (owner, 2026-09-02): the suffix rule below is verified on NSE, and BSE
    * is where that convention is already known not to apply.

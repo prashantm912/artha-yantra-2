@@ -40,14 +40,26 @@ public record UpstoxInstrumentMaster(
     @JsonProperty("trading_symbol") String tradingSymbol,
     // ⚠️ H26 U-A2. The exchange's OWN token, and the measured identity key: it joins our
     // instruments table 100.00% on both NSE_EQ and NSE_FO, where a trading_symbol join matches
-    // only 27% of equities. Boxed Long, NOT a primitive long — a master row for a segment that
-    // omits it must parse to null rather than silently becoming 0, which would collide every such
-    // row onto one key.
+    // only ~28% of equities.
+    //
+    // ⚠️ ON THE WIRE THIS IS A JSON **STRING**, NOT A NUMBER — `"758718"`. An earlier version of
+    // this comment justified the boxed Long by "a segment that omits it must parse to null", and
+    // that reason was FALSE: `computed` 2026-09-03 over the live master, all 117,344 rows carry the
+    // key and NONE omits it. The real reason to box is the 13 rows that carry the EMPTY STRING
+    // (10 GLOBAL_INDEX + 3 GLOBAL_INDICATOR), which Jackson's default empty-string coercion turns
+    // into null. A primitive would be a compile error there, not a silent 0 — but the null still
+    // matters downstream, and `indexNseCash` skips it.
+    //
+    // ⚠️ That coercion is a GLOBAL Jackson default this class does not own, and mapping this field
+    // moved it out of the `ignoreUnknown` bucket where it could never break anything. If the
+    // default ever changed, every reload would throw and the F&O cache would stop warming — loudly
+    // (reload() logs and keeps the prior cache) but permanently. `parsesTheEmptyExchangeTokenAsNull`
+    // pins it, so that change fails a test here instead of in production.
     @JsonProperty("exchange_token") Long exchangeToken,
     // Carried for provenance and for the equity cross-check; Upstox addresses NSE_EQ keys as
     // NSE_EQ|<ISIN>. Not used as identity — an ISIN survives a rename, which is exactly why it
     // cannot be a primary key here.
-    String isin,
+    @JsonProperty("isin") String isin,
     Long expiry,
     @JsonProperty("strike_price") BigDecimal strikePrice,
     @JsonProperty("lot_size") Integer lotSize) {}

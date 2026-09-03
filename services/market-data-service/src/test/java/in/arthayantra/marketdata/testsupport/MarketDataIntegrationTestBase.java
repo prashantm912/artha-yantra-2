@@ -123,6 +123,14 @@ public abstract class MarketDataIntegrationTestBase {
     // hand-constructed canary with a fixed clock — that is how the path stays covered without any
     // context firing it on its own.
     registry.add("artha.ingest-canary.startup-catchup", () -> "false");
+    // ⚠️ And the NEW-13 reachability probe (review, 2026-09-03), for the same cached-context reason
+    // as the three above plus one of its own: it opens REAL SOCKETS to five external origins on a
+    // cron. Left enabled, every cached context probes the internet from CI and writes
+    // network_reachability_observations at an arbitrary moment inside an unrelated test.
+    // ⚠️ Disabling it on the one test that touches the table is NOT equivalent, and that is exactly
+    // what the comment block above warns about: a subclass @SpringBootTest(properties=...) loses to
+    // this method, so such an annotation is INERT — it reads like a fix and does nothing.
+    registry.add("artha.health.reachability.enabled", () -> "false");
   }
 
   /** Connection details for raw-JDBC assertions (grant tests connect as other roles). */

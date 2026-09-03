@@ -226,6 +226,32 @@ class LiveHistoricalCandleGatewayTest {
   }
 
   @Test
+  void bfoOptionDayFetchSendsContinuousZero() {
+    // ⚠️ NEW-14. Kite refuses continuous data for the BSE derivatives segment — 400 "invalid
+    // segment for continuous data" — so a BFO SENSEX option's 1d fetch failed PERMANENTLY. On
+    // 2026-09-02 15:45 IST five of them, from the EOD pass that prefetches 1d for every subscribed
+    // key, opened the SHARED kite-rest breaker: its window is COUNT_BASED over 10 at 50%, so five
+    // permanent failures are half of it whenever traffic is thin.
+    //
+    // ⚠️ The sibling assertion in optionsFetchWithContinuousButFutNeverDoes covers the NFO CE case
+    // and must STAY passing: the two together are what pin this as an exchange split rather than a
+    // blanket retreat from continuous=1. Note the stub resolver reports segment "NSE" for a CE —
+    // wrong, and deliberately left so, because the production gate reads the EXCHANGE. Segment is
+    // empty on most real option rows, which is exactly why it cannot be the discriminator.
+    wireMock.stubFor(
+        get(urlPathEqualTo("/instruments/historical/408065/day"))
+            .willReturn(aResponse().withBody("{\"status\":\"success\",\"data\":{\"candles\":[]}}")));
+
+    gateway("CE", () -> Optional.of("test-token"))
+        .fetch(new InstrumentKey("BFO", "SENSEX2690981000CE"), "1d", FROM, TO);
+
+    wireMock.verify(
+        getRequestedFor(urlPathEqualTo("/instruments/historical/408065/day"))
+            .withQueryParam("continuous", equalTo("0"))
+            .withQueryParam("oi", equalTo("1")));
+  }
+
+  @Test
   void optionMinuteFetchSendsContinuousZero() {
     // Kite 400s "invalid interval for continuous data" when continuous=1 is sent with the minute
     // interval, so option 1m candles (straddle/options-premium charts) MUST send continuous=0.

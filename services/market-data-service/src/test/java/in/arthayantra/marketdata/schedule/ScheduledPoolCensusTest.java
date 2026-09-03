@@ -75,17 +75,24 @@ class ScheduledPoolCensusTest {
    * are counted here and registered nowhere. This test counts source text and says so; do not read
    * the census as a statement about what is scheduled on the live stack.
    *
+   * <p>⚠️ RAISED 41 -> 42 and 11 -> 12 on 2026-09-02 by the NEW-13 outbound-reachability probe
+   * ({@code NetworkReachabilityProbe.probe}), which names {@code reachabilityTaskScheduler}.
+   * <b>The default-pool figure is UNCHANGED</b>, and that is the whole signal: this job blocks on
+   * network timeouts by design, so it joining the shared one-thread pool would have let an outage
+   * stall every other scheduled method — the probe would CAUSE the wider failure it exists to
+   * observe. A total-only assertion could not have told those two outcomes apart.
+   *
    * <p>Raising or lowering any of these three is a deliberate act. They are asserted separately on
    * purpose: the total alone cannot tell "a job was added to the shared pool" from "a job moved off
    * it onto a dedicated bean", and those two have opposite meanings for the single-thread argument
    * in {@code MonitorSchedulingConfig}.
    */
-  private static final int EXPECTED_SCHEDULED_ANNOTATIONS = 41;
+  private static final int EXPECTED_SCHEDULED_ANNOTATIONS = 42;
 
   /**
    * How many of those name a {@code scheduler} bean, i.e. sit on a dedicated single-thread pool.
    */
-  private static final int EXPECTED_NAMING_A_SCHEDULER = 11;
+  private static final int EXPECTED_NAMING_A_SCHEDULER = 12;
 
   /**
    * How many share the ONE-thread default pool — the figure the dedicated beans argue from.

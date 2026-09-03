@@ -12,6 +12,8 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -197,6 +199,114 @@ class InstrumentSyncIntegrationTest extends MarketDataIntegrationTestBase {
       jdbc.update(
           "DELETE FROM instruments WHERE exchange = 'NFO' AND tradingsymbol = 'H30SYNTH-FUT-CONT'");
     }
+  }
+
+  // -----------------------------------------------------------------------------------------------
+  // H26 A2-1 — kite_last_seen_at. The column means "KITE'S OWN DUMP asserted this row at this
+  // moment", which is deliberately NOT what last_seen_at means (any writer advances that). Later
+  // U-A2 units read the distinction to tell a row Kite still publishes from one that merely exists
+  // in our table, so a row that gets the stamp WITHOUT Kite asserting it — or fails to get it WITH
+  // Kite asserting it — silently corrupts every rule built on top. Nothing reads it yet, which is
+  // exactly why it needs pinning now: a defect here is invisible until something trusts it.
+  // -----------------------------------------------------------------------------------------------
+
+  @Test
+  void syncStampsKiteLastSeenOnRowsTheDumpAsserts() {
+    syncService.runSync();
+
+    assertThat(kiteLastSeen("NSE", "RELIANCE"))
+        .as("the Kite dump asserted this row, so the column must say so")
+        .isNotNull();
+  }
+
+  @Test
+  void aRESYNCADVANCESKiteLastSeenOnAnExistingRow() {
+    // ⚠ THE ASSERTION THAT CATCHES THE OBVIOUS WRONG IMPLEMENTATION. Wiring the column into the
+    // INSERT branch alone passes the test above and looks complete — but every row that already
+    // existed keeps its old value forever, however many times Kite re-asserts it. The column would
+    // then read "Kite has not seen this lately" for precisely the rows Kite publishes most
+    // reliably, inverting its meaning. Back-dating makes this deterministic rather than relying on
+    // two now() calls seconds apart being distinguishable.
+    syncService.runSync();
+    jdbc.update(
+        "UPDATE instruments SET kite_last_seen_at = TIMESTAMPTZ '2020-01-01T00:00:00+05:30'"
+            + " WHERE exchange = 'NSE' AND tradingsymbol = 'RELIANCE'");
+
+    syncService.runSync();
+
+    assertThat(kiteLastSeen("NSE", "RELIANCE"))
+        .as("the ON CONFLICT branch must advance it, not only the INSERT")
+        // Timestamp.valueOf parses in the JVM DEFAULT ZONE; the column is TIMESTAMPTZ. The margin
+        // here is a year so it cannot misfire, but the naive-local form is the shape CLAUDE.md
+        // warns about and it would sit three lines under a correctly-zoned literal.
+        .isAfter(Timestamp.from(Instant.parse("2021-01-01T00:00:00Z")));
+  }
+
+  @Test
+  void anImporterPlaceholderNeverGetsAKiteStamp() {
+    // The importer's exact shape (tools/historical-import/ingest.py, _UPSERT_INSTRUMENT): a bare
+    // key with no token, name or segment. Kite has never published it, and the whole point of a
+    // separate column is that this stays visibly true.
+    //
+    // ⚠ INSERTED BEFORE THE SYNC, DELIBERATELY. Written the other way round — sync, then insert,
+    // then assert — nothing production runs between the insert and the assertion, so the test can
+    // only fail if the COLUMN gains a DEFAULT. That asserts a property of Postgres, not of this
+    // repository. Ordered this way, the sync's upsert and tombstoneVanished both run over the row
+    // and the assertion is about what THEY leave behind, which is the claim being made.
+    jdbc.update(
+        """
+        INSERT INTO instruments
+          (exchange, tradingsymbol, instrument_type, underlying_exchange,
+           underlying_tradingsymbol, expiry, strike, is_active,
+           first_seen_at, last_seen_at, updated_at)
+        VALUES ('NFO', 'A21IMPORTED25000CE', 'CE', 'NSE', 'NIFTY 50',
+                DATE '2024-01-25', 25000, false, now(), now(), now())
+        ON CONFLICT (exchange, tradingsymbol) DO NOTHING
+        """);
+
+    syncService.runSync();
+
+    assertThat(kiteLastSeen("NFO", "A21IMPORTED25000CE"))
+        .as("a sync must not stamp a row its dump never carried")
+        .isNull();
+  }
+
+  @Test
+  void aSyntheticContinuousRowNeverGetsAKiteStamp() {
+    // ⚠ Separate from the importer case on purpose: SYN-CONT rows are written by a DIFFERENT
+    // production method (upsertSyntheticCont), so one test cannot demonstrate both. They are
+    // tokenless BY DESIGN and are ours, not Kite's — V060's backfill excluded them for the same
+    // reason, and a future edit that "helpfully" stamped them would make the column claim Kite
+    // publishes a symbol that exists nowhere but here.
+    syncService.runSync();
+    repository.upsertSyntheticCont(
+        "NFO", "A21NIFTY-FUT-CONT", "A21 continuous", "NSE", "NIFTY 50");
+
+    try {
+      assertThat(kiteLastSeen("NFO", "A21NIFTY-FUT-CONT"))
+          .as("a synthetic row is ours, never something Kite asserted")
+          .isNull();
+    } finally {
+      // ⚠ THE SAME CLEANUP byKeyFlagsRowsThatCarryNoMasterMetadata ALREADY DOES, for the same
+      // reason, and this method shipped without it in review. upsertSyntheticCont writes
+      // is_active = TRUE and tombstoneVanished exempts SYN-CONT, so the row survives every later
+      // sync — in a database with no per-method cleanup whose state persists ACROSS SUREFIRE
+      // RERUNS. It is a permanent +1 against
+      // syncPersistsFixtureWithStableKeysAndExactDecimals' exact countActive() equality. The first
+      // run is green only because that method is declared earlier; the second run is not, and a
+      // green first run is exactly what makes this easy to miss. In a finally so a failing
+      // assertion cannot poison the next run either.
+      jdbc.update(
+          "DELETE FROM instruments WHERE exchange = 'NFO' AND tradingsymbol = 'A21NIFTY-FUT-CONT'");
+    }
+  }
+
+  private Timestamp kiteLastSeen(String exchange, String tradingsymbol) {
+    return jdbc.queryForObject(
+        "SELECT kite_last_seen_at FROM instruments WHERE exchange = ? AND tradingsymbol = ?",
+        Timestamp.class,
+        exchange,
+        tradingsymbol);
   }
 
   @Test

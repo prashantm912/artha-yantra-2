@@ -305,3 +305,117 @@ Four usable sessions (08-26 pre-fix, 08-27, 08-28, 08-31), not five; this row ad
 untouched: naive raw transfer **215 + 1,400 = 1,615 > 1,440 FAILS**; the remapped model at the `assumed` ≈12:1
 call-shape factor gives ≈332 and passes. **The factor is still unmeasured and remains the whole question** —
 consistent with the 08-31 note that H26 is decided by measuring one job's call shape, not by accumulating rows.
+
+---
+
+## Session 2026-09-02 (Wed) — the fifth row, and the open question is answered
+
+| session | coverage | Upstox 30m peak | 1m peak | 1s peak | Upstox batch / live | live refused | Kite QUOTE | Kite HIST | Kite DUMP |
+|---|---|---|---|---|---|---|---|---|---|
+| **2026-09-02** (Wed) | **~99%** — process up **08:35:53 IST**, before the 09:15 open; `RestartCount=0`, **no restart**; image `2026-08-29T14:47:37Z`, **unchanged since the 08-31 row** so the two are the same system; captured **15:27:40**, 3 min before close | **215 / 1800** (12%) | 213 / 450 (47%) | 15 / 45 (33%) | 210 / 34 | **0** | **17,378** | 511 | 1 |
+
+**What deployed since the last row** (the check the 08-27 reading added): **nothing reached the running
+process.** `docker image inspect` returns `2026-08-29T14:47:37Z`, identical to the 08-31 and 09-01 rows.
+One market-data commit merged to `main` since (`744ff92e`, #1558, `MarketContextEodJob` boot catch-up) but
+post-dates the image and is **not deployed**. `sourced`. So 08-31 and 09-02 measure byte-identical code.
+
+**Expired backfill:** `0 written, 32081 skipped, 0 failed, 0 rows`, finished **08:37:01 IST** — the same
+quiet outcome as 08-27 and 08-31, not the 08-28 resume that produced this log's only Upstox outlier.
+`computed` from the container log.
+
+### The open question from the 08-31/09-01 rows is now ANSWERED, and not from one case
+
+The previous row asked for **"a call-site breakdown of `ay_upstox_calls_total{path="batch"}` across boot vs
+intraday"** and warned that another day's total would not settle it. A total did not settle it — an
+**arithmetic identity already sitting in every row** did, and today supplies the fourth independent check.
+
+⚠️ **The 1-minute peak is GREATER THAN the entire session's batch count.** `computed`:
+
+| session | batch + live (all Upstox calls) | 1m peak | 30m peak |
+|---|---|---|---|
+| 2026-08-27 | 210 + 50 = 260 | 194 | 215 |
+| 2026-08-31 | 210 + 31 = 241 | **213** | 215 |
+| **2026-09-02** | 210 + 34 = **244** | **213** | **215** |
+
+`peak_used{1m}` = 213 while the whole session's `batch` total is **210**. Every batch call the process ever
+made therefore fits inside **one minute**, and the 30-minute peak (215) exceeds it by two. This is not an
+inference about a burst — it is the burst, measured, with no room left for intraday spread.
+
+Three further observations agree, so this rests on four legs, not one:
+
+1. **09-01's null process reached 210 within four minutes of an 18:48 boot with the market shut.**
+2. **Today's process ran a FULL session and finished at exactly 210** — a complete trading day added
+   **zero** batch calls over a process that saw no session at all.
+3. The burst lands with the expired-backfill sweep at **08:37 IST**, ~38 minutes **before** the 09:15 open.
+
+**Conclusion, `computed`: the ~215 Upstox 30-minute peak is a pre-open boot burst. It carries no session
+load whatsoever.** The 08-31 row's `assumed` hypothesis is upgraded.
+
+⚠️ **One thing this weakens, and it is recorded rather than quietly patched.** The 08-27 reading attributed
+the 1,272 → 210 collapse to the H31 `day-context` precompute calling `worldIndices()` **4× per hour on a
+dedicated schedule**. If those calls carried `path="batch"`, today's ~6.9-hour uptime would have added ~27
+to the total. It added **zero**. So either that call is not labelled `batch`, or the precompute does not
+reach it. `assumed`, **not chased here** — it does not change any number in this log, and the 08-27 row's
+load-bearing claim (the baseline moved, the two eras are not comparable) stands on the measurement, not on
+the mechanism. Flagged so the next reader does not treat the mechanism as established.
+
+### Stop rule — FIVE rows reached, computed, and the answer is STILL UNDECIDED
+
+Five sessions now carry data (08-26, 08-27, 08-28, 08-31, 09-02); **four are post-H31-fix and comparable**
+(08-26 is pre-fix and must not be averaged in). The Kite term is remarkably stable across all of them:
+
+| session | Kite `QUOTE` | per 30-min window |
+|---|---|---|
+| 2026-08-27 | 16,657 | ≈1,340 |
+| 2026-08-28 | 17,726 | ≈1,426 |
+| 2026-08-31 | 17,403 | ≈1,400 |
+| **2026-09-02** | **17,378** | **≈1,399** |
+
+`projected_upstox_30m = current 30m peak + Σ(Kite 30m rate × call-shape factor)`, ceiling 1800, stop at 1440:
+
+- **Naive raw transfer** (factor 1.0, the model the header calls WRONG): `215 + 1,400 = 1,615 > 1,440` — **FAILS**.
+- **Non-overlap form.** The 215 term is now known to be a **pre-open** burst, so on a clean morning boot it
+  does not co-occur with the Kite term in any 30-minute window: `max(215, 1,400) = 1,400 < 1,440` — passes,
+  **by 2.8%**. Far too thin to decide on, and it does **not** hold after a mid-session restart (the 09-01
+  shape), where the burst lands inside the session and the **sum** is the correct form.
+- **Remapped call shape** (`assumed` ≈12:1 on the dominant `/quote` → `/v2/option/chain` term):
+  `215 + ~117 ≈ 332` — passes comfortably.
+
+⚠️ **Verdict: NOT STOP, NOT GO — undecided, and five rows was never going to decide it.** The three models
+span 332 to 1,615 across a 1,440 threshold; **the spread is entirely the call-shape factor**, which is still
+`assumed` and has never been measured.
+
+**Recommendation: stop accumulating daily rows.** Four post-fix sessions agree to the *unit* on the Upstox
+side (210 / 213 / 215, three times identically) and within **2%** on the Kite side. A fifth, sixth or tenth
+row adds no information — the remaining uncertainty is not sampling noise. **What decides H26 is measuring
+one job's call shape** (the OI snapshot's batched Kite `/quote` cycle against the Upstox
+`/v2/option/chain` equivalent), a code-and-job measurement, not a session capture. That is the same
+conclusion the 08-31 row reached; today's row is what makes it safe to act on.
+
+---
+
+## ✅ RETIRED 2026-09-02 (owner ruling) — the capture is disabled, not deleted
+
+The recommendation above was accepted. `h26-daily-rate-capture` is **disabled** in the scheduler
+rather than deleted, so the prompt survives and the decision is reversible if the baseline is ever
+suspected of drifting.
+
+**What retires and what does NOT.** The daily *capture* retires. **H26 itself stays open**, and its
+verdict is unchanged: **NOT STOP, NOT GO.** The stop rule is undecided because the three projections
+still span `≈332 → 1,615` against a 1,440 ceiling, and that spread is *entirely* the unmeasured
+call-shape factor:
+
+| projection | value | vs 1,440 |
+|---|---|---|
+| naive raw transfer | 215 + 1,400 = **1,615** | FAILS |
+| non-overlap (burst is pre-open) | max(215, 1,400) = **1,400** | passes by 2.8% |
+| remapped ≈12:1 (`assumed`) | **≈332** | passes comfortably |
+
+⚠️ **Retiring the capture is not evidence that H26 is safe.** It is evidence that *this instrument*
+has stopped producing information. Reading a retired measurement as a resolved question is exactly
+the inversion this file has warned about elsewhere.
+
+**What would actually decide it**, and the only thing that should be scheduled next on H26: measure
+one job's call shape — the OI snapshot's batched Kite `/quote` cycle against the Upstox
+`/v2/option/chain` equivalent — to get the real remap ratio. That is a code-and-job measurement, not
+a session capture, and no number of further daily rows can substitute for it.

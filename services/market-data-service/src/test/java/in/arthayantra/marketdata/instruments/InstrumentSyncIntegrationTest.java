@@ -12,6 +12,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -197,6 +198,90 @@ class InstrumentSyncIntegrationTest extends MarketDataIntegrationTestBase {
       jdbc.update(
           "DELETE FROM instruments WHERE exchange = 'NFO' AND tradingsymbol = 'H30SYNTH-FUT-CONT'");
     }
+  }
+
+  // -----------------------------------------------------------------------------------------------
+  // H26 A2-1 — kite_last_seen_at. The column means "KITE'S OWN DUMP asserted this row at this
+  // moment", which is deliberately NOT what last_seen_at means (any writer advances that). Later
+  // U-A2 units read the distinction to tell a row Kite still publishes from one that merely exists
+  // in our table, so a row that gets the stamp WITHOUT Kite asserting it — or fails to get it WITH
+  // Kite asserting it — silently corrupts every rule built on top. Nothing reads it yet, which is
+  // exactly why it needs pinning now: a defect here is invisible until something trusts it.
+  // -----------------------------------------------------------------------------------------------
+
+  @Test
+  void syncStampsKiteLastSeenOnRowsTheDumpAsserts() {
+    syncService.runSync();
+
+    assertThat(kiteLastSeen("NSE", "RELIANCE"))
+        .as("the Kite dump asserted this row, so the column must say so")
+        .isNotNull();
+  }
+
+  @Test
+  void aRESYNCADVANCESKiteLastSeenOnAnExistingRow() {
+    // ⚠ THE ASSERTION THAT CATCHES THE OBVIOUS WRONG IMPLEMENTATION. Wiring the column into the
+    // INSERT branch alone passes the test above and looks complete — but every row that already
+    // existed keeps its old value forever, however many times Kite re-asserts it. The column would
+    // then read "Kite has not seen this lately" for precisely the rows Kite publishes most
+    // reliably, inverting its meaning. Back-dating makes this deterministic rather than relying on
+    // two now() calls seconds apart being distinguishable.
+    syncService.runSync();
+    jdbc.update(
+        "UPDATE instruments SET kite_last_seen_at = TIMESTAMPTZ '2020-01-01T00:00:00+05:30'"
+            + " WHERE exchange = 'NSE' AND tradingsymbol = 'RELIANCE'");
+
+    syncService.runSync();
+
+    assertThat(kiteLastSeen("NSE", "RELIANCE"))
+        .as("the ON CONFLICT branch must advance it, not only the INSERT")
+        .isAfter(Timestamp.valueOf("2021-01-01 00:00:00"));
+  }
+
+  @Test
+  void anImporterPlaceholderNeverGetsAKiteStamp() {
+    // The importer's exact shape (tools/historical-import/ingest.py, _UPSERT_INSTRUMENT): a bare
+    // key with no token, name or segment. Kite has never published it, and the whole point of a
+    // separate column is that this stays visibly true.
+    syncService.runSync();
+    jdbc.update(
+        """
+        INSERT INTO instruments
+          (exchange, tradingsymbol, instrument_type, underlying_exchange,
+           underlying_tradingsymbol, expiry, strike, is_active,
+           first_seen_at, last_seen_at, updated_at)
+        VALUES ('NFO', 'A21IMPORTED25000CE', 'CE', 'NSE', 'NIFTY 50',
+                DATE '2024-01-25', 25000, false, now(), now(), now())
+        ON CONFLICT (exchange, tradingsymbol) DO NOTHING
+        """);
+
+    assertThat(kiteLastSeen("NFO", "A21IMPORTED25000CE"))
+        .as("an importer placeholder was never in a Kite dump")
+        .isNull();
+  }
+
+  @Test
+  void aSyntheticContinuousRowNeverGetsAKiteStamp() {
+    // ⚠ Separate from the importer case on purpose: SYN-CONT rows are written by a DIFFERENT
+    // production method (upsertSyntheticCont), so one test cannot demonstrate both. They are
+    // tokenless BY DESIGN and are ours, not Kite's — V060's backfill excluded them for the same
+    // reason, and a future edit that "helpfully" stamped them would make the column claim Kite
+    // publishes a symbol that exists nowhere but here.
+    syncService.runSync();
+    repository.upsertSyntheticCont(
+        "NFO", "A21NIFTY-FUT-CONT", "A21 continuous", "NSE", "NIFTY 50");
+
+    assertThat(kiteLastSeen("NFO", "A21NIFTY-FUT-CONT"))
+        .as("a synthetic row is ours, never something Kite asserted")
+        .isNull();
+  }
+
+  private Timestamp kiteLastSeen(String exchange, String tradingsymbol) {
+    return jdbc.queryForObject(
+        "SELECT kite_last_seen_at FROM instruments WHERE exchange = ? AND tradingsymbol = ?",
+        Timestamp.class,
+        exchange,
+        tradingsymbol);
   }
 
   @Test

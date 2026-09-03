@@ -37,6 +37,23 @@ public class LiveHistoricalCandleGateway implements HistoricalCandleGateway {
   // per-contract FUT history must stay per-contract (15A/15B). (live-verified 2026-06-23)
   private static final Set<String> CONTINUOUS_TYPES = Set.of("CE", "PE");
 
+  // ⚠️ NEW-14 — AND ONLY ON NFO. Kite refuses continuous data for the BSE derivatives segment with
+  // a 400 "invalid segment for continuous data", so every 1d fetch for a BFO SENSEX option failed
+  // permanently. Measured 2026-09-02 15:45 IST: five of them, from the EOD backfill pass asking for
+  // 1d on every subscribed key, were enough to open the SHARED kite-rest breaker (COUNT_BASED over
+  // 10 at 50% — the breaker is most fragile when traffic is lowest). #1567 stopped a permanent 400
+  // from being read as an unavailable upstream; this stops the request being made at all.
+  //
+  // ⚠️ EXCHANGE, never `segment`. TokenInfo carries a segment and "BFO-OPT" reads like the obvious
+  // discriminator — but 175 766 of our NFO option rows and 6 423 BFO ones carry an EMPTY segment
+  // (measured live 2026-09-03), so gating on it would silently send continuous=0 for most of the
+  // NFO path that works today. The exchange is always populated.
+  //
+  // ⚠️ Allow-list, not a BFO deny-list: only NFO is measured to serve continuous data (1 289
+  // source='KITE' option 1d bars against ZERO for BFO). MCX and CDS may well serve it too, but we
+  // trade neither, and a deny-list would hand any future exchange the failing default.
+  private static final String CONTINUOUS_EXCHANGE = "NFO";
+
   private final RestClient restClient;
   private final String apiKey;
   private final AccessTokenProvider tokenProvider;
@@ -83,10 +100,13 @@ public class LiveHistoricalCandleGateway implements HistoricalCandleGateway {
           case "1d" -> "day";
           default -> throw new IllegalArgumentException("only 1m and 1d are fetched from Kite");
         };
-    // continuous=1 is valid only for options on the DAY interval; minute always sends 0 (Kite 400s
-    // "invalid interval for continuous data" otherwise — the bug that blanked the option-premium charts).
+    // continuous=1 is valid only for NFO options on the DAY interval. The minute interval 400s
+    // ("invalid interval for continuous data" — the bug that blanked the option-premium charts) and
+    // so does the BSE derivatives segment ("invalid segment for continuous data" — NEW-14).
     boolean useContinuous =
-        CONTINUOUS_TYPES.contains(info.instrumentType()) && "day".equals(kiteInterval);
+        CONTINUOUS_TYPES.contains(info.instrumentType())
+            && "day".equals(kiteInterval)
+            && CONTINUOUS_EXCHANGE.equals(key.exchange());
     String fromParam = KITE_PARAM.format(OffsetDateTime.ofInstant(from, in.arthayantra.common.web.time.Ist.ZONE));
     String toParam = KITE_PARAM.format(OffsetDateTime.ofInstant(to, in.arthayantra.common.web.time.Ist.ZONE));
 

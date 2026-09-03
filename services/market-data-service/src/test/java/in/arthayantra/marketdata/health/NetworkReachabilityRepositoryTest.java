@@ -12,7 +12,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
 
 /**
  * The fail-soft CONTRACT of {@link NetworkReachabilityRepository}, at the seam where the database
@@ -20,90 +19,55 @@ import org.springframework.jdbc.core.RowMapper;
  *
  * <p>⚠ <b>Why this class exists separately from the quorum tests.</b> Those drive the probe with a
  * MOCKED repository, so they pin how the probe REACTS to a reported failure — they can say nothing
- * about whether the repository ever reports one. Mutating {@code close} to swallow its error left
- * all eighteen of them green, which is the classic "the test mocks the seam the fix lives behind"
- * tautology. The behaviour below is the other half, and without it the {@code return false} branch
- * is never executed by any test.
+ * about whether the repository ever reports one. Mutating the write to swallow its error left every
+ * one of them green, which is the classic "the test mocks the seam the fix lives behind" tautology.
+ * The behaviour below is the other half, and without it the {@code return false} branch is never
+ * executed by any test.
  *
- * <p>Both halves matter for the same defect: a swallowed close leaves the episode open, and a new
- * outage then finds a row already open and writes nothing — merging two incidents into one that
- * reads as a single long outage which never happened.
+ * <p>Both halves matter for the same guarantee, and it is a smaller one than it used to be: a
+ * failed write now loses exactly one observation. There is no retry to get wrong, because a row is
+ * a statement about one instant rather than a step in a state machine — the design change that
+ * removed the Critical this class was originally written to guard.
  */
 class NetworkReachabilityRepositoryTest {
 
   private static final Instant T0 = Instant.parse("2026-09-01T07:12:00Z");
 
   @Test
-  @DisplayName("close REPORTS a failed write rather than swallowing it")
-  void closeReportsFailure() {
+  @DisplayName("record REPORTS a failed write rather than swallowing it")
+  void recordReportsFailure() {
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
     when(jdbc.update(anyString(), any(Object[].class)))
-        .thenThrow(new DataAccessResourceFailureException("connection reset"));
+        .thenThrow(new DataAccessResourceFailureException("db down"));
 
-    assertThat(new NetworkReachabilityRepository(jdbc).close("reach-1", T0)).isFalse();
-  }
-
-  @Test
-  @DisplayName("close reports success when the write lands")
-  void closeReportsSuccess() {
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
-    when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
-
-    assertThat(new NetworkReachabilityRepository(jdbc).close("reach-1", T0)).isTrue();
-  }
-
-  @Test
-  @DisplayName("a failed write NEVER throws into the scheduled pass")
-  void writesNeverThrowIntoTheCaller() {
-    // A diagnostic recorder that throws into its caller can take out the pass it rides on, turning
-    // an observability feature into an outage of its own.
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
-    when(jdbc.update(anyString(), any(Object[].class)))
-        .thenThrow(new DataAccessResourceFailureException("connection reset"));
-
-    assertThatCode(
-            () -> new NetworkReachabilityRepository(jdbc).open("reach-1", T0, 5, 3, 3, "kite", "d"))
-        .doesNotThrowAnyException();
-    assertThatCode(() -> new NetworkReachabilityRepository(jdbc).close("reach-1", T0))
-        .doesNotThrowAnyException();
-  }
-
-  @Test
-  @DisplayName("open REPORTS a failed write rather than swallowing it")
-  void openReportsFailure() {
-    // ⚠ Asserting only "it does not throw" DISCARDS the result, which is the same mocked-seam
-    // tautology this class was created to close — just moved to the other method. Changing the
-    // catch branch to return true would have kept every other test green while restoring complete
-    // episode loss, because every caller-side test mocks this repository.
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
-    when(jdbc.update(anyString(), any(Object[].class)))
-        .thenThrow(new DataAccessResourceFailureException("connection reset"));
-
-    assertThat(new NetworkReachabilityRepository(jdbc).open("reach-1", T0, 5, 3, 3, "kite", "d"))
+    assertThat(new NetworkReachabilityRepository(jdbc).record(T0, 5, 3, 3, "kite,telegram,ntfy"))
+        .as("a swallowed failure would thin the record with nothing in the log to say so")
         .isFalse();
   }
 
   @Test
-  @DisplayName("open reports success when the write lands")
-  void openReportsSuccess() {
+  @DisplayName("record reports success when the write lands")
+  void recordReportsSuccess() {
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
     when(jdbc.update(anyString(), any(Object[].class))).thenReturn(1);
 
-    assertThat(new NetworkReachabilityRepository(jdbc).open("reach-1", T0, 5, 3, 3, "kite", "d"))
+    assertThat(new NetworkReachabilityRepository(jdbc).record(T0, 5, 3, 3, "kite,telegram,ntfy"))
         .isTrue();
   }
 
   @Test
-  @DisplayName("an unreadable open-episode query reports UNKNOWN, never a false 'nothing is open'")
-  void openEpisodeReportsUnknownOnReadFailure() {
-    // ⚠ This is the fail-soft with a real consequence: the next pass then believes nothing is open
-    // and may try to open a second episode. The unique partial index in V061 is what stops that
-    // becoming two overlapping open rows — see NetworkReachabilityEpisodeIntegrationTest.
+  @DisplayName("a failed write NEVER throws into the scheduled pass")
+  void aFailedWriteNeverThrows() {
+    // ⚠ The recorder must not be able to take out the pass it rides on. An observability feature
+    // that becomes an outage of its own is strictly worse than no feature — and this pass shares
+    // its thread with nothing else precisely so a network stall cannot spread, which a thrown
+    // exception would undo by killing the schedule instead.
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
-    when(jdbc.query(anyString(), any(RowMapper.class)))
-        .thenThrow(new DataAccessResourceFailureException("connection reset"));
+    when(jdbc.update(anyString(), any(Object[].class)))
+        .thenThrow(new DataAccessResourceFailureException("db down"));
 
-    var lookup = new NetworkReachabilityRepository(jdbc).openEpisode();
-    assertThat(lookup.readSucceeded()).isFalse();
+    assertThatCode(
+            () -> new NetworkReachabilityRepository(jdbc).record(T0, 5, 3, 3, "kite"))
+        .doesNotThrowAnyException();
   }
 }

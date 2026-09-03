@@ -48,70 +48,142 @@ class NetworkReachabilityQuorumTest {
   private static final String DEFAULTS = NetworkReachabilityProbe.DEFAULT_DESTINATION_SPEC;
 
   @Test
-  @DisplayName("at or above the quorum, with nothing open, OPENS an episode")
-  void opensAnEpisodeWhenTheQuorumIsMet() {
+  @DisplayName("at or above the quorum, the pass is RECORDED")
+  void recordsWhenTheQuorumIsMet() {
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisode()).thenReturn(none());
-    when(repo.open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString()))
-        .thenReturn(true);
+    when(repo.record(any(), anyInt(), anyInt(), anyInt(), anyString())).thenReturn(true);
 
     probe(repo, 3, "kite", "telegram", "ntfy").probe();
 
-    verify(repo).open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString());
+    verify(repo).record(eq(T0), anyInt(), anyInt(), anyInt(), anyString());
   }
 
   @Test
-  @DisplayName("BELOW the quorum is a vendor problem and opens nothing")
-  void doesNotOpenBelowTheQuorum() {
+  @DisplayName("BELOW the quorum is a vendor problem and records nothing")
+  void doesNotRecordBelowTheQuorum() {
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisode()).thenReturn(none());
 
-    // Two of five — the 'one vendor is down' shape. An implementation without a quorum opens here.
+    // Two of five - the 'one vendor is down' shape. An implementation without a quorum records
+    // here, and would then write 288 rows a day for one vendor that refuses our probe.
     probe(repo, 3, "kite", "telegram").probe();
 
-    verify(repo, never())
-        .open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString());
+    verify(repo, never()).record(any(), anyInt(), anyInt(), anyInt(), anyString());
   }
 
   @Test
   @DisplayName("the failed destination NAMES and the THRESHOLD in force are both recorded")
   void recordsWhichDestinationsFailedAndTheThreshold() {
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisode()).thenReturn(none());
 
     probe(repo, 3, "kite", "telegram", "ntfy").probe();
 
-    // probed=5, unreachable=3, quorum=3 — the threshold is stored, not just the observation, so a
+    // probed=5, unreachable=3, quorum=3 - the threshold is stored, not just the observation, so a
     // row can still be judged after the configuration changes.
-    verify(repo)
-        .open(anyString(), any(), eq(5), eq(3), eq(3), eq("kite,telegram,ntfy"), anyString());
+    verify(repo).record(eq(T0), eq(5), eq(3), eq(3), eq("kite,telegram,ntfy"));
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // The shape of the record itself: one TRUE row per pass, no state between passes.
+  // ---------------------------------------------------------------------------------------------
+
+  @Test
+  @DisplayName("a continuing outage writes ONE ROW PER PASS, each stamped with its own instant")
+  void aContinuingOutageWritesOneRowPerPass() {
+    // The design, not an inefficiency. The five earlier revisions wrote one row per INCIDENT and
+    // had to remember, between passes, which incident was in flight - six review rounds and
+    // thirteen findings later, a failed close plus a new outage still merged two incidents and the
+    // healthy gap between them into one authoritative row. Here each pass makes an independent
+    // true statement and the grouping happens in SQL.
+    NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
+    when(repo.record(any(), anyInt(), anyInt(), anyInt(), anyString())).thenReturn(true);
+
+    MutableClock clock = new MutableClock(T0);
+    TestProbe p = new TestProbe(repo, 3, false, clock);
+    p.failing("kite", "telegram", "ntfy");
+
+    p.probe();
+    clock.set(T0.plusSeconds(300));
+    p.probe();
+    clock.set(T0.plusSeconds(600));
+    p.probe();
+
+    verify(repo).record(eq(T0), anyInt(), anyInt(), anyInt(), anyString());
+    verify(repo).record(eq(T0.plusSeconds(300)), anyInt(), anyInt(), anyInt(), anyString());
+    verify(repo).record(eq(T0.plusSeconds(600)), anyInt(), anyInt(), anyInt(), anyString());
   }
 
   @Test
-  @DisplayName("an episode already open is not re-opened while the outage continues")
-  void doesNotReopenAnOpenEpisode() {
+  @DisplayName("recovery simply stops recording - there is nothing to close")
+  void recoveryStopsRecording() {
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisode()).thenReturn(open("reach-1"));
+    when(repo.record(any(), anyInt(), anyInt(), anyInt(), anyString())).thenReturn(true);
 
-    probe(repo, 3, "kite", "telegram", "ntfy").probe();
+    MutableClock clock = new MutableClock(T0);
+    TestProbe p = new TestProbe(repo, 3, false, clock);
+    p.failing("kite", "telegram", "ntfy");
+    p.probe();
 
-    verify(repo, never())
-        .open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString());
-    verify(repo, never()).close(anyString(), any());
+    clock.set(T0.plusSeconds(300));
+    p.failing();
+    p.probe();
+
+    // Exactly one row, from the down pass. The recovery pass has no write of any kind to fail.
+    verify(repo, times(1)).record(any(), anyInt(), anyInt(), anyInt(), anyString());
   }
 
   @Test
-  @DisplayName("recovery below the quorum CLOSES the open episode")
-  void closesOnRecovery() {
+  @DisplayName("a FAILED write loses only its own observation and is never retried")
+  void aFailedWriteLosesOnlyItsOwnObservation() {
+    // The Critical this design removes. Under the episode model a failed write had to be
+    // remembered and replayed, and the replay is where every corruption came from. Here the second
+    // pass carries its own instant and its own evidence, and the first pass's failure is simply a
+    // gap - recoverable from the WARN log, and incapable of producing a wrong row.
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisode()).thenReturn(open("reach-1"));
-    when(repo.close(anyString(), any())).thenReturn(true);
+    when(repo.record(any(), anyInt(), anyInt(), anyInt(), anyString()))
+        .thenReturn(false)
+        .thenReturn(true);
 
-    probe(repo, 3).probe();
+    MutableClock clock = new MutableClock(T0);
+    TestProbe p = new TestProbe(repo, 3, false, clock);
+    p.failing("kite", "telegram", "ntfy");
+    p.probe(); // the write fails
 
-    verify(repo).close(eq("reach-1"), any());
-    verify(repo, never())
-        .open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString());
+    clock.set(T0.plusSeconds(300));
+    p.failing("kite", "telegram", "ntfy", "nse"); // and the world has moved on
+    p.probe();
+
+    // The second row describes the SECOND pass - 4 failures - never a replay of the first's 3.
+    verify(repo).record(eq(T0), eq(5), eq(3), eq(3), eq("kite,telegram,ntfy"));
+    verify(repo).record(eq(T0.plusSeconds(300)), eq(5), eq(4), eq(3), eq("kite,nse,telegram,ntfy"));
+    verify(repo, times(2)).record(any(), anyInt(), anyInt(), anyInt(), anyString());
+  }
+
+  @Test
+  @DisplayName("an outage, a recovery and a SECOND outage are three independent true rows")
+  void twoOutagesSeparatedByRecoveryAreNeverMerged() {
+    // The exact sequence that produced the Critical in the episode model: a close that does not
+    // land, then a new outage before the next healthy pass, yielding one row spanning both
+    // incidents and the healthy gap. Here there is no close to fail, so the sequence cannot arise -
+    // and the gap between rows is what a reader groups on.
+    NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
+    when(repo.record(any(), anyInt(), anyInt(), anyInt(), anyString())).thenReturn(true);
+
+    MutableClock clock = new MutableClock(T0);
+    TestProbe p = new TestProbe(repo, 3, false, clock);
+    p.failing("kite", "telegram", "ntfy");
+    p.probe(); // outage A
+
+    clock.set(T0.plusSeconds(300));
+    p.failing();
+    p.probe(); // healthy - writes nothing at all
+
+    clock.set(T0.plusSeconds(600));
+    p.failing("kite", "telegram", "ntfy");
+    p.probe(); // outage B
+
+    verify(repo).record(eq(T0), anyInt(), anyInt(), anyInt(), anyString());
+    verify(repo).record(eq(T0.plusSeconds(600)), anyInt(), anyInt(), anyInt(), anyString());
+    verify(repo, times(2)).record(any(), anyInt(), anyInt(), anyInt(), anyString());
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -119,110 +191,23 @@ class NetworkReachabilityQuorumTest {
   // ---------------------------------------------------------------------------------------------
 
   @Test
-  @DisplayName("an INTERRUPTED pass writes nothing — it must not stamp a false recovery")
-  void interruptedPassMakesNoTransition() {
-    // ⚠ The failure this pins is the nastiest one in the class. On shutdown every remaining send
-    // fails instantly and is reported REACHABLE (correctly — it is not a network verdict), so the
-    // pass looks like recovery and would CLOSE the open episode. That writes a false end time at
-    // the exact moment the host is going down: the incident this table exists to record, corrupted
-    // by the recorder.
+  @DisplayName("an INTERRUPTED pass records nothing - it must not stamp a false outage")
+  void interruptedPassRecordsNothing() {
+    // Sharper under the per-pass model than it was under episodes. On shutdown every remaining
+    // send fails instantly and is reported REACHABLE (correctly - it is not a network verdict), so
+    // a pass that had already seen enough real failures to meet the quorum would store a permanent,
+    // plausible row asserting the host network died at the moment the service was merely stopping.
     NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisode()).thenReturn(open("reach-1"));
 
     Thread.currentThread().interrupt();
     try {
-      probe(repo, 3).probe();
+      probe(repo, 3, "kite", "telegram", "ntfy").probe();
     } finally {
       // Clear it, or every later test in this JVM inherits the flag.
       assertThat(Thread.interrupted()).isTrue();
     }
 
-    verify(repo, never()).close(anyString(), any());
-    verify(repo, never())
-        .open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString());
-    verify(repo, never()).openEpisode();
-  }
-
-  // ---------------------------------------------------------------------------------------------
-  // A write that did not land must not corrupt the record.
-  // ---------------------------------------------------------------------------------------------
-
-  @Test
-  @DisplayName("a failed open is simply re-observed and retried on the next pass")
-  void retriesAFailedOpenOnTheNextPass() {
-    // ⚠ The whole point of the rework (owner, 2026-09-02): there is no retry BOOKKEEPING. The
-    // outage is still happening and no row exists, so the next pass reaches the identical
-    // conclusion from the identical evidence. The retry is a consequence of re-observation.
-    NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisode()).thenReturn(none());
-    when(repo.open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString()))
-        .thenReturn(false)
-        .thenReturn(true);
-
-    MutableClock clock = new MutableClock(T0);
-    TestProbe p = new TestProbe(repo, 3, false, clock);
-    p.failing("kite", "telegram", "ntfy");
-    p.probe(); // the opening write fails
-    clock.set(T0.plusSeconds(300));
-    p.probe(); // retried from a fresh observation
-
-    // ⚠ The SECOND attempt carries the second pass's start, NOT the first's — the episode is
-    // stamped when it was successfully recorded, late by up to one cron period. That imprecision
-    // is the accepted price of holding no state, and it is pinned here so it stays a decision on
-    // the record rather than drifting back into a bug report.
-    verify(repo)
-        .open(eq("reach-" + T0.toEpochMilli()), eq(T0), anyInt(), anyInt(), anyInt(), anyString(),
-            anyString());
-    verify(repo)
-        .open(eq("reach-" + T0.plusSeconds(300).toEpochMilli()), eq(T0.plusSeconds(300)), anyInt(),
-            anyInt(), anyInt(), anyString(), anyString());
-  }
-
-  @Test
-  @DisplayName("a failed close is retried while the row is still open")
-  void retriesAFailedCloseOnTheNextPass() {
-    NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    // A failed close leaves the row open, which is exactly what the next lookup reports.
-    when(repo.openEpisode()).thenReturn(open("reach-1"));
-    when(repo.close(anyString(), any())).thenReturn(false).thenReturn(true);
-
-    MutableClock clock = new MutableClock(T0);
-    TestProbe p = new TestProbe(repo, 3, false, clock);
-
-    p.probe(); // recovered; the close fails
-    clock.set(T0.plusSeconds(300));
-    p.probe(); // still recovered, row still open, retried
-
-    verify(repo).close("reach-1", T0);
-    verify(repo).close("reach-1", T0.plusSeconds(300));
-  }
-
-  @Test
-  @DisplayName("an outage shorter than one pass leaves NO row — the accepted cost, pinned")
-  void anOutageThatEndsBeforeItIsRecordedLeavesNoRow() {
-    // ⚠ This is a DELIBERATE loss, not a defect, and it is asserted so nobody re-derives the
-    // retained-state machinery to close it. A five-minute sampler cannot see an outage that begins
-    // and ends between two of its passes, whatever it remembers; the previous revision only
-    // appeared to, by recording outages whose OPENING WRITE failed — a database blip, not a short
-    // outage. That narrow case cost three review rounds and two lost-incident defects of its own.
-    NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisode()).thenReturn(none());
-    when(repo.open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString()))
-        .thenReturn(false);
-
-    MutableClock clock = new MutableClock(T0);
-    TestProbe p = new TestProbe(repo, 3, false, clock);
-    p.failing("kite", "telegram", "ntfy");
-    p.probe(); // down; the write does not land
-
-    clock.set(T0.plusSeconds(300));
-    p.failing(); // recovered already
-    p.probe();
-
-    // Nothing open, nothing to close, and no retrospective write.
-    verify(repo, never()).close(anyString(), any());
-    verify(repo, times(1))
-        .open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString());
+    verify(repo, never()).record(any(), anyInt(), anyInt(), anyInt(), anyString());
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -328,7 +313,7 @@ class NetworkReachabilityQuorumTest {
 
     new TestProbe(repo, 3, true, "kite", "telegram", "ntfy").probe();
 
-    verify(repo, never()).openEpisode();
+    verify(repo, never()).record(any(), anyInt(), anyInt(), anyInt(), anyString());
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -337,53 +322,6 @@ class NetworkReachabilityQuorumTest {
     return new NetworkReachabilityProbe(
         mock(NetworkReachabilityRepository.class), new SimpleMeterRegistry(), FIXED, true, 5, spec,
         quorum);
-  }
-
-  private static NetworkReachabilityRepository.OpenEpisodeLookup none() {
-    return new NetworkReachabilityRepository.OpenEpisodeLookup(true, null);
-  }
-
-  private static NetworkReachabilityRepository.OpenEpisodeLookup open(String key) {
-    return new NetworkReachabilityRepository.OpenEpisodeLookup(true, key);
-  }
-
-  /** A lookup that FAILED — "I could not find out", which is not the same as "nothing is open". */
-  private static NetworkReachabilityRepository.OpenEpisodeLookup unknown() {
-    return new NetworkReachabilityRepository.OpenEpisodeLookup(false, null);
-  }
-
-  @Test
-  @DisplayName("an unreadable recovery pass defers the close to the next READABLE pass")
-  void anUnreadableLookupDefersTheClose() {
-    // ⚠ "I could not find out" is still not "nothing is open" — the ONE distinction that survives
-    // dropping the retained state, because acting on a failed read would open a duplicate episode
-    // or close a live one. What changed is the stamp: the close now carries the instant of the
-    // pass that could actually read, not a remembered earlier one.
-    NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisode()).thenReturn(unknown()).thenReturn(open("reach-1"));
-    when(repo.close(anyString(), any())).thenReturn(true);
-
-    MutableClock clock = new MutableClock(T0);
-    TestProbe p = new TestProbe(repo, 3, false, clock);
-
-    p.probe(); // recovered, but episode state is unreadable
-    clock.set(T0.plusSeconds(300));
-    p.probe(); // readable now
-
-    verify(repo, times(1)).close("reach-1", T0.plusSeconds(300));
-  }
-
-  @Test
-  @DisplayName("an unreadable lookup writes NOTHING at all that pass")
-  void anUnreadableLookupWritesNothing() {
-    NetworkReachabilityRepository repo = mock(NetworkReachabilityRepository.class);
-    when(repo.openEpisode()).thenReturn(unknown());
-
-    probe(repo, 3, "kite", "telegram", "ntfy").probe();
-
-    verify(repo, never())
-        .open(anyString(), any(), anyInt(), anyInt(), anyInt(), anyString(), anyString());
-    verify(repo, never()).close(anyString(), any());
   }
 
   @Test

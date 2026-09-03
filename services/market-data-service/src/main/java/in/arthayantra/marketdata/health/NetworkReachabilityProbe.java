@@ -39,11 +39,25 @@ import org.springframework.stereotype.Component;
  * the one mechanism that cannot be relied on here, and attempting it would block on timeouts during
  * the exact minutes the service is already struggling.
  *
- * <p>⚠️ <b>Durability is not a nicety.</b> The counters below exist for dashboards, but the record
+ * <p>⚠️ <b>Durability is not a nicety.</b> The gauge below exists for dashboards, but the record
  * lives in the DB, because a Micrometer counter is process-lifetime and this event is routinely
  * followed by the box going down. The platform has paid for that twice already — a weekly arming
  * report keyed on a counter could only ever say "since the last restart", and the H26 rate peaks
  * died with their process.
+ *
+ * <p>⚠️ <b>ONE ROW PER PASS, NOT ONE PER EPISODE, AND THIS CLASS THEREFORE HOLDS NO STATE</b>
+ * (owner, 2026-09-03). Five earlier revisions opened a row when the quorum first said UNREACHABLE
+ * and closed it on recovery. Across six review rounds that state machine produced thirteen
+ * findings, seven of them introduced while fixing earlier ones, ending in a Critical that care
+ * cannot remove: a failed CLOSE followed by a new outage inside one period makes the writer decline
+ * to open a second row, so a later recovery closes the FIRST — one authoritative row spanning two
+ * incidents and the healthy gap between them.
+ *
+ * <p>A row is now an unconditionally true statement about one instant, and nothing a later pass
+ * does can falsify it. Incidents are grouped at read time, where the judgement about what separates
+ * two outages belongs and where getting it wrong cannot corrupt the facts. A failed insert loses
+ * one observation out of one every five minutes and needs no recovery path — which is why there
+ * is none to get wrong.
  */
 @Component
 public class NetworkReachabilityProbe {
@@ -132,7 +146,7 @@ public class NetworkReachabilityProbe {
   }
 
   /**
-   * Every 5 minutes. Frequent enough to bound an episode's start to a few minutes, rare enough that
+   * Every 5 minutes. Frequent enough to bound an outage to a few minutes, rare enough that
    * the probe is not itself a load source.
    *
    * <p>⚠️ Runs on its OWN scheduler, not the shared default pool — that pool is one thread shared by
@@ -155,83 +169,40 @@ public class NetworkReachabilityProbe {
       }
     }
 
-    // ⚠ AN INTERRUPTED PASS HAS NO OPINION, AND MUST NOT WRITE ONE.
-    // Once the thread is interrupted every remaining send fails instantly, and `reachable` reports
-    // those as REACHABLE (correctly — they are not a network verdict). The result is a pass that
-    // looks like recovery. With an episode open that would CLOSE it, stamping a FALSE recovery at
-    // the exact moment the host is shutting down — the incident this table exists to record. So the
-    // pass is abandoned whole: no gauge update, no transition.
+    // ⚠ AN INTERRUPTED PASS HAS NO OPINION, AND MUST NOT WRITE ONE. Still load-bearing after the
+    // move to per-pass rows, for a sharper reason than before: once the thread is interrupted every
+    // remaining send fails instantly and `reachable` reports those as REACHABLE (correctly — they
+    // are not a network verdict), so a pass that had already seen enough real failures to meet the
+    // quorum would store a row asserting the host network died at the exact moment the service was
+    // merely shutting down. A permanent, plausible, false row. The pass is abandoned whole.
     if (Thread.currentThread().isInterrupted()) {
-      log.info("reachability: pass interrupted (shutdown) — no verdict, no episode transition");
+      log.info("reachability: pass interrupted (shutdown) — no verdict, nothing recorded");
       return;
     }
 
     unreachableGauge.set(failed.size());
     Instant now = clock.instant();
-    boolean hostNetworkDown = failed.size() >= quorum;
 
-    // ⚠ THE OPEN ROW IS THE ONLY STATE. This class deliberately remembers NOTHING between passes
-    // (owner, 2026-09-02). An earlier revision carried three retained fields so an episode's
-    // boundaries survived a failed write, and every review round found another way for that memory
-    // to go wrong: a cleared start that resurrected as the next outage's key, a pending open
-    // replayed after its close, two incidents merged into one authoritative-looking row. The
-    // retained state was not incidental to those defects — it WAS them.
-    //
-    // What this costs, stated rather than hidden: an episode's start and end are the first PASS
-    // that successfully wrote them, so both are late by up to one cron period, and an outage that
-    // begins and ends inside a single period leaves no row. A five-minute sampler could never have
-    // resolved either of those anyway. What it buys is that a failed write needs no recovery path
-    // at all — the world is still down, the row is still absent, and the next pass simply observes
-    // the same thing again and retries. Correctness by re-observation, not by bookkeeping.
-    NetworkReachabilityRepository.OpenEpisodeLookup lookup = repository.openEpisode();
-    if (!lookup.readSucceeded()) {
-      // UNKNOWN, not "nothing is open" — the one distinction still worth drawing, because acting
-      // on a failed read would close a live episode or open a duplicate one.
-      log.warn("reachability: episode state unreadable — no transition this pass");
-      return;
-    }
-    String openKey = lookup.key();
-
-    if (hostNetworkDown) {
-      if (openKey == null) {
-        String key = "reach-" + now.toEpochMilli();
-        log.warn(
-            "reachability: {} of {} destinations unreachable ({}) — opening episode {}."
-                + " This is the HOST network, not one vendor.",
-            failed.size(), destinations.size(), String.join(",", failed), key);
-        boolean recorded =
-            repository.open(
-                key,
-                now,
-                destinations.size(),
-                failed.size(),
-                quorum,
-                String.join(",", failed),
-                "quorum " + failed.size() + "/" + destinations.size() + " unreachable"
-                    + " (threshold " + quorum + ")");
-        if (!recorded) {
-          // No retry state is kept. The outage is still happening and the row is still absent, so
-          // the next pass re-reaches this branch on its own evidence. Logged because the LOG is
-          // then the only record of the minutes before the write started landing.
-          log.warn("reachability: episode {} did not persist — the next pass will re-observe", key);
-        }
+    if (failed.size() < quorum) {
+      if (!failed.isEmpty()) {
+        // Below quorum: a vendor problem, deliberately NOT stored. Logged because "one vendor is
+        // down" is a real finding — it is just a different one, and storing it would let a single
+        // vendor that starts refusing our probe write 288 rows a day and bury the incidents.
+        log.info("reachability: {} unreachable ({}) — below the {} quorum, treating as vendor-local",
+            failed.size(), String.join(",", failed), quorum);
       }
       return;
     }
 
-    if (!failed.isEmpty()) {
-      // Below quorum: a vendor problem, deliberately NOT an episode. Logged so it is still
-      // visible, because "one vendor is down" is a real finding — it is just a different one.
-      log.info("reachability: {} unreachable ({}) — below the {} quorum, treating as vendor-local",
-          failed.size(), String.join(",", failed), quorum);
-    }
-    if (openKey != null) {
-      log.info("reachability: recovered — closing episode {}", openKey);
-      if (!repository.close(openKey, now)) {
-        // Same shape as a failed open: the row stays open, reachability is still fine, and the
-        // next pass reads the same state and closes it then — one cron period later.
-        log.warn("reachability: episode {} did not close — the next pass will retry", openKey);
-      }
+    log.warn(
+        "reachability: {} of {} destinations unreachable ({}) at {} — this is the HOST network,"
+            + " not one vendor.",
+        failed.size(), destinations.size(), String.join(",", failed), now);
+    if (!repository.record(now, destinations.size(), failed.size(), quorum,
+        String.join(",", failed))) {
+      // No retry, by design. The next pass observes independently; one lost row out of one every
+      // five minutes is a gap in the record, and the log line above is what covers it.
+      log.warn("reachability: the {} observation did not persist — see the WARN above for it", now);
     }
   }
 
@@ -253,7 +224,7 @@ public class NetworkReachabilityProbe {
       return true;
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
-      // Shutdown, not a network verdict. Reporting unreachable here would open an episode every
+      // Shutdown, not a network verdict. Reporting unreachable here would record an outage every
       // time the service stops.
       return true;
     } catch (Exception unreachable) {

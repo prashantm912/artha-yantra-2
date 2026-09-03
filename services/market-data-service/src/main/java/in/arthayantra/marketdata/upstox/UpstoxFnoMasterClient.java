@@ -87,8 +87,8 @@ public final class UpstoxFnoMasterClient {
    * loaded. That is this repository's catalogued "a cache that stores a FAILURE with a fresh
    * timestamp" shape, and it made the independence the javadoc above claims only half true. Nothing
    * reads the cash index yet, so the effect today is a wrong number rather than a wrong decision —
-   * but A2-3 is the consumer that must be able to tell "stale" from "fresh and genuinely empty",
-   * and {@link #nseCashSize()} alone cannot. Cross-vendor review 2026-09-03.
+   * but A2-3 is the consumer that must be able to tell a CURRENT cash index from a stale one, and
+   * {@link #nseCashSize()} alone cannot. Cross-vendor review 2026-09-03.
    */
   private volatile Instant cashLoadedAt = Instant.EPOCH;
 
@@ -281,8 +281,10 @@ public final class UpstoxFnoMasterClient {
    * How many NSE cash rows the master currently maps.
    *
    * <p>Zero means the index holds nothing — which is "never loaded" OR "loaded and mapped nothing".
-   * This number alone cannot separate them; {@link #nseCashLoadedAt()} can, and a consumer judging
-   * health must read both.
+   * ⚠️ Nothing here separates those two, and neither does {@link #nseCashLoadedAt()}: an empty cash
+   * candidate is deliberately treated as a FAILED load, so both states read size 0 / EPOCH. What the
+   * pair does tell a consumer is whether the index it is reading is CURRENT or left over from an
+   * earlier load — which is the question A2-3 actually has to answer.
    */
   public int nseCashSize() {
     cache();
@@ -292,11 +294,14 @@ public final class UpstoxFnoMasterClient {
   /**
    * When the cash index last loaded SUCCESSFULLY, or {@link Instant#EPOCH} if it never has.
    *
-   * <p>Advances ONLY on a load that mapped at least one cash row — never on a load whose F&amp;O half
-   * succeeded and whose cash half mapped nothing. That is the whole reason it is not {@code
-   * loadedAt}: paired with {@link #nseCashSize()} it separates "never loaded" from "loaded and
-   * genuinely empty" from "stale", which is what the A2-3 shadow diff has to decide before it can
-   * treat a zero-mismatch session as evidence of anything.
+   * <p>The timestamp of the last successful NON-EMPTY load: it advances only on a load that mapped
+   * at least one cash row, never on one whose F&amp;O half succeeded and whose cash half mapped
+   * nothing. That is the whole reason it is not {@code loadedAt} — it dates the index a caller is
+   * actually reading, so A2-3 can tell a CURRENT index from one left over from an earlier load
+   * before it treats a zero-mismatch session as evidence of anything.
+   *
+   * <p>⚠️ It does NOT separate "never loaded" from "loaded and mapped nothing" — an empty candidate
+   * is treated as a failure, so both read {@code EPOCH}. Cross-vendor review 2026-09-03 (Minor).
    */
   public Instant nseCashLoadedAt() {
     cache();

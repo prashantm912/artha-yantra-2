@@ -78,6 +78,20 @@ public final class UpstoxFnoMasterClient {
    * two caches that fail for unrelated reasons.
    */
   private volatile Map<Long, NseCashIdentity> nseCashByToken = Map.of();
+
+  /**
+   * When the cash index last loaded SUCCESSFULLY — deliberately separate from {@link #loadedAt}.
+   *
+   * <p>⚠️ The two indexes have independent emptiness guards but shared the one timestamp, so a load
+   * whose F&amp;O half succeeded and whose cash half mapped nothing stamped the cash index as freshly
+   * loaded. That is this repository's catalogued "a cache that stores a FAILURE with a fresh
+   * timestamp" shape, and it made the independence the javadoc above claims only half true. Nothing
+   * reads the cash index yet, so the effect today is a wrong number rather than a wrong decision —
+   * but A2-3 is the consumer that must be able to tell "stale" from "fresh and genuinely empty",
+   * and {@link #nseCashSize()} alone cannot. Cross-vendor review 2026-09-03.
+   */
+  private volatile Instant cashLoadedAt = Instant.EPOCH;
+
   private volatile Instant loadedAt = Instant.EPOCH;
   private volatile Instant lastAttemptAt = Instant.EPOCH;
 
@@ -224,6 +238,7 @@ public final class UpstoxFnoMasterClient {
             nseCashByToken.size());
       } else {
         nseCashByToken = cashCandidate;
+        cashLoadedAt = attemptAt;
       }
       loadedAt = attemptAt;
       log.info("Upstox F&O instrument master loaded: {} mapped legs", keysByLeg.size());
@@ -266,11 +281,26 @@ public final class UpstoxFnoMasterClient {
    * How many NSE cash rows the master currently maps.
    *
    * <p>Zero means the index holds nothing — which is "never loaded" OR "loaded and mapped nothing".
-   * The two are distinguishable only from the reload WARN, not from this number.
+   * This number alone cannot separate them; {@link #nseCashLoadedAt()} can, and a consumer judging
+   * health must read both.
    */
   public int nseCashSize() {
     cache();
     return nseCashByToken.size();
+  }
+
+  /**
+   * When the cash index last loaded SUCCESSFULLY, or {@link Instant#EPOCH} if it never has.
+   *
+   * <p>Advances ONLY on a load that mapped at least one cash row — never on a load whose F&amp;O half
+   * succeeded and whose cash half mapped nothing. That is the whole reason it is not {@code
+   * loadedAt}: paired with {@link #nseCashSize()} it separates "never loaded" from "loaded and
+   * genuinely empty" from "stale", which is what the A2-3 shadow diff has to decide before it can
+   * treat a zero-mismatch session as evidence of anything.
+   */
+  public Instant nseCashLoadedAt() {
+    cache();
+    return cashLoadedAt;
   }
 
   /**
@@ -297,7 +327,7 @@ public final class UpstoxFnoMasterClient {
   private static Map<Long, NseCashIdentity> indexNseCash(List<UpstoxInstrumentMaster> rows) {
     Map<Long, NseCashIdentity> map = new HashMap<>();
     for (UpstoxInstrumentMaster r : rows) {
-      if (!"NSE_EQ".equals(r.segment()) || r.exchangeToken() == null || r.instrumentKey() == null) {
+      if (!"NSE_EQ".equals(r.segment()) || r.instrumentKey() == null) {
         continue;
       }
       String symbol = r.tradingSymbol();
@@ -305,10 +335,14 @@ public final class UpstoxFnoMasterClient {
       if (symbol == null || series == null) {
         continue;
       }
+      Long token = parseExchangeToken(r.exchangeToken());
+      if (token == null) {
+        continue;
+      }
       map.putIfAbsent(
-          r.exchangeToken(),
+          token,
           new NseCashIdentity(
-              r.exchangeToken(),
+              token,
               r.instrumentKey(),
               r.isin(),
               symbol,
@@ -316,6 +350,30 @@ public final class UpstoxFnoMasterClient {
               kiteTradingsymbol(symbol, series)));
     }
     return map;
+  }
+
+  /**
+   * The wire {@code exchange_token} as a number, or {@code null} when it is absent, blank or not a
+   * number.
+   *
+   * <p>⚠️ <b>Called only AFTER the {@code NSE_EQ} filter, and that ordering is the point.</b> The
+   * field is mirrored as the JSON string Upstox actually sends, so no row can break the parse — 13
+   * live rows carry the empty string, all of them in segments this index never looks at. Converting
+   * here rather than in the DTO keeps that cost inside the one segment we index and keeps the whole
+   * master parse independent of the mapper's coercion configuration.
+   */
+  private static Long parseExchangeToken(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return null;
+    }
+    try {
+      return Long.valueOf(raw.trim());
+    } catch (NumberFormatException notANumber) {
+      // A non-numeric token is a row we cannot identify, not a reason to fail the load: skip it and
+      // leave the rest of the master indexed. Deliberately silent — the master carries ~117k rows
+      // and a per-row WARN would be a log flood, while the A2-3 shadow diff reports the miss.
+      return null;
+    }
   }
 
   /**

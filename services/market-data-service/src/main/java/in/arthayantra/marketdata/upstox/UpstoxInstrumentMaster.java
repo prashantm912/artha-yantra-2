@@ -42,20 +42,20 @@ public record UpstoxInstrumentMaster(
     // instruments table 100.00% on both NSE_EQ and NSE_FO, where a trading_symbol join matches
     // only ~28% of equities.
     //
-    // ⚠️ ON THE WIRE THIS IS A JSON **STRING**, NOT A NUMBER — `"758718"`. An earlier version of
-    // this comment justified the boxed Long by "a segment that omits it must parse to null", and
-    // that reason was FALSE: `computed` 2026-09-03 over the live master, all 117,344 rows carry the
-    // key and NONE omits it. The real reason to box is the 13 rows that carry the EMPTY STRING
-    // (10 GLOBAL_INDEX + 3 GLOBAL_INDICATOR), which Jackson's default empty-string coercion turns
-    // into null. A primitive would be a compile error there, not a silent 0 — but the null still
-    // matters downstream, and `indexNseCash` skips it.
+    // ⚠️ MIRRORED AS THE WIRE TYPE -- A JSON **STRING** (`"758718"`), NOT A NUMBER -- and that
+    // is the whole point. An earlier revision mapped it to a boxed `Long` and leaned on Jackson's
+    // default empty-string->null coercion for the 13 rows that carry `""` (10 GLOBAL_INDEX +
+    // 3 GLOBAL_INDICATOR; `computed` 2026-09-03 over all 117,344 rows, every one of which carries
+    // the key). That default is a GLOBAL setting this class does not own, and mapping the field had
+    // moved it OUT of the `ignoreUnknown` bucket where it could never break anything: were the
+    // coercion ever reconfigured, EVERY master parse would throw and the F&O cache would stop
+    // warming -- loudly (reload() logs and keeps the prior cache) but permanently, on the live
+    // margin path. Cross-vendor review 2026-09-03 called that the wrong thing to pin with a test.
     //
-    // ⚠️ That coercion is a GLOBAL Jackson default this class does not own, and mapping this field
-    // moved it out of the `ignoreUnknown` bucket where it could never break anything. If the
-    // default ever changed, every reload would throw and the F&O cache would stop warming — loudly
-    // (reload() logs and keeps the prior cache) but permanently. `parsesTheEmptyExchangeTokenAsNull`
-    // pins it, so that change fails a test here instead of in production.
-    @JsonProperty("exchange_token") Long exchangeToken,
+    // As a String the parse cannot throw for any row whatever the mapper is configured to do, and
+    // `indexNseCash` converts to a long AFTER filtering to NSE_EQ -- so a malformed token in a
+    // segment we never index costs nothing. The field is inert again.
+    @JsonProperty("exchange_token") String exchangeToken,
     // Carried for provenance and for the equity cross-check; Upstox addresses NSE_EQ keys as
     // NSE_EQ|<ISIN>. Not used as identity — an ISIN survives a rename, which is exactly why it
     // cannot be a primary key here.

@@ -8,6 +8,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.cfg.CoercionAction;
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import java.io.ByteArrayOutputStream;
@@ -418,13 +420,9 @@ class UpstoxFnoMasterClientTest {
   }
 
   @Test
-  void parsesAnEmptyExchangeTokenAsNullWithoutBreakingTheLoad() {
+  void skipsAnEmptyExchangeTokenWithoutBreakingTheLoad() {
     // ⚠️ exchange_token is a JSON STRING on the wire, and 13 live rows carry "" (10 GLOBAL_INDEX +
-    // 3 GLOBAL_INDICATOR — computed 2026-09-03 over all 117,344 rows). Mapping the field moved it
-    // out of the ignoreUnknown bucket, so its coercion to null is now load-bearing for the WHOLE
-    // parse: were it to throw, reload() would keep the prior cache and never warm again. The
-    // coercion is a global Jackson default this class does not own, which is exactly why it is
-    // pinned here rather than assumed.
+    // 3 GLOBAL_INDICATOR — computed 2026-09-03 over all 117,344 rows). The fixture carries one.
     UpstoxFnoMasterClient client = client();
 
     assertThat(client.nseCashSize()).as("the load survived the empty token").isEqualTo(2);
@@ -432,6 +430,107 @@ class UpstoxFnoMasterClientTest {
         .as("and the F&O index still warmed from the same payload")
         .isEqualTo("NSE_FO|61093");
   }
+
+  @Test
+  void parsesTheWholeMasterEvenWhenScalarCoercionIsConfiguredToFAIL() {
+    // ⚠️ THIS IS THE TEST THE PREVIOUS REVISION COULD NOT WRITE, and the reason the DTO now mirrors
+    // exchange_token as the String Upstox actually sends. Mapping it as a boxed Long made the WHOLE
+    // master parse depend on Jackson's default empty-string→null coercion — a GLOBAL setting this
+    // class does not own — and the test that "pinned" it used a standalone `new ObjectMapper()`,
+    // not the injected production one, so it pinned a default rather than production's behaviour.
+    // Cross-vendor review 2026-09-03 (Critical).
+    //
+    // Here the mapper is configured to REFUSE that coercion outright, which is the strictest thing
+    // any future global config could do. Under the old Long mapping this throws
+    // InvalidFormatException on the GLOBAL_INDEX row, reload() swallows it, and BOTH caches stay
+    // empty forever — the live F&O margin path included. As a String there is nothing to coerce.
+    ObjectMapper strict = new ObjectMapper();
+    strict
+        .coercionConfigDefaults()
+        .setCoercion(CoercionInputShape.EmptyString, CoercionAction.Fail);
+    UpstoxFnoMasterClient client =
+        new UpstoxFnoMasterClient(
+            RestClient.builder(),
+            strict,
+            new UpstoxAnalyticsProperties(null, null, null, wireMock.baseUrl()),
+            Clock.systemUTC());
+
+    assertThat(client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null))
+        .as("the F&O index — the LIVE margin path — warmed under a mapper that refuses coercion")
+        .isEqualTo("NSE_FO|61093");
+    assertThat(client.nseCashSize()).as("and so did the cash index").isEqualTo(2);
+  }
+
+  @Test
+  void skipsANonNumericExchangeTokenRatherThanFailingTheLoad() {
+    // The conversion moved INTO indexNseCash, after the NSE_EQ filter, so a token that is present
+    // but not a number is one unidentifiable row — not a failed master. The other cash row must
+    // still land, which is what separates "skipped" from "the load died".
+    wireMock.resetAll();
+    wireMock.stubFor(
+        get(urlPathEqualTo(MASTER_PATH))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/gzip")
+                    .withBody(gzip(MASTER_JSON.replace("\"exchange_token\":\"758718\"", "\"exchange_token\":\"N/A\"")))));
+
+    UpstoxFnoMasterClient client = client();
+
+    assertThat(client.nseCashSize()).as("the good cash row still landed").isEqualTo(1);
+    assertThat(client.nseCashIdentity(2885L)).isNotNull();
+    assertThat(client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null))
+        .as("and the F&O index is untouched by a bad cash token")
+        .isEqualTo("NSE_FO|61093");
+  }
+
+  @Test
+  void cashFreshnessDoesNotAdvanceWhenTheLoadMapsNoCashRows() {
+    // ⚠️ The two indexes have independent emptiness guards but SHARED one `loadedAt`, so a load
+    // whose F&O half succeeded and whose cash half mapped nothing stamped the cash index as freshly
+    // loaded — this repo's catalogued "a cache that stores a FAILURE with a fresh timestamp".
+    // Cross-vendor review 2026-09-03 (Major). `nseCashSize()` alone cannot tell "never loaded" from
+    // "stale", which is precisely the distinction A2-3's soak has to make.
+    wireMock.resetAll();
+    wireMock.stubFor(
+        get(urlPathEqualTo(MASTER_PATH))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/gzip")
+                    .withBody(gzip(FO_ONLY_MASTER_JSON))));
+
+    UpstoxFnoMasterClient client = client();
+
+    assertThat(client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null))
+        .as("the F&O half genuinely succeeded — that is what makes the shared stamp wrong")
+        .isEqualTo("NSE_FO|61093");
+    assertThat(client.nseCashSize()).isZero();
+    assertThat(client.nseCashLoadedAt())
+        .as("cash never loaded, so its freshness must still be EPOCH")
+        .isEqualTo(Instant.EPOCH);
+  }
+
+  @Test
+  void cashFreshnessAdvancesOnLoadsThatDoMapCashRows() {
+    UpstoxFnoMasterClient client = client();
+
+    assertThat(client.nseCashSize()).isEqualTo(2);
+    assertThat(client.nseCashLoadedAt())
+        .as("a load that mapped cash rows advances cash freshness")
+        .isAfter(Instant.EPOCH);
+  }
+
+  /** F&O + index only — no NSE_EQ row at all, so the cash index legitimately maps nothing. */
+  private static final String FO_ONLY_MASTER_JSON =
+      """
+      [
+        {"segment":"NSE_FO","name":"NIFTY","asset_symbol":"NIFTY","underlying_symbol":"NIFTY",
+         "instrument_key":"NSE_FO|61093","instrument_type":"FUT","trading_symbol":"NIFTY FUT 28 JUL 26","exchange_token":"61093",
+         "expiry":1785263399000,"strike_price":0.0},
+        {"segment":"NSE_INDEX","name":"NIFTY 50","asset_symbol":null,"underlying_symbol":null,
+         "instrument_key":"NSE_INDEX|Nifty 50","instrument_type":"INDEX","trading_symbol":"Nifty 50","exchange_token":"1001",
+         "expiry":null,"strike_price":0.0}
+      ]
+      """;
 
   private static byte[] gzip(String json) {
     ByteArrayOutputStream out = new ByteArrayOutputStream();

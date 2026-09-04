@@ -335,6 +335,16 @@ its first real pass is tomorrow's 08:30 sync (task `verify-a21-kite-last-seen-20
 
 ### 9.4 ⚠️ OPEN ACTION, owner/architect: the strategy-signal log barrier
 
+⚠️ **SUPERSEDED THE NEXT DAY — READ THIS FIRST. The barrier PARTIALLY CLEARED on 2026-09-04 and the
+paragraph below overstates it.** `computed` 2026-09-04 17:06 IST: a bare `docker logs` still stops
+at 09-01 07:11:57Z, but **`--tail 200` and `--tail 2000` both return the current line
+(2026-09-04T11:36:43Z)** — today's data is readable. The 09-04 scheduled analysis found this; my own
+09-03 check used the BARE read and therefore reported the worse of the two. The distinction is that
+an unbounded read walks from the beginning and hits the corruption, while a bounded tail reads
+backwards from the end and never reaches it. **So the recreate is no longer urgent** — it would tidy
+the unbounded read, nothing more. The lesson is the reusable part: *"every read mode"* was a claim
+about instruments I had not all tried, and the one I skipped was the one that worked.
+
 §6.1's proposal is NOT actioned. `docker logs ay-strategy-signal-service` still ends at **09-01
 12:41 IST** for every read mode — third consecutive day, and the `--tail` workaround is now dead
 too. Every log-derived check in this file is **UNKNOWABLE rather than zero**, and each further

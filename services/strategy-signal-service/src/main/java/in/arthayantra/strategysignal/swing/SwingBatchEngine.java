@@ -1241,6 +1241,19 @@ public class SwingBatchEngine {
       if (strat == null) {
         continue; // another family's anchor, or unmanageable (already logged at ERROR)
       }
+      try {
+        warnOnDivergentLotExitRules(doctrine, e.getKey(), lots, primary, strat, resolution);
+      } catch (RuntimeException detectorFailure) {
+        // ⚠️ FAIL-SOFT, and it is the whole containment claim. Without this, an unchecked throw from
+        // metric registration or fingerprint compilation propagates out of exitPass and abandons the
+        // stop evaluation for THIS symbol and every symbol after it — the scheduled wrapper then
+        // records an all-zero failed run and a real position's only daily stop check never happens.
+        // An observability hook that can cost an exit is not observability. Same doctrine as
+        // PaperService.tagLotFailSoft: a diagnostic may never roll back the thing it observes.
+        log.error(
+            "{} swing exit: lot exit-doctrine detector failed for {} — exits continue unaffected",
+            doctrine.batchName(), e.getKey(), detectorFailure);
+      }
       List<EngineCandle> series = series(doctrine, primary.tradingsymbol(), seriesCache, requiredBarDate);
       if (series.isEmpty()) {
         // One retry OUTSIDE the per-run cache: MarketDataCandlesClient fail-softs to an empty list on
@@ -1758,6 +1771,98 @@ public class SwingBatchEngine {
 
   private static String coverageDegradedReason(String symbol) {
     return "EXIT_DEGRADED_COVERAGE:" + symbol;
+  }
+
+  /**
+   * Makes the symbol-only lot collapse VISIBLE when the colliding lots would have exited differently.
+   *
+   * <p><b>What actually happens above, and this method does not change it.</b> {@code
+   * openLotsBySymbol} groups a family's open anchors by {@code tradingsymbol} ALONE, with no strategy
+   * and no version dimension. {@code exitPass} then drives the whole group off {@code
+   * oldestLot(lots)} — ONE lot's definition decides, the shared paper position closes, and EVERY lot
+   * in the group is expired. So when two lots on one symbol carry different exit rules, the younger
+   * lot is exited by the older lot's rules and nothing anywhere says so.
+   *
+   * <p><b>Why a detector and not a fix.</b> Fixing it means re-keying the lot map, which changes
+   * which position closes on which night — an exit-doctrine change and an owner decision, not
+   * something to slip into an observability pass. This is the cheap half: the collapse keeps its
+   * current behaviour, and the case where that behaviour is WRONG stops being silent.
+   *
+   * <p><b>Why this axis specifically.</b> {@code SwingFamilyExitDoctrineTest} already pins the
+   * cross-STRATEGY axis against the bundled YAML, and its own javadoc records what it cannot reach:
+   * two lots resolving to different {@code strategy_version_id}s of the SAME strategy diverge
+   * identically, and editing every family member together — the well-behaved thing to do — keeps that
+   * test green while creating exactly that divergence across a republish. The MANAS seeder
+   * AUTO-PUBLISHES on any bundled-YAML change ("then publish the latest draft"), so on that family a
+   * version bump needs no deliberate act at all; the MINERVINI and scalper seeders deliberately leave
+   * DRAFTS for the owner ("Drafts never emit — the owner … publishes each"), so a new minervini
+   * version takes a deliberate publish — which makes its live spread of version ids more notable
+   * rather than less. That test says the gap "needs a live-data check, not a unit test". This is that
+   * check, placed where the data is.
+   *
+   * <p><b>Reachability, stated honestly rather than overclaimed.</b> The collapse needs TWO lots on
+   * one held symbol, and today none exists: Minervini's {@code pyramid()} returns {@code
+   * PyramidPolicy.NONE} at compile time and Manas's is gated behind {@code
+   * artha.manas-arora.pyramid.enabled}, {@code computed} false from {@code docker inspect} on
+   * 2026-09-12. So this method's body is unreachable in production right now and the early return
+   * costs one {@code size()} check a symbol. ⚠️ The population it is waiting for is already
+   * assembled, though: {@code computed} live the same day, the minervini book holds <b>13 open
+   * anchors across 7 distinct version ids</b> (manas: 7 anchors, 1 version) — 13 distinct symbols, so
+   * zero collisions. The versions are there; only the second lot is missing, and the flag that
+   * supplies it has been armed before (F2 #612). ⚠️ <b>That spread MOVES — re-derive it, never quote
+   * this line.</b>
+   *
+   * <p>Detects only where it can be certain: an ABSENT sibling version (one this family cannot
+   * resolve) is skipped rather than reported, because a version we cannot read is a different defect
+   * and is already logged at ERROR upstream. It compares {@link SwingExitFingerprint} rather than the
+   * version CHECKSUM — a checksum diff fires on an entry-only edit, which the collapse does not harm,
+   * and a detector that cries on harmless edits is one nobody reads. ⚠️ It also compares more than
+   * the raw {@code exitRules}, and review caught why that matters: bare rule-spec equality has a
+   * FALSE-NEGATIVE on indicator-backed exits — exactly Minervini's {@code alias: sma50} trail, where
+   * the rule records stay textually equal while the level moves with the indicator declaration. Rule
+   * ORDER is significant ({@code ExitEvaluator} returns the first rule that fires), so a reorder
+   * reports a divergence; that is the false-ALARM direction and the acceptable one.
+   */
+  private void warnOnDivergentLotExitRules(
+      SwingDoctrine doctrine,
+      String symbol,
+      List<SignalRepository.SignalRow> lots,
+      SignalRepository.SignalRow primary,
+      SwingStrategy governing,
+      AnchorResolution resolution) {
+    if (lots.size() < 2) {
+      return; // the only shape that exists today — see the reachability note above
+    }
+    SwingExitFingerprint governingExit = SwingExitFingerprint.of(governing.definition());
+    for (SignalRepository.SignalRow lot : lots) {
+      if (lot.id() == primary.id()
+          || java.util.Objects.equals(lot.strategyVersionId(), primary.strategyVersionId())) {
+        continue;
+      }
+      SwingStrategy other = resolution.resolve(lot.strategyVersionId()).orElse(null);
+      if (other == null) {
+        continue; // unmanageable; adoptVersion already logged it at ERROR
+      }
+      SwingExitFingerprint otherExit = SwingExitFingerprint.of(other.definition());
+      if (otherExit.equals(governingExit)) {
+        continue;
+      }
+      meters
+          .counter("ay_swing_lot_exit_rule_divergence_total", "batch", doctrine.batchName())
+          .increment();
+      log.warn(
+          "{} swing exit: {} holds lots on DIVERGENT exit doctrine — anchor #{} (version {}, {}) is"
+              + " being exited by anchor #{}'s rules (version {}, {}) because lots key on symbol"
+              + " alone. The younger lot's own exit doctrine is NOT being applied.",
+          doctrine.batchName(),
+          symbol,
+          lot.id(),
+          lot.strategyVersionId(),
+          otherExit,
+          primary.id(),
+          primary.strategyVersionId(),
+          governingExit);
+    }
   }
 
   private static String mixedLotReason(String symbol) {

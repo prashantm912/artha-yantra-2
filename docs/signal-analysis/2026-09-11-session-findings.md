@@ -337,3 +337,31 @@ Ledger §0 group G/H is the authoritative status; nothing applied by this run.
   TIME_STOP reading are observations, not a measured change in the exit model.
 - Read-only run: SELECTs, `docker logs --tail`, `docker inspect`. No restarts, deploys, writes,
   config changes or republishes. Docs-only PR: this file + rollup rows + the H49 ledger cell.
+
+---
+
+## Addendum — 2026-09-12: the NEW-9 tally in §5.3 and §7 is understated
+
+⚠️ **§5.3 and §7 above say the running tally is "~28 losers refused vs ~8 winners". It is
+~32 vs ~8.** Findings files are immutable, so the number stays as written and is corrected here.
+
+The error was not arithmetic. When this file was written, 09-09 and 09-10 had been reduced to
+counters and their veto sole-blocker sets had **never been queried** — so both days contributed
+ZERO to the tally, and I read that zero as "the veto did nothing on those days" rather than "I have
+not looked". Backfilling them (`2026-09-09-session-findings.md` §5.3,
+`2026-09-10-session-findings.md` §5.3) shows both days refused **two corroborated losers each**:
+
+- **09-09 12:36** — champion STOP_LOSS **−₹4,446.94** (`NIFTY2691523400CE`) and **−₹2,816.33**
+  (`SENSEX2691074800CE`). That is the exact bar whose champion fan-out cost **₹41,973**, the worst
+  cluster pair in the recent record. The veto's best single day.
+- **09-10 12:15** — STOP_LOSS **−₹4,614.37** and **−₹1,796.66**, the follow-on to a 12:06 cluster
+  that cost the shadow book ₹30,050.
+
+So the three-day window reads **4 losers and 2 winners refused**, not 2 and 2 — and 09-11 is even
+more clearly the outlier it was described as, with two adjacent sessions in which the veto was
+decisively right. The §5.3 verdict ("this single day does not overturn it") is strengthened, not
+weakened. **Nothing about 09-11's own numbers changes.**
+
+This is the failure mode [[named-instances-are-not-the-set]] describes, one level up: a tally
+carried forward from a window that was only partly measured, where the unmeasured part reads as an
+absence of events rather than an absence of measurement.

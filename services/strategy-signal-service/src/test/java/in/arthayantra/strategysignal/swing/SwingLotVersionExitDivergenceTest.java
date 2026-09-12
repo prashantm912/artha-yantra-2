@@ -124,6 +124,41 @@ class SwingLotVersionExitDivergenceTest {
     assertThat(h.counter(COUNTER)).isZero();
   }
 
+  @Test
+  void anOperandOnlyChangeIsReportedEvenThoughTheExitRulesAreIdentical() {
+    // ⚠️ THE FALSE-NEGATIVE review caught, and it lands on the book that actually has the version
+    // spread. Both versions here declare the SAME trailing_stop record — {basis: indicator, alias:
+    // sma20} — so bare exitRules equality reports nothing. The LEVEL differs, because version 2
+    // declares sma20 over a 10-period window instead of 20. That is Minervini's `alias: sma50` trail
+    // exactly: textually identical rules, a genuinely different exit.
+    Harness h = new Harness();
+    h.indicatorBackedTrail();
+    h.secondLotOnVersion(h.operandOnlyDivergentVersion());
+
+    h.engine().runDaily(h.doctrine, null, false);
+
+    assertThat(h.counter(COUNTER))
+        .as("the rule records are equal — only the operand they resolve through moved")
+        .isEqualTo(1.0);
+  }
+
+  @Test
+  void detectorThatThrowsDoesNotCostTheExit() {
+    // ⚠️ THE CONTAINMENT CLAIM, and review was right that it did not hold. An unchecked throw out of
+    // the detector propagates through exitPass and abandons the stop evaluation for this symbol AND
+    // every symbol after it — the scheduled wrapper then records an all-zero failed run, and a real
+    // position's only daily stop check never happens. An observability hook that can cost an exit is
+    // not observability.
+    Harness h = new Harness();
+    h.secondLotOnVersion(h.divergentVersion());
+
+    SwingBatchEngine.SwingRun run = h.engineWithThrowingMeters().runDaily(h.doctrine, null, false);
+
+    assertThat(run.exits())
+        .as("the exit must settle tonight whatever the diagnostic does")
+        .isEqualTo(1);
+  }
+
   // ---- harness -------------------------------------------------------------------------------
 
   private final class Harness {
@@ -142,6 +177,7 @@ class SwingLotVersionExitDivergenceTest {
     final UUID publishedVersion = UUID.randomUUID();
     final List<SignalRepository.SignalRow> anchors = new ArrayList<>();
     final Clock clock;
+    boolean indicatorBackedTrail;
 
     Harness() {
       this.clock =
@@ -183,9 +219,22 @@ class SwingLotVersionExitDivergenceTest {
       anchors.add(anchor(44L, versionId, series.get(25).bucketStart()));
     }
 
+    /** The fixture config every version in this run is built from. */
+    JsonNode baseConfig() {
+      ObjectNode config = (ObjectNode) swingConfig();
+      if (indicatorBackedTrail) {
+        ObjectNode trailing = trailingStopRule(config);
+        ObjectNode params = (ObjectNode) trailing.get("params");
+        params.removeAll();
+        params.put("basis", "indicator");
+        params.put("alias", "sma20");
+      }
+      return config;
+    }
+
     /** A superseded version whose trailing stop arms at 6% instead of 9% — the javadoc's scenario. */
     UUID divergentVersion() {
-      ObjectNode config = (ObjectNode) swingConfig();
+      ObjectNode config = (ObjectNode) baseConfig();
       ObjectNode trailing = trailingStopRule(config);
       ((ObjectNode) trailing.get("params")).put("arm_pct", 6);
       return registerVersion(config);
@@ -196,7 +245,7 @@ class SwingLotVersionExitDivergenceTest {
      * would differ while the collapse stays harmless.
      */
     UUID sameExitRulesDifferentElsewhereVersion() {
-      ObjectNode config = (ObjectNode) swingConfig();
+      ObjectNode config = (ObjectNode) baseConfig();
       ((ObjectNode) config.path("risk")).put("max_positions", 9);
       return registerVersion(config);
     }
@@ -217,10 +266,64 @@ class SwingLotVersionExitDivergenceTest {
       return id;
     }
 
+    /**
+     * Rewrites the trailing stop in EVERY version to resolve through an indicator alias, so the exit
+     * LEVEL depends on a declaration outside {@code exit_rules}. Without this the operand half of the
+     * fingerprint has nothing to bite on and the test would pass for the wrong reason.
+     */
+    void indicatorBackedTrail() {
+      indicatorBackedTrail = true;
+      when(registry.findVersionById(publishedVersion))
+          .thenReturn(Optional.of(version(publishedVersion, strategyId, baseConfig())));
+    }
+
+    /** Identical exit rules; {@code sma20} declared over 10 periods instead of 20. */
+    UUID operandOnlyDivergentVersion() {
+      ObjectNode config = (ObjectNode) baseConfig();
+      for (JsonNode indicator : config.path("indicators")) {
+        if ("sma20".equals(indicator.path("alias").asText())) {
+          ((ObjectNode) indicator.get("params")).put("period", 10);
+          return registerVersion(config);
+        }
+      }
+      throw new AssertionError("fixture has no sma20 indicator — the scenario cannot be built");
+    }
+
+    /**
+     * A registry that throws for THIS DETECTOR'S counter only.
+     *
+     * <p>⚠️ Scoped on purpose, and the unscoped version is why. A registry that throws for every
+     * counter also breaks the engine's unrelated meters, so the run dies somewhere else entirely and
+     * the test reports a failure that says nothing about the boundary under test — a proof that
+     * reddens for a mechanical reason. Narrowing it to {@link #COUNTER} means the only thing that can
+     * throw here is the line this catch exists to contain.
+     */
+    SwingBatchEngine engineWithThrowingMeters() {
+      return engine(
+          new SimpleMeterRegistry() {
+            @Override
+            protected io.micrometer.core.instrument.Counter newCounter(
+                io.micrometer.core.instrument.Meter.Id id) {
+              if (COUNTER.equals(id.getName())) {
+                throw new IllegalStateException("meter registration failed");
+              }
+              return super.newCounter(id);
+            }
+          });
+    }
+
     SwingBatchEngine engine() {
+      return engine(meters);
+    }
+
+    private SwingBatchEngine engine(io.micrometer.core.instrument.MeterRegistry registry0) {
+      return engineWith(registry0);
+    }
+
+    private SwingBatchEngine engineWith(io.micrometer.core.instrument.MeterRegistry meterRegistry) {
       return new SwingBatchEngine(
           registry, candles, signals, publisher, events, Optional.of(guard), passthroughTx(),
-          new ObjectMapper(), clock, paperEffects, refusals, "OBSERVE_ONLY", null, meters);
+          new ObjectMapper(), clock, paperEffects, refusals, "OBSERVE_ONLY", null, meterRegistry);
     }
 
     /** Absent (never incremented) reads 0, which is what a caller means by "not reported". */

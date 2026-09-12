@@ -1241,7 +1241,19 @@ public class SwingBatchEngine {
       if (strat == null) {
         continue; // another family's anchor, or unmanageable (already logged at ERROR)
       }
-      warnOnDivergentLotExitRules(doctrine, e.getKey(), lots, primary, strat, resolution);
+      try {
+        warnOnDivergentLotExitRules(doctrine, e.getKey(), lots, primary, strat, resolution);
+      } catch (RuntimeException detectorFailure) {
+        // ⚠️ FAIL-SOFT, and it is the whole containment claim. Without this, an unchecked throw from
+        // metric registration or fingerprint compilation propagates out of exitPass and abandons the
+        // stop evaluation for THIS symbol and every symbol after it — the scheduled wrapper then
+        // records an all-zero failed run and a real position's only daily stop check never happens.
+        // An observability hook that can cost an exit is not observability. Same doctrine as
+        // PaperService.tagLotFailSoft: a diagnostic may never roll back the thing it observes.
+        log.error(
+            "{} swing exit: lot exit-doctrine detector failed for {} — exits continue unaffected",
+            doctrine.batchName(), e.getKey(), detectorFailure);
+      }
       List<EngineCandle> series = series(doctrine, primary.tradingsymbol(), seriesCache, requiredBarDate);
       if (series.isEmpty()) {
         // One retry OUTSIDE the per-run cache: MarketDataCandlesClient fail-softs to an empty list on
@@ -1782,7 +1794,11 @@ public class SwingBatchEngine {
    * identically, and editing every family member together — the well-behaved thing to do — keeps that
    * test green while creating exactly that divergence across a republish. The swing seeders
    * AUTO-PUBLISH on any bundled-YAML change (unlike the scalper seeder, which only drafts), so a
-   * version bump needs no deliberate act. That test says the gap "needs a live-data check, not a unit
+   * version bump needs no deliberate act ON THAT FAMILY. ⚠️ Corrected in review: only the MANAS
+   * seeder auto-publishes ("then publish the latest draft"); the MINERVINI and scalper seeders
+   * deliberately leave drafts for the owner ("Drafts never emit — the owner … publishes each"). So on
+   * minervini a new version needs a deliberate publish, which makes its live spread of version ids
+   * more notable rather than less. That test says the gap "needs a live-data check, not a unit
    * test". This is that check, placed where the data is.
    *
    * <p><b>Reachability, stated honestly rather than overclaimed.</b> The collapse needs TWO lots on
@@ -1799,11 +1815,14 @@ public class SwingBatchEngine {
    *
    * <p>Detects only where it can be certain: an ABSENT sibling version (one this family cannot
    * resolve) is skipped rather than reported, because a version we cannot read is a different defect
-   * and is already logged at ERROR upstream. Comparing {@code exitRules} rather than the version
-   * CHECKSUM is deliberate — a checksum diff fires on an entry-only edit, which the collapse does not
-   * harm, and a detector that cries on harmless edits is one nobody reads. The comparison is record
-   * equality over {@code List<ExitRuleSpec>}, so a pure REORDER of identical rules reports a
-   * divergence; that is the false-ALARM direction and the acceptable one.
+   * and is already logged at ERROR upstream. It compares {@link SwingExitFingerprint} rather than the
+   * version CHECKSUM — a checksum diff fires on an entry-only edit, which the collapse does not harm,
+   * and a detector that cries on harmless edits is one nobody reads. ⚠️ It also compares more than
+   * the raw {@code exitRules}, and review caught why that matters: bare rule-spec equality has a
+   * FALSE-NEGATIVE on indicator-backed exits — exactly Minervini's {@code alias: sma50} trail, where
+   * the rule records stay textually equal while the level moves with the indicator declaration. Rule
+   * ORDER is significant ({@code ExitEvaluator} returns the first rule that fires), so a reorder
+   * reports a divergence; that is the false-ALARM direction and the acceptable one.
    */
   private void warnOnDivergentLotExitRules(
       SwingDoctrine doctrine,
@@ -1815,31 +1834,35 @@ public class SwingBatchEngine {
     if (lots.size() < 2) {
       return; // the only shape that exists today — see the reachability note above
     }
-    List<StrategyDefinition.ExitRuleSpec> governingRules = governing.definition().exitRules();
+    SwingExitFingerprint governingExit = SwingExitFingerprint.of(governing.definition());
     for (SignalRepository.SignalRow lot : lots) {
       if (lot.id() == primary.id()
           || java.util.Objects.equals(lot.strategyVersionId(), primary.strategyVersionId())) {
         continue;
       }
       SwingStrategy other = resolution.resolve(lot.strategyVersionId()).orElse(null);
-      if (other == null || other.definition().exitRules().equals(governingRules)) {
+      if (other == null) {
+        continue; // unmanageable; adoptVersion already logged it at ERROR
+      }
+      SwingExitFingerprint otherExit = SwingExitFingerprint.of(other.definition());
+      if (otherExit.equals(governingExit)) {
         continue;
       }
       meters
           .counter("ay_swing_lot_exit_rule_divergence_total", "batch", doctrine.batchName())
           .increment();
       log.warn(
-          "{} swing exit: {} holds lots on DIVERGENT exit rules — anchor #{} (version {}, {}) is"
+          "{} swing exit: {} holds lots on DIVERGENT exit doctrine — anchor #{} (version {}, {}) is"
               + " being exited by anchor #{}'s rules (version {}, {}) because lots key on symbol"
               + " alone. The younger lot's own exit doctrine is NOT being applied.",
           doctrine.batchName(),
           symbol,
           lot.id(),
           lot.strategyVersionId(),
-          other.definition().exitRules(),
+          otherExit,
           primary.id(),
           primary.strategyVersionId(),
-          governingRules);
+          governingExit);
     }
   }
 

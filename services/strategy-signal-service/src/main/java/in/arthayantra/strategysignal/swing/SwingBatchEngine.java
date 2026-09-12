@@ -1792,14 +1792,13 @@ public class SwingBatchEngine {
    * cross-STRATEGY axis against the bundled YAML, and its own javadoc records what it cannot reach:
    * two lots resolving to different {@code strategy_version_id}s of the SAME strategy diverge
    * identically, and editing every family member together — the well-behaved thing to do — keeps that
-   * test green while creating exactly that divergence across a republish. The swing seeders
-   * AUTO-PUBLISH on any bundled-YAML change (unlike the scalper seeder, which only drafts), so a
-   * version bump needs no deliberate act ON THAT FAMILY. ⚠️ Corrected in review: only the MANAS
-   * seeder auto-publishes ("then publish the latest draft"); the MINERVINI and scalper seeders
-   * deliberately leave drafts for the owner ("Drafts never emit — the owner … publishes each"). So on
-   * minervini a new version needs a deliberate publish, which makes its live spread of version ids
-   * more notable rather than less. That test says the gap "needs a live-data check, not a unit
-   * test". This is that check, placed where the data is.
+   * test green while creating exactly that divergence across a republish. The MANAS seeder
+   * AUTO-PUBLISHES on any bundled-YAML change ("then publish the latest draft"), so on that family a
+   * version bump needs no deliberate act at all; the MINERVINI and scalper seeders deliberately leave
+   * DRAFTS for the owner ("Drafts never emit — the owner … publishes each"), so a new minervini
+   * version takes a deliberate publish — which makes its live spread of version ids more notable
+   * rather than less. That test says the gap "needs a live-data check, not a unit test". This is that
+   * check, placed where the data is.
    *
    * <p><b>Reachability, stated honestly rather than overclaimed.</b> The collapse needs TWO lots on
    * one held symbol, and today none exists: Minervini's {@code pyramid()} returns {@code

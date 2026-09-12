@@ -60,6 +60,38 @@ public final class UpstoxFnoMasterClient {
   private final Clock clock;
 
   private volatile Map<FnoKey, FnoLeg> keysByLeg = Map.of();
+
+  /**
+   * H26 U-A2 — NSE CASH identity, indexed by the exchange token.
+   *
+   * <p>⚠️ <b>The class name says Fno and this index does not. That tension is deliberate and cheaper
+   * than the alternative.</b> Renaming would touch ~90 references across the live margin path, the
+   * tick-feed adapter, the quote gateway and the contract canary — money- and live-engine-adjacent
+   * code — to gain nothing but a better noun. The class is really "the Upstox instrument master
+   * client"; it had only ever been used for F&amp;O.
+   *
+   * <p>Built from the SAME parsed rows as {@link #keysByLeg}, so this adds no second download of a
+   * ~3 MB payload and inherits the candidate-then-check hardening in {@code reload()}.
+   *
+   * <p>⚠️ Assigned INDEPENDENTLY of the F&amp;O index, with its own emptiness guard. Gating both on
+   * one condition would let an Upstox change that kills NSE_EQ also block F&amp;O refresh — coupling
+   * two caches that fail for unrelated reasons.
+   */
+  private volatile Map<Long, NseCashIdentity> nseCashByToken = Map.of();
+
+  /**
+   * When the cash index last loaded SUCCESSFULLY — deliberately separate from {@link #loadedAt}.
+   *
+   * <p>⚠️ The two indexes have independent emptiness guards but shared the one timestamp, so a load
+   * whose F&amp;O half succeeded and whose cash half mapped nothing stamped the cash index as freshly
+   * loaded. That is this repository's catalogued "a cache that stores a FAILURE with a fresh
+   * timestamp" shape, and it made the independence the javadoc above claims only half true. Nothing
+   * reads the cash index yet, so the effect today is a wrong number rather than a wrong decision —
+   * but A2-3 is the consumer that must be able to tell a CURRENT cash index from a stale one, and
+   * {@link #nseCashSize()} alone cannot. Cross-vendor review 2026-09-03.
+   */
+  private volatile Instant cashLoadedAt = Instant.EPOCH;
+
   private volatile Instant loadedAt = Instant.EPOCH;
   private volatile Instant lastAttemptAt = Instant.EPOCH;
 
@@ -197,6 +229,17 @@ public final class UpstoxFnoMasterClient {
         return false;
       }
       keysByLeg = candidate;
+      // Independent guard: an empty NSE index must neither discard a good one nor stop the F&O
+      // cache above from refreshing.
+      Map<Long, NseCashIdentity> cashCandidate = indexNseCash(rows);
+      if (cashCandidate.isEmpty()) {
+        log.warn(
+            "Upstox master mapped ZERO NSE cash rows — keeping prior cash index of {}",
+            nseCashByToken.size());
+      } else {
+        nseCashByToken = cashCandidate;
+        cashLoadedAt = attemptAt;
+      }
       loadedAt = attemptAt;
       log.info("Upstox F&O instrument master loaded: {} mapped legs", keysByLeg.size());
       return true;
@@ -214,6 +257,161 @@ public final class UpstoxFnoMasterClient {
       return false;
     }
   }
+
+  /**
+   * The NSE cash identity Upstox holds for {@code exchangeToken}, or {@code null}.
+   *
+   * <p>H26 U-A2, and NOTHING CONSUMES THIS YET — it exists so the A2-3 shadow diff can compare
+   * Upstox identity against our own without a second download.
+   *
+   * <p>⚠️ <b>PRECONDITION: the caller must already know this token belongs to a CASH row.</b> The
+   * index is scoped to {@code NSE_EQ}, which makes the key unique on the UPSTOX side — but OUR
+   * {@code exchange='NSE'} mixes cash with INDICES, and tokens collide across them (`computed`
+   * 2026-09-03: 47 such tokens; it was 30 on 09-02, so re-derive it rather than quoting either).
+   * Hand this an INDEX token and it returns a bond's identity — confidently, and wrong, rather than
+   * {@code null}. A2-3 will iterate exactly that mixed set, which is why the warning belongs on the
+   * method a caller reads and not only in the class doc.
+   */
+  public NseCashIdentity nseCashIdentity(long exchangeToken) {
+    cache();
+    return nseCashByToken.get(exchangeToken);
+  }
+
+  /**
+   * How many NSE cash rows the master currently maps.
+   *
+   * <p>Zero means the index holds nothing — which is "never loaded" OR "loaded and mapped nothing".
+   * ⚠️ Nothing here separates those two, and neither does {@link #nseCashLoadedAt()}: an empty cash
+   * candidate is deliberately treated as a FAILED load, so both states read size 0 / EPOCH. What the
+   * pair does tell a consumer is whether the index it is reading is CURRENT or left over from an
+   * earlier load — which is the question A2-3 actually has to answer.
+   */
+  public int nseCashSize() {
+    cache();
+    return nseCashByToken.size();
+  }
+
+  /**
+   * When the cash index last loaded SUCCESSFULLY, or {@link Instant#EPOCH} if it never has.
+   *
+   * <p>The timestamp of the last successful NON-EMPTY load: it advances only on a load that mapped
+   * at least one cash row, never on one whose F&amp;O half succeeded and whose cash half mapped
+   * nothing. That is the whole reason it is not {@code loadedAt} — it dates the index a caller is
+   * actually reading, so A2-3 can tell a CURRENT index from one left over from an earlier load
+   * before it treats a zero-mismatch session as evidence of anything.
+   *
+   * <p>⚠️ It does NOT separate "never loaded" from "loaded and mapped nothing" — an empty candidate
+   * is treated as a failure, so both read {@code EPOCH}. Cross-vendor review 2026-09-03 (Minor).
+   */
+  public Instant nseCashLoadedAt() {
+    cache();
+    return cashLoadedAt;
+  }
+
+  /**
+   * Indexes {@code NSE_EQ} rows by exchange token.
+   *
+   * <p>⚠️ <b>Keyed on the EXCHANGE TOKEN, not the symbol, and that is the measured choice.</b>
+   * {@code computed} 2026-09-02 over the live master: the token joins our table 9,694/9,694 —
+   * <b>100.00%</b> — while a naive {@code trading_symbol} join matches only 27% and would
+   * MIS-IDENTIFY roughly 73% of NSE equities. Receipt:
+   * {@code docs/signal-analysis/2026-09-02-h26-ua2-identity-join-measurement.md}.
+   *
+   * <p>⚠️ <b>The token is unique per SEGMENT, not per exchange.</b> Our {@code exchange='NSE'} lumps
+   * cash together with INDICES, and tokens collide across those two — token 1001 is both
+   * {@code NIFTY 50} and a bond. Scoping this index to {@code NSE_EQ} is what makes the key unique;
+   * within segment the measurement is 10,096/10,096 distinct. Do not widen it to "all NSE".
+   *
+   * <p>⚠️ The collision COUNT moves and must be re-derived, never quoted: 30 on 2026-09-02, <b>47</b>
+   * on 2026-09-03. It is one query. A moving number written down as a fixed fact is a trap this
+   * repository has paid for before.
+   *
+   * <p>NSE only, deliberately (owner, 2026-09-02): the suffix rule below is verified on NSE, and BSE
+   * is where that convention is already known not to apply.
+   */
+  private static Map<Long, NseCashIdentity> indexNseCash(List<UpstoxInstrumentMaster> rows) {
+    Map<Long, NseCashIdentity> map = new HashMap<>();
+    for (UpstoxInstrumentMaster r : rows) {
+      if (!"NSE_EQ".equals(r.segment()) || r.instrumentKey() == null) {
+        continue;
+      }
+      String symbol = r.tradingSymbol();
+      String series = r.instrumentType();
+      if (symbol == null || series == null) {
+        continue;
+      }
+      Long token = parseExchangeToken(r.exchangeToken());
+      if (token == null) {
+        continue;
+      }
+      map.putIfAbsent(
+          token,
+          new NseCashIdentity(
+              token,
+              r.instrumentKey(),
+              r.isin(),
+              symbol,
+              series,
+              kiteTradingsymbol(symbol, series)));
+    }
+    return map;
+  }
+
+  /**
+   * The wire {@code exchange_token} as a number, or {@code null} when it is absent, blank or not a
+   * number.
+   *
+   * <p>⚠️ <b>Called only AFTER the {@code NSE_EQ} filter, and that ordering is the point.</b> The
+   * field is mirrored as the JSON string Upstox actually sends, so no row can break the parse — 13
+   * live rows carry the empty string, all of them in segments this index never looks at. Converting
+   * here rather than in the DTO keeps that cost inside the one segment we index and keeps the whole
+   * master parse independent of the mapper's coercion configuration.
+   */
+  private static Long parseExchangeToken(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return null;
+    }
+    try {
+      return Long.valueOf(raw.trim());
+    } catch (NumberFormatException notANumber) {
+      // A non-numeric token is a row we cannot identify, not a reason to fail the load: skip it and
+      // leave the rest of the master indexed. Deliberately silent — the master carries ~117k rows
+      // and a per-row WARN would be a log flood, while the A2-3 shadow diff reports the miss.
+      return null;
+    }
+  }
+
+  /**
+   * Derives the Kite tradingsymbol from Upstox's bare symbol plus its series.
+   *
+   * <p>⚠️ <b>This is a DERIVATION, not a synthesis, and the distinction is the whole reason U-A2
+   * shrank.</b> Kite appends the series for every non-EQ series — {@code 749RJ35-SG},
+   * {@code KCK-ST}, and the familiar {@code -BE} — while Upstox carries the bare symbol and the
+   * series separately. {@code computed} 2026-09-02 against the live master and our table:
+   * 2,651 bare + 7,043 suffixed = <b>100.00%, ZERO unmatched</b>.
+   *
+   * <p>⚠️ It also generalises H29/H36: the {@code -BE} twin is not a special case but one instance
+   * of a Kite-wide convention also covering SG, N0, SM, GS and ST.
+   *
+   * <p>⚠️ <b>This is a CROSS-CHECK on the token join, never a substitute for it.</b> The token is
+   * the identity; if the two ever disagree, that disagreement is the A2-3 finding — resolving it in
+   * favour of this rule would be trusting a string over an exchange-issued key.
+   */
+  static String kiteTradingsymbol(String upstoxSymbol, String series) {
+    return "EQ".equals(series) ? upstoxSymbol : upstoxSymbol + "-" + series;
+  }
+
+  /**
+   * One NSE cash instrument as Upstox describes it, plus the Kite symbol derived from it.
+   * {@code isin} may be null; the token and key never are.
+   */
+  public record NseCashIdentity(
+      long exchangeToken,
+      String upstoxInstrumentKey,
+      String isin,
+      String upstoxTradingSymbol,
+      String series,
+      String derivedKiteTradingsymbol) {}
 
   /** Indexes the {@code *_FO} rows by the structured leg tuple → the resolved leg (key + lot). */
   private static Map<FnoKey, FnoLeg> index(List<UpstoxInstrumentMaster> rows) {
